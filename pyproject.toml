@@ -1,0 +1,8 @@
+[project]
+name = zarrinmehr_data_utils
+version = 0.1.0
+description = Personal utilities for data engineering
+authors = [{ name = Alireza Zarrinmehr }]
+dependencies = [pandas, boto3, pyodbc, tqdm]  # Add more as needed
+readme = README.md
+requires-python = =3.7
