@@ -99,18 +99,30 @@ def load_suiteql_data_via_query(
     return df
 
 def load_data_via_query(
-    sql_query, 
-    connection_string, 
-    chunksize=1000
+        sql_query,
+        source_type,
+        connection_string=None,
+        project_id=None,
+        credentials=None,
+        chunksize=1000
 ):
     print(f"Running {sql_query}")
-    chunks = []
-    with pyodbc.connect(connection_string) as conn:
-        total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
-        total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
-        for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
-            chunks.append(chunk)
-    df = pd.concat(chunks, ignore_index=True)
+    if source_type == "mssql":
+        if not connection_string:
+            raise ValueError("connection_string is required for MSSQL source.")
+        chunks = []
+        with pyodbc.connect(connection_string) as conn:
+            total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
+            total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
+            for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
+                chunks.append(chunk)
+        df = pd.concat(chunks, ignore_index=True)
+    elif source_type == "bigquery":
+        if not (project_id and credentials):
+            raise ValueError("project_id and credentials are required for BigQuery source.")
+        df = pandas_gbq.read_gbq(sql_query, project_id=project_id, credentials=credentials)
+    else:
+        raise ValueError("source_type must be either 'mssql' or 'bigquery'")
     df.columns = df.columns.str.title()
     return df
 
