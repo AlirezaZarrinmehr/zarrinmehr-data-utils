@@ -68,8 +68,8 @@ def generate_table_select_queries(bigquery_client, tables_to_remove=None):
         print(f"{project} project does not contain any datasets.")
     if tables_to_remove:
         for table in tables_to_remove:
-            if table in tables_queries:
-                del tables_queries[table]
+            if table in table_queries:
+                del table_queries[table]
     return table_queries
     
 def load_suiteql_data_via_query(
