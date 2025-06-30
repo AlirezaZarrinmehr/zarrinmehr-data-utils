@@ -55,6 +55,23 @@ upload_to_s3(s3_client = s3_client, data =
 # In[2]:
 
 
+def generate_table_select_queries(bigquery_client, tables_to_remove=None):
+    table_queries = {}
+    datasets = list(bigquery_client.list_datasets())
+    project = bigquery_client.project
+    if datasets:
+        for dataset in datasets:
+            table_list = bigquery_client.list_tables(dataset.dataset_id)
+            for table in table_list:
+                table_queries[table.table_id] = f"SELECT * FROM `{table.project}.{table.dataset_id}.{table.table_id}`"
+    else:
+        print(f"{project} project does not contain any datasets.")
+    if tables_to_remove:
+        for table in tables_to_remove:
+            table_queries.pop(table, None)
+    return table_queries
+    
+    
 def load_suiteql_data_via_query(
     consumer_key, 
     consumer_secret, 
