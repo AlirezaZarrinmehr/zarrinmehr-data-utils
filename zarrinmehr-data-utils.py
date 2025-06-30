@@ -55,10 +55,13 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
-def generate_table_select_queries(bigquery_client, tables_to_remove=None):
+def generate_table_select_queries(
+    project_id,
+    bigquery_client,
+    tables_to_remove=None
+):
     table_queries = {}
     datasets = list(bigquery_client.list_datasets())
-    project = bigquery_client.project
     if datasets:
         for dataset in datasets:
             table_list = bigquery_client.list_tables(dataset.dataset_id)
