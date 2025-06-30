@@ -37,7 +37,7 @@ import sys
 
 # ## Functions
 
-# In[ ]:
+# In[2]:
 
 
 '''
@@ -52,7 +52,7 @@ upload_to_s3(s3_client = s3_client, data =
 '''
 
 
-# In[2]:
+# In[3]:
 
 
 def generate_table_select_queries(bigquery_client, tables_to_remove=None):
@@ -68,9 +68,9 @@ def generate_table_select_queries(bigquery_client, tables_to_remove=None):
         print(f"{project} project does not contain any datasets.")
     if tables_to_remove:
         for table in tables_to_remove:
-            table_queries.pop(table, None)
+            if table in tables_queries:
+                del tables_queries[table]
     return table_queries
-    
     
 def load_suiteql_data_via_query(
     consumer_key, 
@@ -931,11 +931,4 @@ def upload_to_redshift(
     prompt = f'{print_date_time()}\t\t🚀 Upload process completed.'
     print(prompt)
     write_file('log.txt' , f"{prompt}")
-
-
-# In[3]:
-
-
-# Use Case : 
-# from zarrinmehrlib import *
 
