@@ -87,7 +87,7 @@ def process_data_to_s3(
         try:
             for col in df.columns:
                 df[col] = df[col].astype('str').str.replace(r'\\n', ' ', regex=True)
-            upload_to_s3(df, bucket_name, object_key, s3_client)
+            upload_to_s3(df, bucket_name, object_key, s3_client, CreateS3Bucket=True)
             prompt = f'{print_date_time()}\t\t"{object_key}" table is loaded to S3 "{bucket_name}" bucket successfully!'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
