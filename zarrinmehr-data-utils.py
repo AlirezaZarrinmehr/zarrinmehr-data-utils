@@ -97,17 +97,16 @@ def process_data_to_s3(
 ):
     for table, sql_query in tables.items():
 
-        while True:
+        for attempt in range(max_retries):
             try:
                 df = load_data_via_query(sql_query=sql_query, source_type=source_type, connection_string=connection_string, project_id=project_id, credentials=credentials)
-
                 prompt = f'{print_date_time()}\t\tTable "{table}" retrieved from {source_type} successfully!'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
                 break
 
             except Exception as e:
-                prompt = f'{print_date_time()}\t\tFailed to retrieve table "{table}". Error: {str(e)}. Retrying in 1 minute...'
+                prompt = f'{print_date_time()}\t\tFailed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
                 time.sleep(60)
