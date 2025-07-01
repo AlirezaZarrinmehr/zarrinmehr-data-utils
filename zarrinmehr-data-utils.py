@@ -55,6 +55,48 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def process_data_to_s3(
+    tables,
+    s3_client,
+    bucket_name,
+    source_type,
+    connection_string=None,
+    project_id=None,
+    credentials=None,
+    max_retries=3,
+):
+    for table, sql_query in tables.items():
+
+        while True:
+            try:
+                df = load_data_via_query(sql_query=sql_query, source_type=source_type, connection_string=connection_string, project_id=project_id, credentials=credentials)
+
+                prompt = f'{print_date_time()}\t\tTable "{table}" retrieved from {source_type} successfully!'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+                break
+
+            except Exception as e:
+                prompt = f'{print_date_time()}\t\tFailed to retrieve table "{table}". Error: {str(e)}. Retrying in 1 minute...'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+                time.sleep(60)
+
+        object_key = table + '.csv'
+
+        try:
+            for col in df.columns:
+                df[col] = df[col].astype('str').str.replace(r'\\n', ' ', regex=True)
+            upload_to_s3(df, bucket_name, object_key, s3_client)
+            prompt = f'{print_date_time()}\t\t"{object_key}" table is loaded to S3 "{bucket_name}" bucket successfully!'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+        except Exception as e:
+            prompt = f'{print_date_time()}\t\tFailed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+            
+
 def generate_table_select_queries(
     project_id,
     bigquery_client,
