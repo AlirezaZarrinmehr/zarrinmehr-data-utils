@@ -55,6 +55,34 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def read_excel_from_sharepoint(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        match = re.search(r'var _wopiContextJson\s*=\s*(\{.*?\});', response.text, re.DOTALL)
+        if match:
+            wopi_context = json.loads(match.group(1))
+            file_get_url = wopi_context.get("FileGetUrl")
+            if file_get_url:
+                file_response = requests.get(file_get_url, stream=True)
+                file_size = int(file_response.headers.get('content-length', 0))
+                progress = tqdm(total=file_size, unit='B', unit_scale=True, desc='Downloading Excel file')
+                xlsx_data = io.BytesIO()
+                for chunk in file_response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        xlsx_data.write(chunk)
+                        progress.update(len(chunk))
+                progress.close()
+                xlsx_data.seek(0)
+                df = pd.read_excel(xlsx_data, engine='openpyxl')
+                return df
+            else:
+                raise ValueError("FileGetUrl not found in WOPI context.")
+        else:
+            raise ValueError("WOPI context JSON not found in the response.")
+    else:
+        raise Exception(f"Failed to fetch the URL. Status code: {response.status_code}")
+        
+        
 def process_data_to_s3(
     tables,
     s3_client,
