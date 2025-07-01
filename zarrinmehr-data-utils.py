@@ -55,6 +55,55 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
+    
+    customers = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customers, df_name = 'customers', id_column = ['CustId'], additional_date_columns = [], zip_code_columns = ['CustZip'], state_columns = ['CustState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    customerLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5']
+    customersCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'customersCategories.csv')
+    customersCategories_2 = customersCategories.loc[ (customersCategories['Company'] != companyName) & (customersCategories['Company'].notna()) ]
+    customersCategories = customersCategories.loc[ (customersCategories['Company'] == companyName) | (customersCategories['Company'].isna()) ]
+    customersCategories['Found'] = False
+    customersCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customersCategories, df_name = 'customersCategories', id_column = ['CustId_SearchKey'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    customersCategories = customersCategories.sort_values(by='CustId_SearchKey', key=lambda x: x.str.len(), ascending=False)
+    customersCategories = customersCategories[customersCategories['CustId_SearchKey'].notna()]
+    customers['CustId'] = customers['CustId'].astype(str).str.upper()
+    customersCategories['CustId_SearchKey'] = customersCategories['CustId_SearchKey'].astype('str').str.upper()
+    customers = customers.merge(customersCategories[['CustId_SearchKey', 'CommonName', 'ParentName'] + customerLevels], left_on = 'CustId', right_on = 'CustId_SearchKey', how = 'left')
+    customersCategories.loc[customersCategories['CustId_SearchKey'].isin(customers['CustId_SearchKey']), 'Found'] = True
+    customersCategories.loc[customersCategories['CustId_SearchKey'].isin(customers['CustId_SearchKey']), 'Company'] = companyName
+    customers.drop(columns = 'CustId_SearchKey', inplace=True)
+    customers['LookUpIn'] = customers['CustName'].fillna('')
+    customers['LookUpIn'] = customers['LookUpIn'].str.upper()
+    keyword_dict = customersCategories.loc[~customersCategories['Found']==True].set_index('CustId_SearchKey')['CommonName'].to_dict()
+    for keyword, CommonName in keyword_dict.items():
+        found_mask = (
+            (customers.CommonName.isna()) & 
+            (customers['LookUpIn'].str.startswith(keyword))
+        )
+        customers.loc[found_mask, 'CommonName'] = CommonName
+        if found_mask.any():
+            customersCategories.loc[customersCategories['CustId_SearchKey'] == keyword, 'Found'] = True
+            customersCategories.loc[(customersCategories['Company'].isna())&(customersCategories['CustId_SearchKey'] == keyword), 'Company'] = companyName
+    customersCategories_combined = pd.concat([customersCategories, customersCategories_2], ignore_index=True)
+    upload_to_s3(s3_client = s3_client, data = customersCategories_combined, bucket_name = 'manual-db', object_key = 'customersCategories.csv')
+    print(customersCategories.Found.sum())
+    customersCategories = customersCategories[~customersCategories['CommonName'].duplicated()]
+    customers_2 = customers.loc[~customers[['ParentName'] + customerLevels].isna().all(axis=1)].copy()
+    customers = customers.loc[customers[['ParentName'] + customerLevels].isna().all(axis=1)].copy()
+    customers.drop(columns = ['ParentName'] + customerLevels, inplace=True)
+    customers = customers.merge(customersCategories[['CommonName', 'ParentName'] + customerLevels], on='CommonName', how = 'left')
+    customers = pd.concat([customers, customers_2], ignore_index=True)
+    customers.loc[customers.CommonName.isna(), 'CommonName'] = customers['CustName'].str[0:15]
+    customers.loc[customers.ParentName.isna(), 'ParentName'] = customers['CommonName']
+    for customerLevel in customerLevels:
+        customers.loc[customers[customerLevel].isna(), customerLevel] = 'OTHER'
+    customers['Company'] = companyName
+    customers = customers[['Company'] + customers.columns[:-1].tolist()].copy()
+    customers.drop(columns = 'LookUpIn', inplace=True)
+    upload_to_s3(s3_client = s3_client, data = customers, bucket_name = s3_bucket_name + '-c', object_key = 'customers.csv')
+    return customers
+    
+
 def process_qb_transactions_by_account(
     companyName,
     transactions,
