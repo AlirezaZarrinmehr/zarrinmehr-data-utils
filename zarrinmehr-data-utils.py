@@ -92,6 +92,8 @@ def process_data_to_s3(
     project_id=None,
     credentials=None,
     max_retries=3,
+    CreateS3Bucket=False,
+    aws_region=None
 ):
     for table, sql_query in tables.items():
 
@@ -115,7 +117,7 @@ def process_data_to_s3(
         try:
             for col in df.columns:
                 df[col] = df[col].astype('str').str.replace(r'\\n', ' ', regex=True)
-            upload_to_s3(df, bucket_name, object_key, s3_client, CreateS3Bucket=True)
+            upload_to_s3(data=df, bucket_name=bucket_name, object_key=object_key, s3_client=s3_client, CreateS3Bucket=CreateS3Bucket, aws_region=aws_region)
             prompt = f'{print_date_time()}\t\t"{object_key}" table is loaded to S3 "{bucket_name}" bucket successfully!'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
@@ -262,14 +264,15 @@ def upload_to_s3(
     bucket_name, 
     object_key, 
     s3_client, 
-    CreateS3Bucket=False
+    CreateS3Bucket=False,
+    aws_region=None
 ):
     
     if CreateS3Bucket:
         try:
             buckets = pd.DataFrame(s3_client.list_buckets()["Buckets"])
             if bucket_name not in buckets.Name.to_list():
-                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': AWS_REGION})
+                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
                 prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" created successfully'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
