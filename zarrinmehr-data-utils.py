@@ -167,6 +167,9 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
     item['Company'] = companyName
     item = item[['Company'] + item.columns[:-1].tolist()]
     upload_to_s3(s3_client = s3_client, data = item, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
+    prompt = f'Items Found: {itemsCategories.Found.sum()}...'
+    print(prompt)
+    write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
     return item
     
 def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
