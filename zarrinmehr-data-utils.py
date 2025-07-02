@@ -55,6 +55,68 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def upload_to_s3(
+    data, 
+    bucket_name, 
+    object_key, 
+    s3_client, 
+    CreateS3Bucket=False,
+    aws_region=None
+):
+    
+    if CreateS3Bucket:
+        try:
+            buckets = pd.DataFrame(s3_client.list_buckets()["Buckets"])
+            if bucket_name not in buckets.Name.to_list():
+                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
+                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" created successfully'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            else:
+                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" already exists'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+
+        except Exception as e:
+            prompt = f'{print_date_time()}\t\tFailed to create bucket "{bucket_name}". Error: {str(e)}.'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+
+    clean_data = data.copy()
+
+    # for col in clean_data.select_dtypes(include=['object', 'string']).columns:
+    #     if len(clean_data[col].shape)==1:
+    #         clean_data[col] = clean_data[col].fillna('').astype(str).str.replace(r'\r\n|\r|\n', ' ', regex=True)
+    #     else:
+    #         print(f"Warning: DataFrame has more than one column named '{col}'. Cannot safely clean these columns.")
+            
+    for idx, dtype in enumerate(clean_data.dtypes):
+        if dtype == 'object' or dtype.name == 'string':
+            clean_data.iloc[:, idx] = (
+                clean_data.iloc[:, idx]
+                .fillna('')
+                .astype(str)
+                .str.replace(r'\r\n|\r|\n', ' ', regex=True)
+            )
+
+    csv_buffer = io.StringIO()
+    clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
+    csv_buffer.seek(0)
+    data_size = len(csv_buffer.getvalue())
+    
+    with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
+        
+        def callback(bytes_transferred):
+            progress.update(bytes_transferred)
+            
+        bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
+        s3_client.upload_fileobj(
+            Fileobj=bytes_buffer,
+            Bucket=bucket_name,
+            Key=object_key,
+            Callback=callback
+        )
+        
 def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
     
     customers = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customers, df_name = 'customers', id_column = ['CustId'], additional_date_columns = [], zip_code_columns = ['CustZip'], state_columns = ['CustState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -477,56 +539,6 @@ def read_csv_from_s3(
         xlsx_buffer = io.BytesIO(xlsx_data)
         df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     return df
-
-def upload_to_s3(
-    data, 
-    bucket_name, 
-    object_key, 
-    s3_client, 
-    CreateS3Bucket=False,
-    aws_region=None
-):
-    
-    if CreateS3Bucket:
-        try:
-            buckets = pd.DataFrame(s3_client.list_buckets()["Buckets"])
-            if bucket_name not in buckets.Name.to_list():
-                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" created successfully'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-            else:
-                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" already exists'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-
-        except Exception as e:
-            prompt = f'{print_date_time()}\t\tFailed to create bucket "{bucket_name}". Error: {str(e)}.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-
-    clean_data = data.copy()
-    # for col in clean_data.columns:
-    for col in clean_data.select_dtypes(include=['object', 'string']).columns:
-        clean_data[col] = clean_data[col].fillna('').astype(str).str.replace(r'\r\n|\r|\n', ' ', regex=True)
-
-    csv_buffer = io.StringIO()
-    clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
-    csv_buffer.seek(0)
-    data_size = len(csv_buffer.getvalue())
-    
-    with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
-        
-        def callback(bytes_transferred):
-            progress.update(bytes_transferred)
-            
-        bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
-        s3_client.upload_fileobj(
-            Fileobj=bytes_buffer,
-            Bucket=bucket_name,
-            Key=object_key,
-            Callback=callback
-        )
 
 def clean_df(
     s3_client,
