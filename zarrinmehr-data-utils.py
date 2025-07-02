@@ -86,7 +86,7 @@ def upload_to_s3(
 
     # for col in clean_data.select_dtypes(include=['object', 'string']).columns:
     #     if len(clean_data[col].shape)==1:
-    #         clean_data[col] = clean_data[col].fillna('').astype(str).str.replace(r'\r\n|\r|\n', ' ', regex=True)
+    #         clean_data[col] = clean_data[col].fillna('').astype(str).str.replace(r'\r\n|\r|\n', ' ', regex=True).str.replace(r'\\n', ' ', regex=True)
     #     else:
     #         print(f"Warning: DataFrame has more than one column named '{col}'. Cannot safely clean these columns.")
             
@@ -97,6 +97,7 @@ def upload_to_s3(
                 .fillna('')
                 .astype(str)
                 .str.replace(r'\r\n|\r|\n', ' ', regex=True)
+                .str.replace(r'\\n', ' ', regex=True)
             )
 
     csv_buffer = io.StringIO()
@@ -396,8 +397,6 @@ def process_data_to_s3(
         object_key = table + '.csv'
 
         try:
-            for col in df.columns:
-                df[col] = df[col].astype('str').str.replace(r'\\n', ' ', regex=True)
             upload_to_s3(data=df, bucket_name=bucket_name, object_key=object_key, s3_client=s3_client, CreateS3Bucket=CreateS3Bucket, aws_region=aws_region)
             prompt = f'{print_date_time()}\t\t"{object_key}" table is loaded to S3 "{bucket_name}" bucket successfully!'
             print(prompt)
