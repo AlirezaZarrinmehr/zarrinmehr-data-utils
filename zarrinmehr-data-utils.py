@@ -231,12 +231,8 @@ def delete_thing_and_certificates(iot_client, thing_name):
     except botocore.exceptions.ClientError as e:
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
 
-def fetch_data_from_timestream(query): 
-    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
-    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
-    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
-    client = boto3.client('timestream-query')
-    paginator = client.get_paginator('query')
+def fetch_data_from_timestream(timestream_query_client, query): 
+    paginator = timestream_query_client.get_paginator('query')
     count_query = f"SELECT count(*) FROM ({query})"
     count_page_iterator = paginator.paginate(QueryString=count_query)
     total_rows = 0
