@@ -200,10 +200,6 @@ def fetch_iot_things(iot_client):
     return things
 
 def delete_thing_and_certificates(iot_client, thing_name):
-    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
-    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
-    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
-    client = boto3.client('iot')
     try:
         iot_client.describe_thing(thingName=thing_name)
     except iot_client.exceptions.ResourceNotFoundException:
