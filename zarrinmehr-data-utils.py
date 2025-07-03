@@ -380,7 +380,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         print(f"[ERROR] FTP connection or operation failed: {e}")
         return False
 
-def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path):
+def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path, files_to_upload_to_AwsCertificates):
     try:
         print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
         with ftplib.FTP(ip_address) as ftp:
