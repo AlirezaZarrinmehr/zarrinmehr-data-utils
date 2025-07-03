@@ -386,8 +386,8 @@ def cleanup_device_driver_files(ip_address, username, password):
 
 def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path):
     try:
-        print(f"[INFO] Connecting to device at {ip} to install the driver files...")
-        with ftplib.FTP(ip) as ftp:
+        print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
+        with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
             print("[SUCCESS] Login successful.")
             directories = ftp.nlst()
