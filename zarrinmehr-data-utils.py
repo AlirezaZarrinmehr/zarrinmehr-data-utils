@@ -138,7 +138,8 @@ def get_ewon(base_url, developer_id, ewon_id, session_id=None):
         t2m_logout(base_url, session_id, developer_id)
     return response.json()
 
-def get_ewon_details(base_url, developer_id, encodedName, device_username, device_password, session_id=None):
+def get_ewon_details(base_url, developer_id, encodedName, device_username, device_password, account, username, password, session_id=None):
+
     try:
         temporary_session = False
         if session_id is None:
