@@ -173,55 +173,51 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
         # print(f"Get Ewon Details Failed: {response.text}")
         return {}
 
-def fetch_iot_things():
-    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
-    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
-    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
-    client = boto3.client('iot')
+def fetch_iot_things(iot_client):
     things_df_list = []
-    response = client.list_things(maxResults=250)
+    response = iot_client.list_things(maxResults=250)
     next_token = response.get('nextToken', None)
     things_df_list.append(pd.DataFrame(response['things']))
     while next_token:
-        response = client.list_things(maxResults=250, nextToken=next_token)
+        response = iot_client.list_things(maxResults=250, nextToken=next_token)
         things_df_list.append(pd.DataFrame(response['things']))
         next_token = response.get('nextToken', None)
     things = pd.concat(things_df_list, axis=0)    
     return things
 
-def delete_thing_and_certificates(thing_name):
+def delete_thing_and_certificates(iot_client, thing_name):
     os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
     os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
     os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
     client = boto3.client('iot')
     try:
-        client.describe_thing(thingName=thing_name)
-    except client.exceptions.ResourceNotFoundException:
+        iot_client.describe_thing(thingName=thing_name)
+    except iot_client.exceptions.ResourceNotFoundException:
         print(f"[WARNING] Thing '{thing_name}' does not exist. Skipping.")
         return
     try:
-        principals = client.list_thing_principals(thingName=thing_name)['principals']
+        principals = iot_client.list_thing_principals(thingName=thing_name)['principals']
         for principal in principals:
             print(f"[INFO] Detaching certificate: {principal}")
-            client.detach_thing_principal(
+            iot_client.detach_thing_principal(
                 thingName=thing_name,
                 principal=principal
             )
-            policies = client.list_attached_policies(target=principal)['policies']
+            policies = iot_client.list_attached_policies(target=principal)['policies']
             for policy in policies:
                 print(f"[INFO] Detaching policy '{policy['policyName']}' from certificate...")
-                client.detach_policy(
+                iot_client.detach_policy(
                     policyName=policy['policyName'],
                     target=principal
                 )
             cert_id = principal.split('/')[-1]
             print(f"[INFO] Deactivating certificate: {cert_id}")
-            client.update_certificate(
+            iot_client.update_certificate(
                 certificateId=cert_id,
                 newStatus='INACTIVE'
             )
             print(f"[INFO] Deleting certificate: {cert_id}")
-            client.delete_certificate(
+            iot_client.delete_certificate(
                 certificateId=cert_id,
                 forceDelete=True
             )
@@ -230,7 +226,7 @@ def delete_thing_and_certificates(thing_name):
         return
 
     try:
-        client.delete_thing(thingName=thing_name)
+        iot_client.delete_thing(thingName=thing_name)
         print(f"[SUCCESS] Successfully deleted Thing '{thing_name}' and all associated certificates.\n")
     except botocore.exceptions.ClientError as e:
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
