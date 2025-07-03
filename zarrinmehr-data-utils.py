@@ -55,6 +55,435 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def t2m_login(base_url, developer_id, account, username, password):
+    try:
+        response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
+        response_data = response.json()
+        if response_data.get('success') == True:
+            print(f"[SUCCESS] t2m_login Successful.")
+            return response_data['t2msession']
+        else:
+            raise Exception()
+    except:    
+        print(f"t2m_login Failed: {response.text}")
+
+def t2m_logout(base_url, session_id, developer_id):
+    try:
+        response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
+        response_data = response.json()
+        if response_data.get('success') == True:
+            print(f"[SUCCESS] t2m_logout Successful.")
+        else:
+            raise Exception()
+    except:    
+        print(f"t2m_logout Failed: {response.text}")
+     
+def get_account_info(base_url, developer_id, session_id=None):
+    try:
+        temporary_session = False
+        if session_id is None:
+            session_id = t2m_login(base_url, developer_id, account, username, password)
+            temporary_session = True
+        response = requests.get(f"{base_url}getaccountinfo?t2msession={session_id}&t2mdeveloperid={developer_id}") 
+        if temporary_session:
+            t2m_logout(base_url, session_id, developer_id)
+        response_data = response.json()
+        if response_data.get('success') == True:
+            print(f"Get Account Info Successful!")
+            return response_data
+        else:
+            raise Exception()
+    except:    
+        print(f"Get Account Info Failed: {response.text}")
+
+def get_ewons(base_url, developer_id, session_id=None):
+    try:
+        temporary_session = False
+        if session_id is None:
+            session_id = t2m_login(base_url, developer_id, account, username, password)
+            temporary_session = True
+        response = requests.get(f"{base_url}getewons?t2msession={session_id}&t2mdeveloperid={developer_id}")
+        if temporary_session:
+            t2m_logout(base_url, session_id, developer_id)
+        response_data = response.json()
+        if response_data.get('success') == True:
+            print(f"Get Ewons Successful!")
+            df = pd.DataFrame(response_data.get('ewons'))
+            return df
+        else:
+            raise Exception()
+    except:    
+        print(f"Get Ewons Failed: {response.text}")
+
+def get_ewon(base_url, developer_id, ewon_id, session_id=None):
+    temporary_session = False
+    if session_id is None:
+        session_id = t2m_login(base_url, developer_id, account, username, password)
+        temporary_session = True
+    response = requests.get(f"{base_url}getewon?id={ewon_id}&t2msession={session_id}&t2mdeveloperid={developer_id}")
+    if temporary_session:
+        t2m_logout(base_url, session_id, developer_id)
+    return response.json()
+
+def get_ewon_details(base_url, developer_id, encodedName, device_username, device_password, session_id=None):
+    try:
+        temporary_session = False
+        if session_id is None:
+            session_id = t2m_login(base_url, developer_id, account, username, password)
+            temporary_session = True
+        response = requests.get(f"{base_url}get/{encodedName}/rcgi.bin/ParamForm?AST_Param=$dtES$ftH$fn&t2msession={session_id}&t2mdeveloperid={developer_id}&t2mdeviceusername={device_username}&t2mdevicepassword={device_password}")
+        if temporary_session:
+            t2m_logout(base_url, session_id, developer_id)
+        if response.status_code == 200:
+            response_text = response.text
+            try:
+                soup = BeautifulSoup(response_text, 'html.parser')
+                rows = soup.find_all('tr')
+                parsed_data = {}
+                for row in rows:
+                    try:
+                        cell = row.find('td')
+                        if cell and ':' in cell.text:
+                            key, value = cell.text.strip().split(':', 1)
+                            parsed_data[key.strip()] = value.strip()
+                        else:
+                            print(f"[Warning] Skipping row with unexpected format: {row}")
+                    except Exception as e:
+                        print(f"[Error] Failed to process row '{row}': {e}")
+                print(f"[SUCCESS] Get Ewon Details Successful.")
+                return parsed_data
+                
+            except Exception as e:
+                print(f"[Critical] Failed to parse HTML: {e}")
+                return {}
+            # soup = BeautifulSoup(response_text, 'html.parser')
+            # table = soup.find('table', {'class': 'edbt'})
+            # parsed_data = {}
+            # for row in table.find_all('tr'):
+            #     cells = row.find_all('td')
+            #     if len(cells) == 1:
+            #         key_value = cells[0].text.split(':')
+            #         if len(key_value) == 2:
+            #             parsed_data[key_value[0]] = key_value[1]
+            # print(f"Get Ewon Details Successful!")
+            # return parsed_data
+        else:
+            raise Exception()
+    except:    
+        # print(f"Get Ewon Details Failed: {response.text}")
+        return {}
+
+def fetch_iot_things():
+    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
+    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
+    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
+    client = boto3.client('iot')
+    things_df_list = []
+    response = client.list_things(maxResults=250)
+    next_token = response.get('nextToken', None)
+    things_df_list.append(pd.DataFrame(response['things']))
+    while next_token:
+        response = client.list_things(maxResults=250, nextToken=next_token)
+        things_df_list.append(pd.DataFrame(response['things']))
+        next_token = response.get('nextToken', None)
+    things = pd.concat(things_df_list, axis=0)    
+    return things
+
+def delete_thing_and_certificates(thing_name):
+    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
+    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
+    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
+    client = boto3.client('iot')
+    try:
+        client.describe_thing(thingName=thing_name)
+    except client.exceptions.ResourceNotFoundException:
+        print(f"[WARNING] Thing '{thing_name}' does not exist. Skipping.")
+        return
+    try:
+        principals = client.list_thing_principals(thingName=thing_name)['principals']
+        for principal in principals:
+            print(f"[INFO] Detaching certificate: {principal}")
+            client.detach_thing_principal(
+                thingName=thing_name,
+                principal=principal
+            )
+            policies = client.list_attached_policies(target=principal)['policies']
+            for policy in policies:
+                print(f"[INFO] Detaching policy '{policy['policyName']}' from certificate...")
+                client.detach_policy(
+                    policyName=policy['policyName'],
+                    target=principal
+                )
+            cert_id = principal.split('/')[-1]
+            print(f"[INFO] Deactivating certificate: {cert_id}")
+            client.update_certificate(
+                certificateId=cert_id,
+                newStatus='INACTIVE'
+            )
+            print(f"[INFO] Deleting certificate: {cert_id}")
+            client.delete_certificate(
+                certificateId=cert_id,
+                forceDelete=True
+            )
+    except botocore.exceptions.ClientError as e:
+        print(f"[ERROR] Failed to clean up certificates or policies for '{thing_name}': {e}")
+        return
+
+    try:
+        client.delete_thing(thingName=thing_name)
+        print(f"[SUCCESS] Successfully deleted Thing '{thing_name}' and all associated certificates.\n")
+    except botocore.exceptions.ClientError as e:
+        print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
+
+def fetch_data_from_timestream(query): 
+    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
+    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
+    os.environ["AWS_DEFAULT_REGION"] = AWS_REGION
+    client = boto3.client('timestream-query')
+    paginator = client.get_paginator('query')
+    count_query = f"SELECT count(*) FROM ({query})"
+    count_page_iterator = paginator.paginate(QueryString=count_query)
+    total_rows = 0
+    for count_page in count_page_iterator:
+        if count_page['Rows']:
+            total_rows = int(count_page['Rows'][0]['Data'][0]['ScalarValue'])
+    if total_rows == 0:
+        return pd.DataFrame()
+    all_rows = []
+    column_headers = []
+    page_iterator = paginator.paginate(QueryString=query)
+    first_page = True
+    with tqdm(total=total_rows, desc="Fetching Data", unit="row") as pbar:
+        for page in page_iterator:
+            if first_page:
+                column_headers = [col['Name'] for col in page['ColumnInfo']]
+                first_page = False
+            for row in page['Rows']:
+                row_data = [value['ScalarValue'] if 'ScalarValue' in value else None for value in row['Data']]
+                all_rows.append(row_data)
+                pbar.update(1)
+    df = pd.DataFrame(all_rows, columns=column_headers)
+    return df
+
+def restart_device_via_web_ui(ip_address, username, password):
+    print("[INFO] Initiating device restart via web UI...")
+    try:
+        options = webdriver.ChromeOptions()
+        # options.add_argument("--headless")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--log-level=3")
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+        driver.get(f'http://{ip_address}')
+        wait = WebDriverWait(driver, 120)
+
+        def find_and_act(element_id, action='click', text=None, max_attempts=10):
+            attempts = 0
+            while attempts < max_attempts:
+                try:
+                    element = wait.until(EC.presence_of_element_located((By.ID, element_id)))
+                    driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                    time.sleep(0.5)
+                    if action == 'click':
+                        element.click()
+                    elif action == 'send_keys' and text is not None:
+                        element.send_keys(text)
+                    elif action == 'enter':
+                        element.send_keys(Keys.ENTER)
+                    return True
+
+                except Exception as e:
+                    print(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
+                    attempts += 1
+                    time.sleep(1)
+            print(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
+            return False
+
+        if not find_and_act('textfield-1056-inputEl', action='send_keys', text=username): return False
+        if not find_and_act('textfield-1057-inputEl', action='send_keys', text=password): return False
+        if not find_and_act('button-1061-btnInnerEl'): return False
+        if not find_and_act('ext-element-378'): return False
+        if not find_and_act('ext-element-375'): return False
+        if not find_and_act('btn_Reboot-btnInnerEl'): return False
+
+        try:
+            reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
+            if reboot_message:
+                print("[SUCCESS] Reboot message received. Device will reboot shortly.")
+                return True
+        except Exception as ValueError:
+            print(f"[WARNING] Reboot message not found: {ValueError}.")
+            return False
+    except Exception as e:
+        print(f"[ERROR] An error occurred during device restart: {e}")
+        return False
+    finally:
+        if driver:
+            driver.quit()
+            
+def cleanup_device_driver_files(ip_address, username, password):
+    try:
+        print(f"[INFO] Connecting to device at {ip} to clean up the driver files...")
+        with ftplib.FTP(ip) as ftp:
+            ftp.login(user=username, passwd=password)
+            print("[SUCCESS] Login successful.")
+            directories = ftp.nlst()
+            if 'usr' not in directories:
+                print("[ERROR] The 'usr' directory is missing on the device!")
+                return False
+            ftp.cwd('/usr')
+            usr_files = ftp.nlst()
+            files_to_delete = [
+                f for f in usr_files if (
+                    'flexy-aws-connector' in f or
+                    'jvmrun' in f or
+                    'AwsConnectorConfig.json' in f
+                )
+            ]
+            folders_to_delete = [
+                f for f in usr_files if (
+                    'AwsCertificates' in f or
+                    'hist-data-queue' in f
+                )
+            ]
+            if not files_to_delete and not folders_to_delete:
+                print("[INFO] Driver is missing. No cleanup needed — already clean.")
+                return True
+            print("[INFO] Driver is outdated. Cleaning up old files...")
+            for file in files_to_delete:
+                try:
+                    ftp.delete(file)
+                    print(f"[INFO] Deleted file: {file}")
+                except ftplib.all_errors as e:
+                    print(f"[ERROR] Failed to delete file {file}: {e}")
+            def delete_directory_and_contents(ftp, dir_name):
+                try:
+                    ftp.cwd(dir_name)
+                    files = ftp.nlst()
+                    for f in files:
+                        try:
+                            ftp.delete(f)
+                            print(f"[INFO] Deleted file '{f}' inside '{dir_name}'")
+                        except Exception as e:
+                            print(f"[ERROR] Could not delete '{f}' in '{dir_name}': {e}")
+                    ftp.cwd("..")
+                    ftp.rmd(dir_name)
+                    print(f"[INFO] Deleted directory: {dir_name}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to delete directory '{dir_name}': {e}")
+            for folder in folders_to_delete:
+                delete_directory_and_contents(ftp, folder)
+            print("[SUCCESS] Cleanup complete.")
+            return True
+    except ftplib.all_errors as e:
+        print(f"[ERROR] FTP connection or operation failed: {e}")
+        return False
+
+def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path):
+    try:
+        print(f"[INFO] Connecting to device at {ip} to install the driver files...")
+        with ftplib.FTP(ip) as ftp:
+            ftp.login(user=username, passwd=password)
+            print("[SUCCESS] Login successful.")
+            directories = ftp.nlst()
+            if 'usr' not in directories:
+                print("[ERROR] The 'usr' directory is missing on the device!")
+                return False
+            ftp.cwd('/usr')
+            usr_files = ftp.nlst()
+            files_to_delete = [
+                f for f in usr_files if (
+                    'flexy-aws-connector' in f or
+                    'jvmrun' in f or
+                    'AwsConnectorConfig.json' in f
+                )
+            ]
+            folders_to_delete = [
+                f for f in usr_files if (
+                    'AwsCertificates' in f or
+                    'hist-data-queue' in f
+                )
+            ]
+            if latest_driver_jar in usr_files:
+                print("[INFO] Driver is already installed!")
+                return "Already Installed"
+            elif not files_to_delete and not folders_to_delete:
+                print("[INFO] Installing driver and certification files...")
+                for file_name in files_to_upload_to_usr:
+                    local_file = os.path.join(latest_driver_folder_path, file_name)
+                    try:
+                        with open(local_file, 'rb') as fp:
+                            ftp.storbinary(f'STOR {file_name}', fp)
+                    except FileNotFoundError:
+                        print(f"[ERROR]  File not found: {local_file}")
+                        return False
+                    except Exception as e:
+                        print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                        return False
+    
+                ftp.mkd('AwsCertificates')
+                ftp.cwd('AwsCertificates')
+                for file_name in files_to_upload_to_AwsCertificates:
+                    local_file = os.path.join(cert_path, file_name)
+                    try:
+                        with open(local_file, 'rb') as fp:
+                            ftp.storbinary(f'STOR {file_name}', fp)
+                    except FileNotFoundError:
+                        print(f"[ERROR]  File not found: {local_file}")
+                        return False
+                    except Exception as e:
+                        print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                        return False
+                print("[SUCCESS] Install complete.")
+                return True
+            else:
+                print("[INFO] Cleanup needed!")
+                return "Cleanup Needed"
+                
+    except ftplib.all_errors as e:
+        print(f"[ERROR] FTP connection or operation failed: {e}")
+        return False
+        
+def stop_driver(ip_address, username, password):
+
+    url = f"http://{ip_address}//rcgi.bin/jvmCmd?cmd=stop"  
+    
+    try:
+        response = requests.get(url, auth=HTTPBasicAuth(username, password))
+        print()
+        print()
+
+        if response.status_code == 200 and response.text.strip() == "JVM Stopped":
+            print("[SUCCESS] JVM stop command completed.")
+            return True
+        else:
+            print("[WARNING] Unexpected response received:")
+            print(f"  - Status Code: {response.status_code}")
+            print(f"  - Response: {response.text}")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Request failed: {e}")
+        return False
+        
+def find_four_digit_number(string):
+    match = re.search(r'\d{4}', string)
+    if match:
+        return match.group()
+    else:
+        return "No four-digit number found"
+
+def timer_and_alert(seconds, sound_file):
+    try:
+        if seconds <= 0:
+            winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+        else:
+            for _ in tqdm(range(seconds), desc="[PENDING] Timer", unit="s"):
+                time.sleep(1)
+            winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+    except Exception as e:
+        print(f"[ERROR] Failed to play sound: {e}")
+        
+        
 def upload_to_s3(
     data, 
     bucket_name, 
