@@ -328,8 +328,8 @@ def restart_device_via_web_ui(ip_address, username, password):
             
 def cleanup_device_driver_files(ip_address, username, password):
     try:
-        print(f"[INFO] Connecting to device at {ip} to clean up the driver files...")
-        with ftplib.FTP(ip) as ftp:
+        print(f"[INFO] Connecting to device at {ip_address} to clean up the driver files...")
+        with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
             print("[SUCCESS] Login successful.")
             directories = ftp.nlst()
