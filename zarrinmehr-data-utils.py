@@ -46,6 +46,13 @@ from bs4 import BeautifulSoup
 import ast
 import winsound
 import botocore.exceptions
+import inspect
+
+
+caller_globals = inspect.stack()[1][0].f_globals
+for name in list(globals()):
+    if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
+        caller_globals[name] = globals()[name]
 
 
 # ## Functions
@@ -68,7 +75,16 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
-def load_permissions_data(timestream_query_client, timestream_write_client, permissions_dataset, processedAccess, unProcessedAccess, requiredMeasureNames, database_name, table_name):
+def load_permissions_data(
+    timestream_query_client, 
+    timestream_write_client, 
+    permissions_dataset, 
+    processedAccess, 
+    unProcessedAccess, 
+    requiredMeasureNames, 
+    database_name, 
+    table_name
+):
     query = """
             SELECT deviceId, measure_name, COUNT(*) AS "Number of observation"
             FROM "KomarEwonDB"."EwonDataTable"
