@@ -68,6 +68,80 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
+def load_permissions_data(permissions_dataset, processedAccess, unProcessedAccess, requiredMeasureNames, database_name, table_name):
+    query = """
+            SELECT deviceId, measure_name, COUNT(*) AS "Number of observation"
+            FROM "KomarEwonDB"."EwonDataTable"
+            GROUP BY deviceId, measure_name
+            """
+    ts_df = fetch_data_from_timestream(query)
+    def has_required_measures(group):
+        return set(requiredMeasureNames).issubset(set(group['measure_name']))
+    filtered_device_ids = ts_df.groupby('deviceId').filter(has_required_measures)
+    authorized_device_ids = filtered_device_ids['deviceId'].unique()
+    all_devices_ids = sorted(ts_df['deviceId'].unique())
+    authorized_devices_count = len(authorized_device_ids)
+    all_devices_count = len(all_devices_ids)
+
+    unprocessed_users_list = "\n".join(f"\t- {user}" for user in unProcessedAccess)
+    processed_users_list = "\n".join(f"\t- {user}" for user in processedAccess)
+    prompt = f"""
+    User Access Details for "{table_name}":
+    All devices will be available to:
+    {unprocessed_users_list}
+    {authorized_devices_count} out of {all_devices_count} devices meet the required criteria and will be available to:
+    {processed_users_list}
+    """
+    print(prompt)
+    write_file('log.txt' , f"{prompt}")
+
+    default_permissions = []
+    for user in unProcessedAccess:
+        for device in all_devices_ids:
+            default_permissions.append({'UserName': user, 'deviceId': device})
+    for user in processedAccess:
+        for device in authorized_device_ids:
+            default_permissions.append({'UserName': user, 'deviceId': device})
+    default_permissions_df = pd.DataFrame(default_permissions)
+    updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
+    upload_to_timestream(updated_permissions_dataset[['UserName', 'deviceId']], table_name, database_name)
+
+
+def upload_to_timestream(df, table_name, database_name):
+    try:
+        ts_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
+        ts_write_client.create_table(DatabaseName=database_name, TableName=table_name)
+        prompt = f'{print_date_time()}\t\tTable "{table_name}" deleted & created successfully'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+
+    except Exception as e:
+        prompt = f'{print_date_time()}\t\tError deleting or creating table: {e}'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+        raise
+    try:
+        for index, row in tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
+            timestamp = int(datetime.now().timestamp() * 1000)
+            record = {
+                'Dimensions': [{'Name': dim, 'Value': str(row[dim])} for dim in df.columns.to_list()],
+                'MeasureName': '_',
+                'MeasureValue': '_',
+                'MeasureValueType': 'VARCHAR',
+                'Time': str(timestamp)
+            }
+
+            ts_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
+        prompt = f'{print_date_time()}\t\tTable "{table_name}" Loaded to Timestream "{database_name}" database successfully!'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+    except Exception as e:
+        prompt = f'{print_date_time()}\t\tFailed to load "{table_name}" to Timestream. Error: {str(e)}'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+        raise
+
+
 def t2m_login(base_url, developer_id, account, username, password):
     try:
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
@@ -80,6 +154,7 @@ def t2m_login(base_url, developer_id, account, username, password):
     except:    
         print(f"t2m_login Failed: {response.text}")
 
+
 def t2m_logout(base_url, session_id, developer_id):
     try:
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
@@ -90,7 +165,8 @@ def t2m_logout(base_url, session_id, developer_id):
             raise Exception()
     except:    
         print(f"t2m_logout Failed: {response.text}")
-     
+
+
 def get_account_info(base_url, developer_id, session_id=None):
     try:
         temporary_session = False
@@ -109,6 +185,7 @@ def get_account_info(base_url, developer_id, session_id=None):
     except:    
         print(f"Get Account Info Failed: {response.text}")
 
+        
 def get_ewons(base_url, developer_id, session_id=None):
     try:
         temporary_session = False
@@ -128,6 +205,7 @@ def get_ewons(base_url, developer_id, session_id=None):
     except:    
         print(f"Get Ewons Failed: {response.text}")
 
+
 def get_ewon(base_url, developer_id, ewon_id, session_id=None):
     temporary_session = False
     if session_id is None:
@@ -137,6 +215,7 @@ def get_ewon(base_url, developer_id, ewon_id, session_id=None):
     if temporary_session:
         t2m_logout(base_url, session_id, developer_id)
     return response.json()
+
 
 def get_ewon_details(base_url, developer_id, encodedName, device_username, device_password, account, username, password, session_id=None):
 
@@ -187,6 +266,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
         # print(f"Get Ewon Details Failed: {response.text}")
         return {}
 
+
 def fetch_iot_things(iot_client):
     things_df_list = []
     response = iot_client.list_things(maxResults=250)
@@ -198,6 +278,7 @@ def fetch_iot_things(iot_client):
         next_token = response.get('nextToken', None)
     things = pd.concat(things_df_list, axis=0)    
     return things
+
 
 def delete_thing_and_certificates(iot_client, thing_name):
     try:
@@ -241,6 +322,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
     except botocore.exceptions.ClientError as e:
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
 
+
 def fetch_data_from_timestream(timestream_query_client, query): 
     paginator = timestream_query_client.get_paginator('query')
     count_query = f"SELECT count(*) FROM ({query})"
@@ -266,6 +348,7 @@ def fetch_data_from_timestream(timestream_query_client, query):
                 pbar.update(1)
     df = pd.DataFrame(all_rows, columns=column_headers)
     return df
+
 
 def restart_device_via_web_ui(ip_address, username, password):
     print("[INFO] Initiating device restart via web UI...")
@@ -321,7 +404,8 @@ def restart_device_via_web_ui(ip_address, username, password):
     finally:
         if driver:
             driver.quit()
-            
+
+
 def cleanup_device_driver_files(ip_address, username, password):
     try:
         print(f"[INFO] Connecting to device at {ip_address} to clean up the driver files...")
@@ -379,6 +463,7 @@ def cleanup_device_driver_files(ip_address, username, password):
     except ftplib.all_errors as e:
         print(f"[ERROR] FTP connection or operation failed: {e}")
         return False
+
 
 def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path, files_to_upload_to_AwsCertificates):
     try:
@@ -444,7 +529,8 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
     except ftplib.all_errors as e:
         print(f"[ERROR] FTP connection or operation failed: {e}")
         return False
-        
+
+
 def stop_driver(ip_address, username, password):
 
     url = f"http://{ip_address}//rcgi.bin/jvmCmd?cmd=stop"  
@@ -466,13 +552,15 @@ def stop_driver(ip_address, username, password):
     except requests.exceptions.RequestException as e:
         print(f"[ERROR] Request failed: {e}")
         return False
-        
+
+
 def find_four_digit_number(string):
     match = re.search(r'\d{4}', string)
     if match:
         return match.group()
     else:
         return "No four-digit number found"
+
 
 def timer_and_alert(seconds, sound_file):
     try:
@@ -485,7 +573,7 @@ def timer_and_alert(seconds, sound_file):
     except Exception as e:
         print(f"[ERROR] Failed to play sound: {e}")
         
-        
+
 def upload_to_s3(
     data, 
     bucket_name, 
