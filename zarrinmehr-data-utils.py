@@ -107,10 +107,10 @@ def load_permissions_data(permissions_dataset, processedAccess, unProcessedAcces
     upload_to_timestream(updated_permissions_dataset[['UserName', 'deviceId']], table_name, database_name)
 
 
-def upload_to_timestream(df, table_name, database_name):
+def upload_to_timestream(timestream_write_client, df, table_name, database_name):
     try:
-        ts_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
-        ts_write_client.create_table(DatabaseName=database_name, TableName=table_name)
+        timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
+        timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
         prompt = f'{print_date_time()}\t\tTable "{table_name}" deleted & created successfully'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
@@ -131,7 +131,7 @@ def upload_to_timestream(df, table_name, database_name):
                 'Time': str(timestamp)
             }
 
-            ts_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
+            timestream_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
         prompt = f'{print_date_time()}\t\tTable "{table_name}" Loaded to Timestream "{database_name}" database successfully!'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
