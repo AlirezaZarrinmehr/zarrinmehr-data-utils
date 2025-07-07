@@ -104,10 +104,10 @@ def load_permissions_data(timestream_query_client, timestream_write_client, perm
             default_permissions.append({'UserName': user, 'deviceId': device})
     default_permissions_df = pd.DataFrame(default_permissions)
     updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
-    upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], table_name, database_name)
+    upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], database_name, table_name)
 
 
-def upload_to_timestream(timestream_write_client, df, table_name, database_name):
+def upload_to_timestream(timestream_write_client, df, database_name, table_name):
     try:
         timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
         timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
