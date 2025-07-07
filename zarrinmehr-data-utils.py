@@ -68,13 +68,13 @@ upload_to_s3(s3_client = s3_client, data =
 # In[3]:
 
 
-def load_permissions_data(permissions_dataset, processedAccess, unProcessedAccess, requiredMeasureNames, database_name, table_name):
+def load_permissions_data(timestream_query_client, timestream_write_client, permissions_dataset, processedAccess, unProcessedAccess, requiredMeasureNames, database_name, table_name):
     query = """
             SELECT deviceId, measure_name, COUNT(*) AS "Number of observation"
             FROM "KomarEwonDB"."EwonDataTable"
             GROUP BY deviceId, measure_name
             """
-    ts_df = fetch_data_from_timestream(query)
+    ts_df = fetch_data_from_timestream(timestream_query_client, query)
     def has_required_measures(group):
         return set(requiredMeasureNames).issubset(set(group['measure_name']))
     filtered_device_ids = ts_df.groupby('deviceId').filter(has_required_measures)
@@ -104,7 +104,7 @@ def load_permissions_data(permissions_dataset, processedAccess, unProcessedAcces
             default_permissions.append({'UserName': user, 'deviceId': device})
     default_permissions_df = pd.DataFrame(default_permissions)
     updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
-    upload_to_timestream(updated_permissions_dataset[['UserName', 'deviceId']], table_name, database_name)
+    upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], table_name, database_name)
 
 
 def upload_to_timestream(timestream_write_client, df, table_name, database_name):
