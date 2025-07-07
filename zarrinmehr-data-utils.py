@@ -47,7 +47,7 @@ import ast
 import winsound
 import botocore.exceptions
 import inspect
-
+import base64
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
@@ -74,6 +74,109 @@ upload_to_s3(s3_client = s3_client, data =
 
 # In[3]:
 
+
+def get_access_token(client_id, client_secret, username, password, token_url):
+
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    payload = {
+        "grant_type": "password",
+        "username": username,
+        "password": password
+    }
+    response = requests.post(token_url, headers=headers, data=payload)
+    if response.ok:
+        access_token = response.json().get("access_token")
+        refresh_token = response.json().get("refresh_token")
+        print("Access Token Retrieved!")
+        return access_token, refresh_token
+    else:
+        print(f"Authorization Failed. Status Code: {response.status_code}")
+        print(response.text)
+        return None
+
+def refresh_access_token(client_id, client_secret, refresh_token, token_url):
+
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    response = requests.post(token_url, headers=headers, data=payload)
+    if response.ok:
+        access_token = response.json().get("access_token")
+        refresh_token = response.json().get("refresh_token")
+        return access_token, refresh_token
+    else:
+        print(f"Failed to Retrieve Refreshed Access Token! Authorization Failed. Status Code: {response.status_code}")
+        print(response.text)
+        return None
+
+def get_resource(api_url, params=None):
+
+    global client_id, client_secret, access_token, refresh_token, token_url
+    access_token, refresh_token = refresh_access_token(client_id, client_secret, refresh_token, token_url)
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+
+    if params:
+        response = requests.get(api_url, headers=headers, params=params)
+    else:
+        response = requests.get(api_url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Failed to retrieve the resource!")
+        print(json.loads(response.text))
+        return response
+
+def get_full_resource(api_url):
+
+    resources = []
+    params = {
+    "$count": "true"
+    }
+    response = get_resource(api_url, params)
+    total_number = response.get('@odata.count', None)
+    table_name = response.get('@odata.context', None).split('#')[-1]
+    if total_number is not None:
+        total_pages = total_number// 50 + (total_number % 50 > 0)
+        with tqdm(total=total_pages, desc=f'Fetching "{table_name}"') as pbar:
+            while True:
+                response = get_resource(api_url)
+                resources.extend(response['value'])
+                pbar.update(1)
+                try:
+                    api_url = response['@odata.nextLink']
+                    time.sleep(1)
+                except:
+                    break
+
+    else:
+        page_index = 0
+        while True:
+            response = get_resource(api_url, params)
+            resources.extend(response['value'])
+            print(f"Page {page_index} added!")
+            try:
+                api_url = response['@odata.nextLink']
+                page_index += 1
+                time.sleep(1)
+            except:
+                print(f"All pages retrieved!")
+                break
+
+    df = pd.DataFrame(resources)
+    return df, table_name
 
 def load_permissions_data(
     timestream_query_client, 
