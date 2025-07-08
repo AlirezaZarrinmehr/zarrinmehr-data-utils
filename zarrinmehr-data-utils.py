@@ -612,7 +612,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         return False
 
 
-def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, files_to_upload_to_AwsCertificates, source_type, s3_bucket_name = None):
+def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, files_to_upload_to_AwsCertificates, source_type, s3_bucket_name = None, s3_client=None):
     try:
         print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
         with ftplib.FTP(ip_address) as ftp:
