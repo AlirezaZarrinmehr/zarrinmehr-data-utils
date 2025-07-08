@@ -69,6 +69,10 @@ read_csv_from_s3(s3_client = s3_client,
 
 upload_to_s3(
 upload_to_s3(s3_client = s3_client, data = 
+
+fetch_data_from_timestream(query
+fetch_data_from_timestream(timestream_query_client, query
+
 '''
 
 
@@ -178,6 +182,77 @@ def get_full_resource(api_url):
     df = pd.DataFrame(resources)
     return df, table_name
 
+def list_timestream_tables(timestream_write_client, database_name):
+    try:
+        response = timestream_write_client.list_tables(DatabaseName=database_name)
+        tables = [i.get('TableName', []) for i in response.get('Tables', [])]
+        return tables
+    except Exception as e:
+        print(f"Error listing tables in {database_name}: {e}")
+        return []
+
+def fetch_data_from_timestream(timestream_query_client, query): 
+    paginator = timestream_query_client.get_paginator('query')
+    count_query = f"SELECT count(*) FROM ({query})"
+    count_page_iterator = paginator.paginate(QueryString=count_query)
+    total_rows = 0
+    for count_page in count_page_iterator:
+        if count_page['Rows']:
+            total_rows = int(count_page['Rows'][0]['Data'][0]['ScalarValue'])
+    if total_rows == 0:
+        return pd.DataFrame()
+    all_rows = []
+    column_headers = []
+    page_iterator = paginator.paginate(QueryString=query)
+    first_page = True
+    with tqdm(total=total_rows, desc="Fetching Data", unit="row") as pbar:
+        for page in page_iterator:
+            if first_page:
+                column_headers = [col['Name'] for col in page['ColumnInfo']]
+                first_page = False
+            for row in page['Rows']:
+                row_data = [value['ScalarValue'] if 'ScalarValue' in value else None for value in row['Data']]
+                all_rows.append(row_data)
+                pbar.update(1)
+    df = pd.DataFrame(all_rows, columns=column_headers)
+    return df
+    
+    
+def upload_to_timestream(timestream_write_client, df, database_name, table_name):
+    try:
+        timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
+        timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
+        prompt = f'{print_date_time()}\t\tTable "{table_name}" deleted & created successfully'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+
+    except Exception as e:
+        prompt = f'{print_date_time()}\t\tError deleting or creating table: {e}'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+        raise
+    try:
+        for index, row in tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
+            timestamp = int(datetime.now().timestamp() * 1000)
+            record = {
+                'Dimensions': [{'Name': dim, 'Value': str(row[dim])} for dim in df.columns.to_list()],
+                'MeasureName': '_',
+                'MeasureValue': '_',
+                'MeasureValueType': 'VARCHAR',
+                'Time': str(timestamp)
+            }
+
+            timestream_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
+        prompt = f'{print_date_time()}\t\tTable "{table_name}" Loaded to Timestream "{database_name}" database successfully!'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+    except Exception as e:
+        prompt = f'{print_date_time()}\t\tFailed to load "{table_name}" to Timestream. Error: {str(e)}'
+        print(prompt)
+        write_file('log.txt' , f"{prompt}")
+        raise
+        
+        
 def load_permissions_data(
     timestream_query_client, 
     timestream_write_client, 
@@ -224,41 +299,6 @@ def load_permissions_data(
     default_permissions_df = pd.DataFrame(default_permissions)
     updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
     upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], database_name, table_name)
-
-
-def upload_to_timestream(timestream_write_client, df, database_name, table_name):
-    try:
-        timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
-        timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
-        prompt = f'{print_date_time()}\t\tTable "{table_name}" deleted & created successfully'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
-
-    except Exception as e:
-        prompt = f'{print_date_time()}\t\tError deleting or creating table: {e}'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
-        raise
-    try:
-        for index, row in tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
-            timestamp = int(datetime.now().timestamp() * 1000)
-            record = {
-                'Dimensions': [{'Name': dim, 'Value': str(row[dim])} for dim in df.columns.to_list()],
-                'MeasureName': '_',
-                'MeasureValue': '_',
-                'MeasureValueType': 'VARCHAR',
-                'Time': str(timestamp)
-            }
-
-            timestream_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
-        prompt = f'{print_date_time()}\t\tTable "{table_name}" Loaded to Timestream "{database_name}" database successfully!'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
-    except Exception as e:
-        prompt = f'{print_date_time()}\t\tFailed to load "{table_name}" to Timestream. Error: {str(e)}'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
-        raise
 
 
 def t2m_login(base_url, developer_id, account, username, password):
@@ -440,33 +480,6 @@ def delete_thing_and_certificates(iot_client, thing_name):
         print(f"[SUCCESS] Successfully deleted Thing '{thing_name}' and all associated certificates.\n")
     except botocore.exceptions.ClientError as e:
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
-
-
-def fetch_data_from_timestream(timestream_query_client, query): 
-    paginator = timestream_query_client.get_paginator('query')
-    count_query = f"SELECT count(*) FROM ({query})"
-    count_page_iterator = paginator.paginate(QueryString=count_query)
-    total_rows = 0
-    for count_page in count_page_iterator:
-        if count_page['Rows']:
-            total_rows = int(count_page['Rows'][0]['Data'][0]['ScalarValue'])
-    if total_rows == 0:
-        return pd.DataFrame()
-    all_rows = []
-    column_headers = []
-    page_iterator = paginator.paginate(QueryString=query)
-    first_page = True
-    with tqdm(total=total_rows, desc="Fetching Data", unit="row") as pbar:
-        for page in page_iterator:
-            if first_page:
-                column_headers = [col['Name'] for col in page['ColumnInfo']]
-                first_page = False
-            for row in page['Rows']:
-                row_data = [value['ScalarValue'] if 'ScalarValue' in value else None for value in row['Data']]
-                all_rows.append(row_data)
-                pbar.update(1)
-    df = pd.DataFrame(all_rows, columns=column_headers)
-    return df
 
 
 def restart_device_via_web_ui(ip_address, username, password):
