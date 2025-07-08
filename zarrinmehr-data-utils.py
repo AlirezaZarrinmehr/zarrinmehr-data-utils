@@ -584,7 +584,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         return False
 
 
-def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, latest_driver_folder_path, cert_path, files_to_upload_to_AwsCertificates):
+def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, files_to_upload_to_AwsCertificates, source_type, s3_bucket_name = None):
     try:
         print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
         with ftplib.FTP(ip_address) as ftp:
@@ -614,30 +614,52 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 return "Already Installed"
             elif not files_to_delete and not folders_to_delete:
                 print("[INFO] Installing driver and certification files...")
-                for file_name in files_to_upload_to_usr:
-                    local_file = os.path.join(latest_driver_folder_path, file_name)
-                    try:
-                        with open(local_file, 'rb') as fp:
-                            ftp.storbinary(f'STOR {file_name}', fp)
-                    except FileNotFoundError:
-                        print(f"[ERROR]  File not found: {local_file}")
-                        return False
-                    except Exception as e:
-                        print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                for file_name, file_path in files_to_upload_to_usr.items():
+                    if source_type == 'local':
+                        try:
+                            with open(file_path, 'rb') as fp:
+                                ftp.storbinary(f'STOR {file_name}', fp)
+                        except FileNotFoundError:
+                            print(f"[ERROR]  File not found: {file_path}")
+                            return False
+                        except Exception as e:
+                            print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                            return False
+                    elif source_type == 's3':
+                        s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=file_path)
+                        try:
+                            with s3_object['Body'] as fp:
+                                ftp.storbinary(f'STOR {file_name}', fp)
+                        except Exception as e:
+                            print(f"[ERROR] Failed to upload {file_name} from S3: {e}")
+                            return False
+                    else:
+                        print(f"[ERROR] Unknown source type: {source_type}")
                         return False
     
                 ftp.mkd('AwsCertificates')
                 ftp.cwd('AwsCertificates')
-                for file_name in files_to_upload_to_AwsCertificates:
-                    local_file = os.path.join(cert_path, file_name)
-                    try:
-                        with open(local_file, 'rb') as fp:
-                            ftp.storbinary(f'STOR {file_name}', fp)
-                    except FileNotFoundError:
-                        print(f"[ERROR]  File not found: {local_file}")
-                        return False
-                    except Exception as e:
-                        print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                for file_name, file_path in files_to_upload_to_AwsCertificates.items():
+                    if source_type == 'local':
+                        try:
+                            with open(file_path, 'rb') as fp:
+                                ftp.storbinary(f'STOR {file_name}', fp)
+                        except FileNotFoundError:
+                            print(f"[ERROR]  File not found: {file_path}")
+                            return False
+                        except Exception as e:
+                            print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                            return False
+                    elif source_type == 's3':
+                        s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=file_path)
+                        try:
+                            with s3_object['Body'] as fp:
+                                ftp.storbinary(f'STOR {file_name}', fp)
+                        except Exception as e:
+                            print(f"[ERROR] Failed to upload {file_name} from S3: {e}")
+                            return False
+                    else:
+                        print(f"[ERROR] Unknown source type: {source_type}")
                         return False
                 print("[SUCCESS] Install complete.")
                 return True
