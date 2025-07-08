@@ -28,6 +28,7 @@ import json
 import pyodbc
 from requests_oauthlib import OAuth1
 import psycopg2
+from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from google.cloud import bigquery
 import pandas_gbq
@@ -79,6 +80,20 @@ fetch_data_from_timestream(timestream_query_client, query
 # In[3]:
 
 
+def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
+    try:
+        sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
+        sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=f"{sheetName}!A:Z").execute()
+        sheet_values = sheet_data.get('values', [])
+        if not sheet_values:
+            raise ValueError("Google Sheet is empty or range is incorrect.")
+        df = pd.DataFrame(sheet_values[1:], columns=sheet_values[0])
+        return df
+    except HttpError as e:
+        raise Exception(f"Google Sheets API request failed: {e}")  
+    except Exception as e:
+        raise Exception(f"An error occurred while fetching data: {e}")
+        
 def get_access_token(client_id, client_secret, username, password, token_url):
 
     credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
