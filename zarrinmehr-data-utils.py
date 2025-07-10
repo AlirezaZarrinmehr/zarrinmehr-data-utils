@@ -498,7 +498,8 @@ def restart_device_via_web_ui(ip_address, username, password):
         options = webdriver.ChromeOptions()
         # options.add_argument("--headless")
         options.add_argument("--disable-extensions")
-        options.add_argument("--log-level=3")
+        options.add_argument("--disable-logging")
+        # options.add_argument("--log-level=3")
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         driver.get(f'http://{ip_address}')
         wait = WebDriverWait(driver, 120)
@@ -1682,7 +1683,7 @@ def associate_role_with_redshift(
         current_roles = response["Clusters"][0].get("IamRoles", [])
         role_associated = any(role['IamRoleArn'] == redshift_iam_role_arn for role in current_roles) 
         if role_associated:
-            prompt = f'{print_date_time()}\t\t⚠️ Role "{redshift_iam_role_arn}" is already associated with the Redshift cluster "{redshift_cluster_identifier}".'
+            prompt = f'{print_date_time()}\t\t[INFO] Role "{redshift_iam_role_arn}" is already associated with the Redshift cluster "{redshift_cluster_identifier}".'
             print(prompt)
             write_file('log.txt', f"{prompt}")
         else:
@@ -1796,7 +1797,7 @@ def turn_on_case_sensitivity(
         print(f"Modified cluster '{redshift_cluster_identifier}' with parameter group '{parameter_group_name}'")
         response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     else:
-        print(f"Cluster '{redshift_cluster_identifier}' already has the parameter group '{parameter_group_name}' associated.")
+        print(f"[INFO] Cluster '{redshift_cluster_identifier}' already has the parameter group '{parameter_group_name}' associated.")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
 
 def upload_to_redshift(
