@@ -6,9 +6,28 @@
 # A curated collection of Python utility functions for data engineers and analysts.
 # 
 
-# ## Libraries
+# In[2]:
 
-# In[1]:
+
+'''
+clean_df(
+clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name,
+
+read_csv_from_s3(
+read_csv_from_s3(s3_client = s3_client, 
+
+upload_to_s3(
+upload_to_s3(s3_client = s3_client, data = 
+
+fetch_data_from_timestream(query
+fetch_data_from_timestream(timestream_query_client, query
+
+'''
+
+
+# ## Functions
+
+# In[3]:
 
 
 import os
@@ -56,30 +75,10 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
-# ## Functions
-
-# In[2]:
 
 
-'''
-clean_df(
-clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name,
 
-read_csv_from_s3(
-read_csv_from_s3(s3_client = s3_client, 
-
-upload_to_s3(
-upload_to_s3(s3_client = s3_client, data = 
-
-fetch_data_from_timestream(query
-fetch_data_from_timestream(timestream_query_client, query
-
-'''
-
-
-# In[3]:
-
-
+        
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
         sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
@@ -113,7 +112,7 @@ def get_access_token(client_id, client_secret, username, password, token_url):
         print("Access Token Retrieved!")
         return access_token, refresh_token
     else:
-        print(f"Authorization Failed. Status Code: {response.status_code}")
+        print(f"[ERROR] Authorization Failed. Status Code: {response.status_code}")
         print(response.text)
         return None
 
@@ -134,7 +133,7 @@ def refresh_access_token(client_id, client_secret, refresh_token, token_url):
         refresh_token = response.json().get("refresh_token")
         return access_token, refresh_token
     else:
-        print(f"Failed to Retrieve Refreshed Access Token! Authorization Failed. Status Code: {response.status_code}")
+        print(f"[ERROR] Failed to Retrieve Refreshed Access Token! Authorization Failed. Status Code: {response.status_code}")
         print(response.text)
         return None
 
@@ -154,7 +153,7 @@ def get_resource(api_url, params=None):
     if response.status_code == 200:
         return response.json()
     else:
-        print(f"Failed to retrieve the resource!")
+        print(f"[ERROR] Failed to retrieve the resource!")
         print(json.loads(response.text))
         return response
 
@@ -237,12 +236,12 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
     try:
         timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
         timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
-        prompt = f'{print_date_time()}\t\tTable "{table_name}" deleted & created successfully'
+        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" deleted & created!'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
 
     except Exception as e:
-        prompt = f'{print_date_time()}\t\tError deleting or creating table: {e}'
+        prompt = f'{print_date_time()}\t\t[ERROR] Error deleting or creating table: {e}'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
         raise
@@ -258,11 +257,11 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
             }
 
             timestream_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
-        prompt = f'{print_date_time()}\t\tTable "{table_name}" Loaded to Timestream "{database_name}" database successfully!'
+        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" Loaded to Timestream "{database_name}" database!'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
     except Exception as e:
-        prompt = f'{print_date_time()}\t\tFailed to load "{table_name}" to Timestream. Error: {str(e)}'
+        prompt = f'{print_date_time()}\t\t[ERROR] Failed to load "{table_name}" to Timestream. Error: {str(e)}'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
         raise
@@ -321,12 +320,12 @@ def t2m_login(base_url, developer_id, account, username, password):
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] t2m_login Successful.")
+            print(f"[SUCCESS] t2m_login Successful!")
             return response_data['t2msession']
         else:
             raise Exception()
     except:    
-        print(f"t2m_login Failed: {response.text}")
+        print(f"[ERROR] t2m_login Failed: {response.text}")
 
 
 def t2m_logout(base_url, session_id, developer_id):
@@ -334,11 +333,11 @@ def t2m_logout(base_url, session_id, developer_id):
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] t2m_logout Successful.")
+            print(f"[SUCCESS] t2m_logout Successful!")
         else:
             raise Exception()
     except:    
-        print(f"t2m_logout Failed: {response.text}")
+        print(f"[ERROR] t2m_logout Failed: {response.text}")
 
 
 def get_account_info(base_url, developer_id, session_id=None):
@@ -357,7 +356,7 @@ def get_account_info(base_url, developer_id, session_id=None):
         else:
             raise Exception()
     except:    
-        print(f"Get Account Info Failed: {response.text}")
+        print(f"[ERROR] Get Account Info Failed: {response.text}")
 
         
 def get_ewons(base_url, developer_id, session_id=None):
@@ -377,7 +376,7 @@ def get_ewons(base_url, developer_id, session_id=None):
         else:
             raise Exception()
     except:    
-        print(f"Get Ewons Failed: {response.text}")
+        print(f"[ERROR] Get Ewons Failed: {response.text}")
 
 
 def get_ewon(base_url, developer_id, ewon_id, session_id=None):
@@ -414,14 +413,14 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
                             key, value = cell.text.strip().split(':', 1)
                             parsed_data[key.strip()] = value.strip()
                         else:
-                            print(f"[Warning] Skipping row with unexpected format: {row}")
+                            print(f"[WARNING] Skipping row with unexpected format: {row}")
                     except Exception as e:
-                        print(f"[Error] Failed to process row '{row}': {e}")
-                print(f"[SUCCESS] Get Ewon Details Successful.")
+                        print(f"[ERROR] Failed to process row '{row}': {e}")
+                print(f"[SUCCESS] Get Ewon Details Successful!")
                 return parsed_data
                 
             except Exception as e:
-                print(f"[Critical] Failed to parse HTML: {e}")
+                print(f"[ERROR] Failed to parse HTML: {e}")
                 return {}
             # soup = BeautifulSoup(response_text, 'html.parser')
             # table = soup.find('table', {'class': 'edbt'})
@@ -492,7 +491,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
 
     try:
         iot_client.delete_thing(thingName=thing_name)
-        print(f"[SUCCESS] Successfully deleted Thing '{thing_name}' and all associated certificates.\n")
+        print(f"[SUCCESS] Deleted Thing '{thing_name}' and all associated certificates!\n")
     except botocore.exceptions.ClientError as e:
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
 
@@ -540,7 +539,7 @@ def restart_device_via_web_ui(ip_address, username, password):
         try:
             reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
             if reboot_message:
-                print("[SUCCESS] Reboot message received. Device will reboot shortly.")
+                print("[SUCCESS] Reboot message received. Device will reboot shortly!")
                 return True
         except Exception as ValueError:
             print(f"[WARNING] Reboot message not found: {ValueError}.")
@@ -558,7 +557,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         print(f"[INFO] Connecting to device at {ip_address} to clean up the driver files...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Login successful.")
+            print("[SUCCESS] Login successful!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
@@ -605,7 +604,7 @@ def cleanup_device_driver_files(ip_address, username, password):
                     print(f"[ERROR] Failed to delete directory '{dir_name}': {e}")
             for folder in folders_to_delete:
                 delete_directory_and_contents(ftp, folder)
-            print("[SUCCESS] Cleanup complete.")
+            print("[SUCCESS] Cleanup complete!")
             return True
     except ftplib.all_errors as e:
         print(f"[ERROR] FTP connection or operation failed: {e}")
@@ -617,7 +616,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
         print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Login successful.")
+            print("[SUCCESS] Login successful!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
@@ -676,7 +675,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                             print(f"[ERROR]  File not found: {file_path}")
                             return False
                         except Exception as e:
-                            print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                            print(f"[ERROR] Failed to upload {file_name}: {e}")
                             return False
                     elif source_type == 's3':
                         s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=file_path)
@@ -689,7 +688,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                     else:
                         print(f"[ERROR] Unknown source type: {source_type}")
                         return False
-                print("[SUCCESS] Install complete.")
+                print("[SUCCESS] Install complete!")
                 return True
             else:
                 print("[INFO] Cleanup needed!")
@@ -710,7 +709,7 @@ def stop_driver(ip_address, username, password):
         print()
 
         if response.status_code == 200 and response.text.strip() == "JVM Stopped":
-            print("[SUCCESS] JVM stop command completed.")
+            print("[SUCCESS] JVM stop command completed!")
             return True
         else:
             print("[WARNING] Unexpected response received:")
@@ -757,7 +756,7 @@ def upload_to_s3(
             buckets = pd.DataFrame(s3_client.list_buckets()["Buckets"])
             if bucket_name not in buckets.Name.to_list():
                 s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" created successfully'
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{bucket_name}" created!'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
             else:
@@ -766,7 +765,7 @@ def upload_to_s3(
                 write_file('log.txt' , f"{prompt}")
 
         except Exception as e:
-            prompt = f'{print_date_time()}\t\tFailed to create bucket "{bucket_name}". Error: {str(e)}.'
+            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
 
@@ -1105,7 +1104,7 @@ def read_excel_from_sharepoint(url):
         else:
             raise ValueError("WOPI context JSON not found in the response.")
     else:
-        raise Exception(f"Failed to fetch the URL. Status code: {response.status_code}")
+        raise Exception(f"[ERROR] Failed to fetch the URL. Status code: {response.status_code}")
         
         
 def process_data_to_s3(
@@ -1121,30 +1120,32 @@ def process_data_to_s3(
     aws_region=None
 ):
     for table, sql_query in tables.items():
-
         for attempt in range(max_retries):
             try:
                 df = load_data_via_query(sql_query=sql_query, source_type=source_type, connection_string=connection_string, project_id=project_id, credentials=credentials)
-                prompt = f'{print_date_time()}\t\tTable "{table}" retrieved from {source_type} successfully!'
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
                 break
-
             except Exception as e:
-                prompt = f'{print_date_time()}\t\tFailed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
                 time.sleep(60)
+        else:
+            prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+            continue
 
         object_key = table + '.csv'
-
         try:
             upload_to_s3(data=df, bucket_name=bucket_name, object_key=object_key, s3_client=s3_client, CreateS3Bucket=CreateS3Bucket, aws_region=aws_region)
-            prompt = f'{print_date_time()}\t\t"{object_key}" table is loaded to S3 "{bucket_name}" bucket successfully!'
+            prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
         except Exception as e:
-            prompt = f'{print_date_time()}\t\tFailed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
+            prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
             
@@ -1630,7 +1631,7 @@ def wait_for_cluster_available(
             write_file('log.txt', f"{prompt}")
             raise ValueError(f'Cluster "{redshift_cluster_identifier}" is not available. Current status: "{cluster_status}"')
     except Exception as e:
-        prompt = f'{print_date_time()}\t\tError waiting for cluster to become available: {e}'
+        prompt = f'{print_date_time()}\t\t[ERROR] Error waiting for cluster to become available: {e}'
         print(prompt)
         write_file('log.txt', f"{prompt}")
 
@@ -1644,7 +1645,7 @@ def create_iam_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy)
         )
-        prompt = f'{print_date_time()}\t\tRole "{role_name}" created successfully.'
+        prompt = f'{print_date_time()}\t\t[SUCCESS] Role "{role_name}" created!'
         print(prompt)
         write_file('log.txt', f"{prompt}")
         return response['Role']['Arn']
@@ -1669,7 +1670,7 @@ def attach_policies_to_role(
             print(prompt)
             write_file('log.txt', f"{prompt}")
         except iam_client.exceptions.NoSuchEntityException as e:
-            prompt = f'{print_date_time()}\t\tError attaching policy "{policy}": {str(e)}'
+            prompt = f'{print_date_time()}\t\t[ERROR] Error attaching policy "{policy}": {str(e)}'
             print(prompt)
             write_file('log.txt', f"{prompt}")
 
@@ -1706,7 +1707,7 @@ def associate_role_with_redshift(
                 updated_roles = response["Clusters"][0].get("IamRoles", [])
                 role_associated = any(role['IamRoleArn'] == redshift_iam_role_arn for role in updated_roles)
                 if role_associated:
-                    prompt = f'{print_date_time()}\t\t✅ Role "{redshift_iam_role_arn}" has been successfully associated with the Redshift cluster "{redshift_cluster_identifier}".'
+                    prompt = f'{print_date_time()}\t\t[SUCCESS] Role "{redshift_iam_role_arn}" has been associated with the Redshift cluster "{redshift_cluster_identifier}"!'
                     print(prompt)
                     write_file('log.txt', f"{prompt}")
                 else:
@@ -1714,15 +1715,15 @@ def associate_role_with_redshift(
                     print(prompt)
                     write_file('log.txt', f"{prompt}")
             if not role_associated:
-                prompt = f'{print_date_time()}\t\t❌ Timeout reached. Role "{redshift_iam_role_arn}" was not associated with the Redshift cluster "{redshift_cluster_identifier}" within {timeout} seconds.'
+                prompt = f'{print_date_time()}\t\t[ERROR] Timeout reached. Role "{redshift_iam_role_arn}" was not associated with the Redshift cluster "{redshift_cluster_identifier}" within {timeout} seconds.'
                 print(prompt)
                 write_file('log.txt', f"{prompt}")
     except redshift_client.exceptions.ClusterNotFoundFault:
-        prompt = f'{print_date_time()}\t\tError: Redshift cluster "{redshift_cluster_identifier}" not found.'
+        prompt = f'{print_date_time()}\t\t[ERROR] Redshift cluster "{redshift_cluster_identifier}" not found.'
         print(prompt)
         write_file('log.txt', f"{prompt}")
     except Exception as e:
-        prompt = f'{print_date_time()}\t\tError associating role: {str(e)}'
+        prompt = f'{print_date_time()}\t\t[ERROR] Error associating role: {str(e)}'
         print(prompt)
         write_file('log.txt', f"{prompt}")
         
@@ -1750,7 +1751,7 @@ def add_inbound_rule(
             ToPort=5439,
             CidrIp="0.0.0.0/0"
         )
-        prompt = f'{print_date_time()}\t\t✅ Inbound rule for 0.0.0.0/0 added to security group "{security_group_id}".'
+        prompt = f'{print_date_time()}\t\t[SUCCESS] Inbound rule for 0.0.0.0/0 added to security group "{security_group_id}"!'
         print(prompt)
         write_file('log.txt', f"{prompt}")
     else:
@@ -1864,7 +1865,7 @@ def upload_to_redshift(
             port=5439
         )
         cur = conn.cursor()
-        prompt = f'{print_date_time()}\t\tConnected to Redshift successfully.'
+        prompt = f'{print_date_time()}\t\t[SUCCESS] Connected to Redshift!'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
         enable_case_sensitive_query = 'SET enable_case_sensitive_identifier TO true;'
@@ -1877,7 +1878,7 @@ def upload_to_redshift(
         print(prompt)
         write_file('log.txt' , f"{prompt}")
     except Exception as e:
-        raise Exception(f'Failed to connect to Redshift: {e}')
+        raise Exception(f'[ERROR] Failed to connect to Redshift: {e}')
     for bucket in s3_bucket_names:
         prompt = f'{print_date_time()}\t\tScanning S3 bucket: "{bucket}"'
         print(prompt)
@@ -1914,7 +1915,7 @@ def upload_to_redshift(
                     drop_table_query = f'DROP TABLE "{table_name}";'
                     cur.execute(drop_table_query)
                     conn.commit()
-                    prompt = f'{print_date_time()}\t\t✅ Table "{table_name}" dropped.'
+                    prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" dropped!'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
                 df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = csv_file, dtype_str=True)
@@ -1941,7 +1942,7 @@ def upload_to_redshift(
                 write_file('log.txt' , f"{prompt}")
                 cur.execute(create_table_query)
                 conn.commit()
-                prompt = f'{print_date_time()}\t\t✅ Table "{table_name}" created.'
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" created!'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
                 copy_query = f"""
@@ -1960,16 +1961,16 @@ def upload_to_redshift(
                     write_file('log.txt' , f"{prompt}")
                     cur.execute(copy_query)
                     conn.commit()
-                    prompt = f'{print_date_time()}\t\t✅ Successfully uploaded {csv_file} to Redshift table "{table_name}".'
+                    prompt = f'{print_date_time()}\t\t[SUCCESS] Uploaded {csv_file} to Redshift table "{table_name}"!'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
                 except Exception as e:
-                    prompt = f'{print_date_time()}\t\t❌ Error uploading {csv_file}: {e}'
+                    prompt = f'{print_date_time()}\t\t[ERROR] Error uploading {csv_file}: {e}'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
                     raise
         except Exception as e:
-            prompt = f'{print_date_time()}\t\t❌ Error uploading files in bucket "{bucket}": {e}'
+            prompt = f'{print_date_time()}\t\t[ERROR] Error uploading files in bucket "{bucket}": {e}'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
             raise
