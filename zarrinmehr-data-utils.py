@@ -453,7 +453,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
     try:
         iot_client.describe_thing(thingName=thing_name)
     except iot_client.exceptions.ResourceNotFoundException:
-        print(f"[WARNING] Thing '{thing_name}' does not exist. Skipping.")
+        print(f"[WARNING] Thing '{thing_name}' does not exist.")
         return
     try:
         principals = iot_client.list_thing_principals(thingName=thing_name)['principals']
@@ -756,7 +756,7 @@ def upload_to_s3(
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
             else:
-                prompt = f'{print_date_time()}\t\tBucket "{bucket_name}" already exists'
+                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{bucket_name}" already exists.'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
 
@@ -1646,7 +1646,7 @@ def create_iam_role(
         write_file('log.txt', f"{prompt}")
         return response['Role']['Arn']
     except iam_client.exceptions.EntityAlreadyExistsException:
-        prompt = f'{print_date_time()}\t\t⚠️ Role "{role_name}" already exists.'
+        prompt = f'{print_date_time()}\t\t[INFO] Role "{role_name}" already exists.'
         print(prompt)
         write_file('log.txt', f"{prompt}")
         return iam_client.get_role(RoleName=role_name)['Role']['Arn']
@@ -1751,7 +1751,7 @@ def add_inbound_rule(
         print(prompt)
         write_file('log.txt', f"{prompt}")
     else:
-        prompt = f'{print_date_time()}\t\t⚠️ Security group rule already exists, skipping.'
+        prompt = f'{print_date_time()}\t\t[INFO] Security group rule already exists.'
         print(prompt)
         write_file('log.txt', f"{prompt}")
 
@@ -1769,10 +1769,10 @@ def turn_on_case_sensitivity(
             ParameterGroupFamily=parameter_group_family,
             Description=f'Param group for {redshift_cluster_identifier}'
         )
-        print(f"Created parameter group '{parameter_group_name}'")
+        print(f"[SUCCESS] Created parameter group '{parameter_group_name}'!")
 
     else:
-        print(f"Parameter group '{parameter_group_name}' already exists. Skipping creation.")
+        print(f"[INFO] Parameter group '{parameter_group_name}' already exists.")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     response = redshift_client.modify_cluster_parameter_group(
         ParameterGroupName=parameter_group_name,
@@ -1823,7 +1823,7 @@ def upload_to_redshift(
         attach_policies_to_role(iam_client, role_name, role_policies)
         response = redshift_client.describe_clusters(ClusterIdentifier=redshift_cluster_identifier)
         cluster_status = response["Clusters"][0]["ClusterStatus"]
-        prompt = f'{print_date_time()}\t\tCluster "{redshift_cluster_identifier}" exists. Status: {cluster_status}'
+        prompt = f'{print_date_time()}\t\t[INFO] Cluster "{redshift_cluster_identifier}" exists. Status: {cluster_status}'
         print(prompt)
         write_file('log.txt' , f"{prompt}")
     except redshift_client.exceptions.ClusterNotFoundFault:
@@ -1905,7 +1905,7 @@ def upload_to_redshift(
                 cur.execute(check_table_query)
                 result = cur.fetchall()
                 if table_name in [row[2] for row in result]:
-                    prompt = f'{print_date_time()}\t\tTable "{table_name}" exists. Dropping it...'
+                    prompt = f'{print_date_time()}\t\t[INFO] Table "{table_name}" exists. Dropping it...'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
                     drop_table_query = f'DROP TABLE "{table_name}";'
