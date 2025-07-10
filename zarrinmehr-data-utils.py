@@ -75,10 +75,6 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
-
-
-
-        
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
         sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
@@ -320,7 +316,7 @@ def t2m_login(base_url, developer_id, account, username, password):
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] t2m_login Successful!")
+            print(f"[SUCCESS] Logged into Talk2M!")
             return response_data['t2msession']
         else:
             raise Exception()
@@ -333,7 +329,7 @@ def t2m_logout(base_url, session_id, developer_id):
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] t2m_logout Successful!")
+            print(f"[SUCCESS] Logged out of Talk2M!")
         else:
             raise Exception()
     except:    
@@ -351,12 +347,12 @@ def get_account_info(base_url, developer_id, session_id=None):
             t2m_logout(base_url, session_id, developer_id)
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"Get Account Info Successful!")
+            print(f"[SUCCESS] Retrieved account information!")
             return response_data
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] Get Account Info Failed: {response.text}")
+        print(f"[ERROR] Failed to Retrieve account information: {response.text}")
 
         
 def get_ewons(base_url, developer_id, session_id=None):
@@ -370,13 +366,13 @@ def get_ewons(base_url, developer_id, session_id=None):
             t2m_logout(base_url, session_id, developer_id)
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"Get Ewons Successful!")
+            print(f"[SUCCESS] Retrieved Ewons!")
             df = pd.DataFrame(response_data.get('ewons'))
             return df
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] Get Ewons Failed: {response.text}")
+        print(f"[ERROR] Failed to Retrieve Ewons: {response.text}")
 
 
 def get_ewon(base_url, developer_id, ewon_id, session_id=None):
@@ -416,7 +412,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
                             print(f"[WARNING] Skipping row with unexpected format: {row}")
                     except Exception as e:
                         print(f"[ERROR] Failed to process row '{row}': {e}")
-                print(f"[SUCCESS] Get Ewon Details Successful!")
+                print(f"[SUCCESS] Retrieved Ewon Details!")
                 return parsed_data
                 
             except Exception as e:
@@ -557,7 +553,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         print(f"[INFO] Connecting to device at {ip_address} to clean up the driver files...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Login successful!")
+            print("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
@@ -616,7 +612,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
         print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Login successful!")
+            print("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
