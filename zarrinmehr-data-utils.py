@@ -539,7 +539,7 @@ def restart_device_via_web_ui(ip_address, username, password):
                 print("[SUCCESS] Reboot message received. Device will reboot shortly!")
                 return True
         except Exception as ValueError:
-            print(f"[WARNING] Reboot message not found: {ValueError}.")
+            print(f"[ERROR] Reboot message not found: {ValueError}.")
             return False
     except Exception as e:
         print(f"[ERROR] An error occurred during device restart: {e}")
@@ -782,6 +782,7 @@ def upload_to_s3(
                 .astype(str)
                 .str.replace(r'\r\n|\r|\n', ' ', regex=True)
                 .str.replace(r'\\n', ' ', regex=True)
+                .str.replace(r'\\', ' ', regex=True)
             )
 
     csv_buffer = io.StringIO()
