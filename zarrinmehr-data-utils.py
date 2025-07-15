@@ -6,7 +6,7 @@
 # A curated collection of Python utility functions for data engineers and analysts.
 # 
 
-# In[2]:
+# In[1]:
 
 
 '''
@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[3]:
+# In[2]:
 
 
 import os
@@ -722,8 +722,10 @@ def stop_driver(ip_address, username, password):
 def install_device_firmware(ip_address, username, password, firmware_file_name, firmware_file_path, s3_bucket_name , s3_client):
     try:
         print(f"[INFO] Connecting to device at {ip_address} to install the firmware...")
-        with ftplib.FTP(ip_address) as ftp:
+        with ftplib.FTP(ip_address, timeout=30) as ftp:
+            # ftp.set_debuglevel(2)
             ftp.login(user=username, passwd=password)
+            ftp.set_pasv(True)
             print("[SUCCESS] Logged into device!")
             ftp.cwd('/')
             print("[INFO] Installing firmware...")
