@@ -719,6 +719,28 @@ def stop_driver(ip_address, username, password):
         return False
 
 
+def install_device_firmware(ip_address, username, password, firmware_file_name, firmware_file_path, s3_bucket_name , s3_client):
+    try:
+        print(f"[INFO] Connecting to device at {ip_address} to install the firmware...")
+        with ftplib.FTP(ip_address) as ftp:
+            ftp.login(user=username, passwd=password)
+            print("[SUCCESS] Logged into device!")
+            ftp.cwd('/')
+            print("[INFO] Installing firmware...")
+            s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
+            try:
+                with s3_object['Body'] as fp:
+                    ftp.storbinary(f'STOR {firmware_file_name}', fp)
+            except Exception as e:
+                print(f"[ERROR] Failed to upload {firmware_file_name} from S3: {e}")
+                return False
+            print("[SUCCESS] firmware Install complete!")
+            return True
+            
+    except ftplib.all_errors as e:
+        print(f"[ERROR] FTP connection or operation failed: {e}")
+        return False
+
 def find_four_digit_number(string):
     match = re.search(r'\d{4}', string)
     if match:
