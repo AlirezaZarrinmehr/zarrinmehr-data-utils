@@ -75,6 +75,24 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
+def impute_by_group(df, group_col, target_col, method='median', mask=None):
+
+    if mask is not None:
+        df.loc[mask, target_col] = df.loc[mask, target_col].replace(0, np.nan)
+    else:
+        df[target_col] = df[target_col].replace(0, np.nan)
+
+    group_stat = df.groupby(group_col)[target_col].transform(method)
+
+    if mask is not None:
+        df.loc[mask, target_col] = df.loc[mask, target_col].fillna(group_stat[mask])
+        df.loc[mask, target_col] = df.loc[mask, target_col].fillna(df[target_col].agg(method))
+    else:
+        df[target_col] = df[target_col].fillna(group_stat)
+        df[target_col] = df[target_col].fillna(df[target_col].agg(method))
+
+    return df
+    
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
         sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
