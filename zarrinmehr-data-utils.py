@@ -81,17 +81,28 @@ def impute_by_group(df, group_col, target_col, method='median', mask=None):
         df.loc[mask, target_col] = df.loc[mask, target_col].replace(0, np.nan)
     else:
         df[target_col] = df[target_col].replace(0, np.nan)
-
     group_stat = df.groupby(group_col)[target_col].transform(method)
-
     if mask is not None:
         df.loc[mask, target_col] = df.loc[mask, target_col].fillna(group_stat[mask])
         df.loc[mask, target_col] = df.loc[mask, target_col].fillna(df[target_col].agg(method))
     else:
         df[target_col] = df[target_col].fillna(group_stat)
         df[target_col] = df[target_col].fillna(df[target_col].agg(method))
-
     return df
+
+def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Total']):
+
+    zero_mask = (ordersLines[columns] == 0).any(axis=1)
+    ordersLines.loc[zero_mask, columns] = 0
+    for col in columns:
+        median_val = txnsLines[col].median()
+        ordersLines.loc[ordersLines[col] == 0, col] = median_val
+
+    if 'Quantity' in columns and 'Rate' in columns and 'Total' in columns:
+        ordersLines['Total'] = ordersLines['Quantity'] * ordersLines['Rate']
+
+    return ordersLines
+
     
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
