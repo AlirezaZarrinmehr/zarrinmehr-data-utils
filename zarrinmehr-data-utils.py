@@ -553,6 +553,7 @@ def restart_device_via_web_ui(ip_address, username, password):
                     attempts += 1
                     time.sleep(1)
             print(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
+            print("[ERROR] Failed to reboot the device.")
             return False
 
         if not find_and_act('textfield-1056-inputEl', action='send_keys', text=username): return False
@@ -565,13 +566,16 @@ def restart_device_via_web_ui(ip_address, username, password):
         try:
             reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
             if reboot_message:
-                print("[SUCCESS] Reboot message received. Device will reboot shortly!")
+                print("[INFO] Reboot message received.")
+                print("[SUCCESS] Device will reboot shortly!")
                 return True
         except Exception as ValueError:
             print(f"[ERROR] Reboot message not found: {ValueError}.")
+            print("[ERROR] Failed to reboot the device.")
             return False
     except Exception as e:
         print(f"[ERROR] An error occurred during device restart: {e}")
+        print("[ERROR] Failed to reboot the device.")
         return False
     finally:
         if driver:
@@ -748,29 +752,49 @@ def stop_driver(ip_address, username, password):
         return False
 
 
-def install_device_firmware(ip_address, username, password, firmware_file_name, firmware_file_path, s3_bucket_name , s3_client):
-    try:
-        print(f"[INFO] Connecting to device at {ip_address} to install the firmware...")
-        with ftplib.FTP(ip_address, timeout=30) as ftp:
-            # ftp.set_debuglevel(2)
-            ftp.login(user=username, passwd=password)
-            ftp.set_pasv(True)
-            print("[SUCCESS] Logged into device!")
-            ftp.cwd('/')
-            print("[INFO] Installing firmware...")
-            s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
-            try:
-                with s3_object['Body'] as fp:
-                    ftp.storbinary(f'STOR {firmware_file_name}', fp)
-            except Exception as e:
-                print(f"[ERROR] Failed to upload {firmware_file_name} from S3: {e}")
-                return False
-            print("[SUCCESS] firmware Install complete!")
-            return True
-            
-    except ftplib.all_errors as e:
-        print(f"[ERROR] FTP connection or operation failed: {e}")
-        return False
+def install_device_firmware(
+        ip_address, 
+        username, 
+        password, 
+        firmware_file_name,
+        firmware_file_path, 
+        s3_bucket_name, 
+        s3_client,
+        max_retries=3,
+):
+    print(f"[INFO] Connecting to device at {ip_address} to install the firmware...")
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with ftplib.FTP(ip_address, timeout=120) as ftp:
+                # ftp.set_debuglevel(2)
+                ftp.login(user=username, passwd=password)
+                try:
+                    ftp.set_pasv(True)
+                except Exception as e:
+                    print(f"[INFO] Passive mode failed: {e}. Switching to active mode...")
+                    ftp.set_pasv(False)
+                ftp.sock.settimeout(120)
+                ftp.sendcmd('TYPE I')
+                ftp.cwd('/')
+                print("[SUCCESS] Logged into device!")
+                s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
+                firmware_data = s3_object['Body'].read()
+                firmware_size = len(firmware_data)
+                fp = io.BytesIO(firmware_data)
+                fp.seek(0)
+                with tqdm.wrapattr(fp, "read", total=firmware_size, desc="Installing firmware", unit="B", unit_scale=True) as wrapped_fp:
+                    ftp.storbinary(f'STOR {firmware_file_name}', wrapped_fp, blocksize=32768)
+                print("[SUCCESS] Firmware install complete!")
+                return True
+
+        except Exception as e:
+            print(f'[ERROR] Failed to upload {firmware_file_name} from S3: {str(e)}. Retry {attempt + 1}/{max_retries} in 5 seconds...')
+            time.sleep(5)
+
+    print("[ERROR] Failed to install the firmware!")
+    return False
+
 
 def find_four_digit_number(string):
     match = re.search(r'\d{4}', string)
