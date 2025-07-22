@@ -525,7 +525,7 @@ def restart_device_via_web_ui(ip_address, username, password):
     print("[INFO] Restarting...")
     try:
         options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
+        # options.add_argument("--headless")
         options.add_argument("--disable-extensions")
         # options.add_argument("--disable-logging")
         options.add_argument("--log-level=3")
