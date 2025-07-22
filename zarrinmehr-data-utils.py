@@ -522,10 +522,10 @@ def delete_thing_and_certificates(iot_client, thing_name):
 
 
 def restart_device_via_web_ui(ip_address, username, password):
-    print("[INFO] Initiating device restart via web UI...")
+    print("[INFO] Restarting...")
     try:
         options = webdriver.ChromeOptions()
-        # options.add_argument("--headless")
+        options.add_argument("--headless")
         options.add_argument("--disable-extensions")
         # options.add_argument("--disable-logging")
         options.add_argument("--log-level=3")
@@ -559,6 +559,9 @@ def restart_device_via_web_ui(ip_address, username, password):
         if not find_and_act('textfield-1056-inputEl', action='send_keys', text=username): return False
         if not find_and_act('textfield-1057-inputEl', action='send_keys', text=password): return False
         if not find_and_act('button-1061-btnInnerEl'): return False
+        time.sleep(3)
+        driver.refresh()
+        time.sleep(1)
         if not find_and_act('ext-element-378'): return False
         if not find_and_act('ext-element-375'): return False
         if not find_and_act('btn_Reboot-btnInnerEl'): return False
@@ -584,7 +587,7 @@ def restart_device_via_web_ui(ip_address, username, password):
 
 def cleanup_device_driver_files(ip_address, username, password):
     try:
-        print(f"[INFO] Connecting to device at {ip_address} to clean up the driver files...")
+        print(f"[INFO] Cleaning up the driver...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
             print("[SUCCESS] Logged into device!")
@@ -608,9 +611,8 @@ def cleanup_device_driver_files(ip_address, username, password):
                 )
             ]
             if not files_to_delete and not folders_to_delete:
-                print("[INFO] Driver is missing. No cleanup needed — already clean.")
+                print("[INFO] No cleanup needed — already clean.")
                 return True
-            print("[INFO] Driver is outdated. Cleaning up old files...")
             for file in files_to_delete:
                 try:
                     ftp.delete(file)
@@ -643,7 +645,7 @@ def cleanup_device_driver_files(ip_address, username, password):
 
 def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, files_to_upload_to_AwsCertificates, source_type, s3_bucket_name = None, s3_client=None):
     try:
-        print(f"[INFO] Connecting to device at {ip_address} to install the driver files...")
+        print(f"[INFO] Installing the driver...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
             print("[SUCCESS] Logged into device!")
@@ -670,7 +672,6 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 print("[INFO] Driver is already installed!")
                 return "Already Installed"
             elif not files_to_delete and not folders_to_delete:
-                print("[INFO] Installing driver and certification files...")
                 for file_name, file_path in files_to_upload_to_usr.items():
                     if source_type == 'local':
                         try:
@@ -721,7 +722,6 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 print("[SUCCESS] Install complete!")
                 return True
             else:
-                print("[INFO] Cleanup needed!")
                 return "Cleanup Needed"
                 
     except ftplib.all_errors as e:
@@ -762,7 +762,7 @@ def install_device_firmware(
         s3_client,
         max_retries=3,
 ):
-    print(f"[INFO] Connecting to device at {ip_address} to install the firmware...")
+    print(f"[INFO] Installing the firmware...")
 
     for attempt in range(1, max_retries + 1):
         try:
