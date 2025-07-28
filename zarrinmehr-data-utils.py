@@ -1485,7 +1485,7 @@ def print_date_time():
     return data
 
 def correctCompleteDates(
-    df , 
+    df, 
     orderStatusCol, 
     orderDateCol, 
     completeDateCol, 
@@ -1494,11 +1494,11 @@ def correctCompleteDates(
     lastModDateCol, 
     postCompletionStatuses
 ):
-    df[orderDateCol] = pd.to_datetime(df[orderDateCol], errors='coerce')
-    df[completeDateCol] = pd.to_datetime(df[completeDateCol], errors='coerce')
-    df[shipDateCol] = pd.to_datetime(df[shipDateCol], errors='coerce')
-    df[invoiceDateCol] = pd.to_datetime(df[invoiceDateCol], errors='coerce')
-    df[lastModDateCol] = pd.to_datetime(df[lastModDateCol], errors='coerce')                           
+    today = pd.Timestamp(datetime.today().date())
+
+    for col in [orderDateCol, completeDateCol, shipDateCol, invoiceDateCol, lastModDateCol]:
+        df[col] = pd.to_datetime(df[col], errors='coerce')
+        df[col] = df[col].mask(df[col] > today, pd.NaT)
     def correctCompleteDate(row):
         orderStatus = row[orderStatusCol]
         orderDate = row[orderDateCol]
@@ -1508,9 +1508,9 @@ def correctCompleteDates(
         lastModDate = row[lastModDateCol]
         if completeDate >= orderDate:
             return completeDate
-        elif completeDate < orderDate and arriveDate >= orderDate:
+        elif arriveDate >= orderDate:
             return arriveDate
-        elif completeDate < orderDate and invoiceDate >= orderDate:
+        elif invoiceDate >= orderDate:
             return invoiceDate
         elif orderStatus in postCompletionStatuses and lastModDate >= orderDate:
             return lastModDate
