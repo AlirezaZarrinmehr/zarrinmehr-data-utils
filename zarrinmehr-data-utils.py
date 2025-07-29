@@ -1489,7 +1489,8 @@ def correctCompleteDates(
     shipDateCol, 
     invoiceDateCol, 
     lastModDateCol, 
-    postCompletionStatuses
+    postCompletionStatuses,
+    fallback_to_order_date=True
 ):
     today = pd.Timestamp(datetime.today().date())
 
@@ -1511,6 +1512,8 @@ def correctCompleteDates(
             return invoiceDate
         elif orderStatus in postCompletionStatuses and lastModDate >= orderDate:
             return lastModDate
+        elif orderStatus in postCompletionStatuses and fallback_to_order_date:
+            return orderDate
         else:
             return None
     df['CorrectedCompletedDate'] = df.apply(correctCompleteDate, axis=1)
