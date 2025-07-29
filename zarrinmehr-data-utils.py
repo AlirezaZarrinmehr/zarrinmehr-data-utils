@@ -521,7 +521,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
         print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
 
 
-def restart_device_via_web_ui(ip_address, username, password):
+def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
     print("[INFO] Restarting...")
     try:
         options = webdriver.ChromeOptions()
@@ -531,7 +531,7 @@ def restart_device_via_web_ui(ip_address, username, password):
         options.add_argument("--log-level=3")
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         driver.get(f'http://{ip_address}')
-        wait = WebDriverWait(driver, 120)
+        wait = WebDriverWait(driver, wait_time)
 
         def find_and_act(element_id, action='click', text=None, max_attempts=10):
             attempts = 0
@@ -559,9 +559,6 @@ def restart_device_via_web_ui(ip_address, username, password):
         if not find_and_act('textfield-1056-inputEl', action='send_keys', text=username): return False
         if not find_and_act('textfield-1057-inputEl', action='send_keys', text=password): return False
         if not find_and_act('button-1061-btnInnerEl'): return False
-        time.sleep(3)
-        driver.refresh()
-        time.sleep(1)
         if not find_and_act('ext-element-378'): return False
         if not find_and_act('ext-element-375'): return False
         if not find_and_act('btn_Reboot-btnInnerEl'): return False
