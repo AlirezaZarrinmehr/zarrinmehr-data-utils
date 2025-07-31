@@ -83,6 +83,45 @@ for name in list(globals()):
 
 
 
+def generate_open_cases_df(
+    df,
+    min_date,
+    openDateCol,
+    closeDateCol,
+    idCol,
+    timezone,
+    statusCol=None,
+    excludeStatusList=None,
+    quantile_values=None,
+    n=5
+):
+    df = df[df[openDateCol] >= min_date].copy()
+    df[idCol] = df[idCol].fillna('').astype('str').str.upper().str.strip().apply(convert_to_int_or_keep)
+    if excludeStatusList:
+        df = df[~df[statusCol].isin(excludeStatusList)].copy()
+    open_df = pd.DataFrame()
+    max_date = pd.to_datetime(datetime.now(timezone).date())
+    current_date = min_date
+    while current_date <= max_date:
+        active_df = df[
+            (df[openDateCol] <= current_date) &
+            ((df[closeDateCol] > current_date) | df[closeDateCol].isnull())
+        ].copy()
+        active_df = active_df[~active_df[idCol].duplicated()]
+        active_df['Age'] = (current_date - active_df[openDateCol]).dt.days
+        active_df['Date'] = current_date
+        open_df = pd.concat([open_df, active_df[
+            ['Date', 'Age', idCol]
+        ]], ignore_index=True)
+        current_date += pd.Timedelta(days=1)
+    if not quantile_values:
+        quantile_values = [int(open_df['Age'].quantile(i/n)) for i in range(n+1)]
+    print(quantile_values)
+    open_df['Age Group'] = open_df['Age'].apply(lambda x: group(x, quantile_values))
+    write_file('log.txt' , f"{print_date_time()}\t\tGenerated open cases dataframe successfully!")
+    return open_df
+    
+    
 def train_and_predict(
     labeled_df: pd.DataFrame,
     unlabeled_df : pd.DataFrame,
