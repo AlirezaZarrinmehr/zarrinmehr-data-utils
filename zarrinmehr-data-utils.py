@@ -459,7 +459,7 @@ def t2m_login(base_url, developer_id, account, username, password):
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] Logged into Talk2M!")
+            # print(f"[SUCCESS] Logged into Talk2M!")
             return response_data['t2msession']
         else:
             raise Exception()
@@ -472,7 +472,7 @@ def t2m_logout(base_url, session_id, developer_id):
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] Logged out of Talk2M!")
+            # print(f"[SUCCESS] Logged out of Talk2M!")
         else:
             raise Exception()
     except:    
@@ -555,7 +555,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
                             print(f"[WARNING] Skipping row with unexpected format: {row}")
                     except Exception as e:
                         print(f"[ERROR] Failed to process row '{row}': {e}")
-                print(f"[SUCCESS] Retrieved Ewon Details!")
+                # print(f"[SUCCESS] Retrieved Ewon Details!")
                 return parsed_data
                 
             except Exception as e:
@@ -756,7 +756,6 @@ def cleanup_device_driver_files(ip_address, username, password):
 
 def install_device_driver_files(ip_address, username, password, latest_driver_jar, files_to_upload_to_usr, files_to_upload_to_AwsCertificates, source_type, s3_bucket_name = None, s3_client=None):
     try:
-        print(f"[INFO] Installing the driver...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
             print("[SUCCESS] Logged into device!")
@@ -783,6 +782,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 print("[INFO] Driver is already installed!")
                 return "Already Installed"
             elif not files_to_delete and not folders_to_delete:
+                print("[INFO] Installing the driver...")
                 for file_name, file_path in files_to_upload_to_usr.items():
                     if source_type == 'local':
                         try:
