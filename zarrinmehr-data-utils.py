@@ -701,7 +701,7 @@ def cleanup_device_driver_files(ip_address, username, password):
         print(f"[INFO] Cleaning up the driver...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Logged into device!")
+            # print("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
@@ -758,7 +758,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
     try:
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            print("[SUCCESS] Logged into device!")
+            # print("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
                 print("[ERROR] The 'usr' directory is missing on the device!")
@@ -888,7 +888,7 @@ def install_device_firmware(
                 ftp.sock.settimeout(120)
                 ftp.sendcmd('TYPE I')
                 ftp.cwd('/')
-                print("[SUCCESS] Logged into device!")
+                # print("[SUCCESS] Logged into device!")
                 s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
                 firmware_data = s3_object['Body'].read()
                 firmware_size = len(firmware_data)
