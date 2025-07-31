@@ -459,7 +459,7 @@ def t2m_login(base_url, developer_id, account, username, password):
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
         response_data = response.json()
         if response_data.get('success') == True:
-            # print(f"[SUCCESS] Logged into Talk2M!")
+            pass # print(f"[SUCCESS] Logged into Talk2M!")
             return response_data['t2msession']
         else:
             raise Exception()
@@ -472,7 +472,7 @@ def t2m_logout(base_url, session_id, developer_id):
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
         response_data = response.json()
         if response_data.get('success') == True:
-            # print(f"[SUCCESS] Logged out of Talk2M!")
+            pass # print(f"[SUCCESS] Logged out of Talk2M!")
         else:
             raise Exception()
     except:    
