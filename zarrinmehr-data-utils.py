@@ -68,6 +68,13 @@ import winsound
 import botocore.exceptions
 import inspect
 import base64
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
@@ -75,6 +82,71 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
+
+def train_and_predict(
+    labeled_df: pd.DataFrame,
+    unlabeled_df : pd.DataFrame,
+    input_cols: list,
+    target_cols: list
+) -> pd.DataFrame:
+    # 1. Combine input text columns
+    labeled_df['combined_text'] = labeled_df[input_cols].astype(str).agg(' '.join, axis=1)
+
+    # 2. Encode target columns
+    output_encoders = {}
+    Y_encoded = pd.DataFrame()
+    for col in target_cols:
+        le = LabelEncoder()
+        Y_encoded[col] = le.fit_transform(labeled_df[col].astype(str))
+        output_encoders[col] = le
+
+    # 3. Train-test split
+    X = labeled_df['combined_text']
+    Y = Y_encoded
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+    # 4. TF-IDF vectorization
+    tfidf = TfidfVectorizer(max_features=500)
+    X_train_tfidf = tfidf.fit_transform(X_train)
+    X_test_tfidf = tfidf.transform(X_test)
+
+    # 5. Train model
+    model = MultiOutputClassifier(RandomForestClassifier(random_state=42))
+    model.fit(X_train_tfidf, Y_train)
+
+    # 6. Evaluate model
+    y_pred_array = model.predict(X_test_tfidf)
+    y_pred = pd.DataFrame(y_pred_array, columns=Y_test.columns, index=Y_test.index)
+
+    Y_test_decoded = Y_test.copy()
+    for col in target_cols:
+        y_pred[col] = output_encoders[col].inverse_transform(y_pred[col])
+        Y_test_decoded[col] = output_encoders[col].inverse_transform(Y_test[col])
+
+    print("Per-column accuracy:")
+    for col in target_cols:
+        acc = accuracy_score(Y_test_decoded[col], y_pred[col])
+        print(f"{col}: {acc:.4f}")
+
+    exact_match_acc = np.mean(np.all(y_pred.values == Y_test_decoded.values, axis=1))
+    print(f"Exact match accuracy: {exact_match_acc:.4f}")
+
+    # 7. Predict on new dataset
+    unlabeled_df ['combined_text'] = unlabeled_df [input_cols].astype(str).agg(' '.join, axis=1)
+    X_new_tfidf = tfidf.transform(unlabeled_df ['combined_text'])
+
+    preds_array = model.predict(X_new_tfidf)
+    predicted_targets_df = pd.DataFrame(preds_array, columns=target_cols)
+    for col in target_cols:
+        predicted_targets_df[col] = output_encoders[col].inverse_transform(predicted_targets_df[col])
+
+    final_predictions = pd.concat([
+        unlabeled_df [input_cols].reset_index(drop=True),
+        predicted_targets_df.reset_index(drop=True)
+    ], axis=1)
+    return final_predictions
+
+    
 def impute_by_group(df, group_col, target_col, method='median', mask=None):
 
     if mask is not None:
@@ -89,6 +161,7 @@ def impute_by_group(df, group_col, target_col, method='median', mask=None):
         df[target_col] = df[target_col].fillna(group_stat)
         df[target_col] = df[target_col].fillna(df[target_col].agg(method))
     return df
+    
 
 def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Total']):
 
@@ -118,6 +191,7 @@ def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     except Exception as e:
         raise Exception(f"An error occurred while fetching data: {e}")
         
+        
 def get_access_token(client_id, client_secret, username, password, token_url):
 
     credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -140,6 +214,7 @@ def get_access_token(client_id, client_secret, username, password, token_url):
         print(f"[ERROR] Authorization Failed. Status Code: {response.status_code}")
         print(response.text)
         return None
+
 
 def refresh_access_token(client_id, client_secret, refresh_token, token_url):
 
