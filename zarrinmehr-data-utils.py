@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[2]:
+# In[ ]:
 
 
 import os
@@ -120,8 +120,8 @@ def generate_open_cases_df(
     open_df['Age Group'] = open_df['Age'].apply(lambda x: group(x, quantile_values))
     write_file('log.txt' , f"{print_date_time()}\t\tGenerated open cases dataframe successfully!")
     return open_df
-    
-    
+
+
 def train_and_predict(
     labeled_df: pd.DataFrame,
     unlabeled_df : pd.DataFrame,
@@ -185,7 +185,7 @@ def train_and_predict(
     ], axis=1)
     return final_predictions
 
-    
+
 def impute_by_group(df, group_col, target_col, method='median', mask=None):
 
     if mask is not None:
@@ -200,7 +200,7 @@ def impute_by_group(df, group_col, target_col, method='median', mask=None):
         df[target_col] = df[target_col].fillna(group_stat)
         df[target_col] = df[target_col].fillna(df[target_col].agg(method))
     return df
-    
+
 
 def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Total']):
 
@@ -215,7 +215,7 @@ def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Tota
 
     return ordersLines
 
-    
+
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
         sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
@@ -229,8 +229,8 @@ def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
         raise Exception(f"Google Sheets API request failed: {e}")  
     except Exception as e:
         raise Exception(f"An error occurred while fetching data: {e}")
-        
-        
+
+
 def get_access_token(client_id, client_secret, username, password, token_url):
 
     credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -369,8 +369,8 @@ def fetch_data_from_timestream(timestream_query_client, query):
                 pbar.update(1)
     df = pd.DataFrame(all_rows, columns=column_headers)
     return df
-    
-    
+
+
 def upload_to_timestream(timestream_write_client, df, database_name, table_name):
     try:
         timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
@@ -404,8 +404,8 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
         print(prompt)
         write_file('log.txt' , f"{prompt}")
         raise
-        
-        
+
+
 def load_permissions_data(
     timestream_query_client, 
     timestream_write_client, 
@@ -497,7 +497,7 @@ def get_account_info(base_url, developer_id, session_id=None):
     except:    
         print(f"[ERROR] Failed to Retrieve account information: {response.text}")
 
-        
+
 def get_ewons(base_url, developer_id, session_id=None):
     try:
         temporary_session = False
@@ -557,7 +557,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
                         print(f"[ERROR] Failed to process row '{row}': {e}")
                 # print(f"[SUCCESS] Retrieved Ewon Details!")
                 return parsed_data
-                
+
             except Exception as e:
                 print(f"[ERROR] Failed to parse HTML: {e}")
                 return {}
@@ -805,7 +805,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                     else:
                         print(f"[ERROR] Unknown source type: {source_type}")
                         return False
-    
+
                 ftp.mkd('AwsCertificates')
                 ftp.cwd('AwsCertificates')
                 for file_name, file_path in files_to_upload_to_AwsCertificates.items():
@@ -834,7 +834,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 return True
             else:
                 return "Cleanup Needed"
-                
+
     except ftplib.all_errors as e:
         print(f"[ERROR] FTP connection or operation failed: {e}")
         return False
@@ -843,7 +843,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
 def stop_driver(ip_address, username, password):
 
     url = f"http://{ip_address}//rcgi.bin/jvmCmd?cmd=stop"  
-    
+
     try:
         response = requests.get(url, auth=HTTPBasicAuth(username, password))
         print()
@@ -925,7 +925,7 @@ def timer_and_alert(seconds, sound_file):
             winsound.PlaySound(sound_file, winsound.SND_FILENAME)
     except Exception as e:
         print(f"[ERROR] Failed to play sound: {e}")
-        
+
 
 def upload_to_s3(
     data, 
@@ -935,7 +935,7 @@ def upload_to_s3(
     CreateS3Bucket=False,
     aws_region=None
 ):
-    
+
     if CreateS3Bucket:
         try:
             buckets = pd.DataFrame(s3_client.list_buckets()["Buckets"])
@@ -961,7 +961,7 @@ def upload_to_s3(
     #         clean_data[col] = clean_data[col].fillna('').astype(str).str.replace(r'\r\n|\r|\n', ' ', regex=True).str.replace(r'\\n', ' ', regex=True)
     #     else:
     #         print(f"Warning: DataFrame has more than one column named '{col}'. Cannot safely clean these columns.")
-            
+
     for idx, dtype in enumerate(clean_data.dtypes):
         if dtype == 'object' or dtype.name == 'string':
             clean_data.iloc[:, idx] = (
@@ -977,12 +977,12 @@ def upload_to_s3(
     clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
     csv_buffer.seek(0)
     data_size = len(csv_buffer.getvalue())
-    
+
     with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
-        
+
         def callback(bytes_transferred):
             progress.update(bytes_transferred)
-            
+
         bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
         s3_client.upload_fileobj(
             Fileobj=bytes_buffer,
@@ -990,7 +990,7 @@ def upload_to_s3(
             Key=object_key,
             Callback=callback
         )
-        
+
 def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
 
     item = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = item, df_name = 'item', id_column = ['ItemId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1044,9 +1044,9 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
     print(prompt)
     write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
     return item
-    
+
 def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
-    
+
     customers = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customers, df_name = 'customers', id_column = ['CustId'], additional_date_columns = [], zip_code_columns = ['CustZip'], state_columns = ['CustState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     customerLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5']
     customersCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'customersCategories.csv')
@@ -1092,7 +1092,7 @@ def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_n
     customers.drop(columns = 'LookUpIn', inplace=True)
     upload_to_s3(s3_client = s3_client, data = customers, bucket_name = s3_bucket_name + '-c', object_key = 'customers.csv')
     return customers
-    
+
 
 def process_qb_transactions_by_account(
     companyName,
@@ -1264,7 +1264,7 @@ def process_qb_transactions_by_account(
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
-    
+
 def read_excel_from_sharepoint(url):
     response = requests.get(url)
     if response.status_code == 200:
@@ -1291,8 +1291,8 @@ def read_excel_from_sharepoint(url):
             raise ValueError("WOPI context JSON not found in the response.")
     else:
         raise Exception(f"[ERROR] Failed to fetch the URL. Status code: {response.status_code}")
-        
-        
+
+
 def process_data_to_s3(
     tables,
     s3_client,
@@ -1334,7 +1334,7 @@ def process_data_to_s3(
             prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
-            
+
 
 def generate_table_select_queries(
     project_id,
@@ -1355,7 +1355,7 @@ def generate_table_select_queries(
             if table in table_queries:
                 del table_queries[table]
     return table_queries
-    
+
 def load_suiteql_data_via_query(
     consumer_key, 
     consumer_secret, 
@@ -1610,7 +1610,9 @@ def correctCompleteDates(
 
     for col in [orderDateCol, completeDateCol, shipDateCol, invoiceDateCol, lastModDateCol]:
         df[col] = pd.to_datetime(df[col], errors='coerce')
-        df[col] = df[col].mask(df[col] > today, pd.NaT)
+        df[col] = df[col].mask(df[col] > today, today)
+
+    postCompletionStatuses = set(postCompletionStatuses)
     def correctCompleteDate(row):
         orderStatus = row[orderStatusCol]
         orderDate = row[orderDateCol]
@@ -1620,14 +1622,16 @@ def correctCompleteDates(
         lastModDate = row[lastModDateCol]
         if completeDate >= orderDate:
             return completeDate
-        elif arriveDate >= orderDate:
-            return arriveDate
-        elif invoiceDate >= orderDate:
-            return invoiceDate
-        elif orderStatus in postCompletionStatuses and lastModDate >= orderDate:
-            return lastModDate
-        elif orderStatus in postCompletionStatuses and fallback_to_order_date:
-            return orderDate
+
+        if orderStatus in postCompletionStatuses:
+            if arriveDate >= orderDate:
+                return arriveDate
+            if invoiceDate >= orderDate:
+                return invoiceDate
+            if lastModDate >= orderDate:
+                return lastModDate
+            if fallback_to_order_date:
+                return orderDate
         else:
             return None
     df['CorrectedCompletedDate'] = df.apply(correctCompleteDate, axis=1)
@@ -1678,7 +1682,7 @@ def read_iif_from_s3(
     iif_obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
     file_size = iif_obj['ContentLength']   
     progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
-    
+
     def stream_with_progress(bytes_io):
         while True:
             chunk = bytes_io.read(1024 * 1024)
@@ -1687,14 +1691,14 @@ def read_iif_from_s3(
             progress.update(len(chunk))
             yield chunk
         progress.close()
-    
+
     body = iif_obj['Body']
     stream = stream_with_progress(body)
     iif_string = b''.join(stream).decode(encoding)  
     iif_buffer = io.StringIO(iif_string)
     columns = [f'Column{i}' for i in range(1, 101)]
     df = pd.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
-    
+
     return df
 
 def clean_address(
@@ -1726,7 +1730,7 @@ def clean_address(
             return ship_name, city, state, zip_code
         except:
             return None, None, None, None 
-        
+
     addresses = {'BillAddressBlockAddr':'billingAddress', 'ShipAddressBlockAddr':'ShippingAddress', 'BADDR':'billingAddress', 'SADDR':'ShippingAddress', 'ADDR':'Address'}
     for key, value in addresses.items():
         AddressCols = [i for i in df.columns if key in i]
@@ -1915,7 +1919,7 @@ def associate_role_with_redshift(
         prompt = f'{print_date_time()}\t\t[ERROR] Error associating role: {str(e)}'
         print(prompt)
         write_file('log.txt', f"{prompt}")
-        
+
 def add_inbound_rule(
     redshift_client, 
     ec2_client, 
