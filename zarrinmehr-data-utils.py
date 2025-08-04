@@ -433,7 +433,7 @@ def load_permissions_data(
     unprocessed_users_list = "\n".join(f"\t- {user}" for user in unProcessedAccess)
     processed_users_list = "\n".join(f"\t- {user}" for user in processedAccess)
     prompt = f"""
-    User Access Details for "{table_name}":
+    User Access Details:
     All devices will be available to:
     {unprocessed_users_list}
     {authorized_devices_count} out of {all_devices_count} devices are qualified and will be available to:
