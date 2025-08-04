@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[ ]:
+# In[2]:
 
 
 import os
@@ -413,8 +413,8 @@ def load_permissions_data(
     processedAccess, 
     unProcessedAccess, 
     requiredMeasureNames, 
-    database_name, 
-    table_name
+    database_name = None, 
+    table_name = None
 ):
     query = """
             SELECT deviceId, measure_name, COUNT(*) AS "Number of observation"
@@ -424,11 +424,11 @@ def load_permissions_data(
     ts_df = fetch_data_from_timestream(timestream_query_client, query)
     def has_required_measures(group):
         return set(requiredMeasureNames).issubset(set(group['measure_name']))
-    filtered_device_ids = ts_df.groupby('deviceId').filter(has_required_measures)
-    authorized_device_ids = filtered_device_ids['deviceId'].unique()
-    all_devices_ids = sorted(ts_df['deviceId'].unique())
-    authorized_devices_count = len(authorized_device_ids)
-    all_devices_count = len(all_devices_ids)
+    qualified_devices = ts_df.groupby('deviceId').filter(has_required_measures)
+    qualified_devices = qualified_devices['deviceId'].unique()
+    all_devices = sorted(ts_df['deviceId'].unique())
+    authorized_devices_count = len(qualified_devices)
+    all_devices_count = len(all_devices)
 
     unprocessed_users_list = "\n".join(f"\t- {user}" for user in unProcessedAccess)
     processed_users_list = "\n".join(f"\t- {user}" for user in processedAccess)
@@ -436,7 +436,7 @@ def load_permissions_data(
     User Access Details for "{table_name}":
     All devices will be available to:
     {unprocessed_users_list}
-    {authorized_devices_count} out of {all_devices_count} devices meet the required criteria and will be available to:
+    {authorized_devices_count} out of {all_devices_count} devices are qualified and will be available to:
     {processed_users_list}
     """
     print(prompt)
@@ -444,14 +444,17 @@ def load_permissions_data(
 
     default_permissions = []
     for user in unProcessedAccess:
-        for device in all_devices_ids:
+        for device in all_devices:
             default_permissions.append({'UserName': user, 'deviceId': device})
     for user in processedAccess:
-        for device in authorized_device_ids:
+        for device in qualified_devices:
             default_permissions.append({'UserName': user, 'deviceId': device})
     default_permissions_df = pd.DataFrame(default_permissions)
     updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
-    upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], database_name, table_name)
+
+    if database_name and table_name:
+        upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], database_name, table_name)
+    return qualified_devices
 
 
 def t2m_login(base_url, developer_id, account, username, password):
