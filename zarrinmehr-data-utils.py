@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[ ]:
+# In[2]:
 
 
 import os
@@ -275,7 +275,8 @@ def process_data_to_s3(
     max_retries=3,
     CreateS3Bucket=False,
     aws_region=None,
-    file_path=None
+    file_path=None,
+    table_desc=None
 ):
     for table, sql_query in tables.items():
         for attempt in range(max_retries):
@@ -312,8 +313,10 @@ def process_data_to_s3(
             print(prompt)
             write_file('log.txt' , f"{prompt}")
             continue
-
-        object_key = table + '.csv'
+        if not table_desc:
+            object_key = table + '.csv'
+        else:
+            object_key = table.upper() + ' :: ' + table_desc.get(table, 'UNKNOWN') + '.csv'
         try:
             if not file_path:
                 upload_to_s3(
