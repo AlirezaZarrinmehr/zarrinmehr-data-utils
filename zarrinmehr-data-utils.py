@@ -30,6 +30,8 @@ fetch_data_from_timestream(timestream_query_client, query
 # In[6]:
 
 
+import importlib
+
 modules  = [
     "os",
     "datetime",
@@ -50,7 +52,6 @@ modules  = [
     "psycopg2",
     "googleapiclient.discovery",
     "pandas_gbq",
-    "importlib",
     "sys",
     "requests.auth",
     "ftplib",
