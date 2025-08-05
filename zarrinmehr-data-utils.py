@@ -50,7 +50,7 @@ modules  = [
     "psycopg2",
     "googleapiclient.discovery",
     "pandas_gbq",
-    "importlib.util",
+    "importlib",
     "sys",
     "requests.auth",
     "ftplib",
