@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[6]:
+# In[2]:
 
 
 import importlib
@@ -74,7 +74,6 @@ modules  = [
 for mod in modules:
     try:
         importlib.import_module(mod)
-        successful.append(mod)
     except ImportError as e:
         print("\n❌ Failed to import {mod}: {str(e)}")
 
