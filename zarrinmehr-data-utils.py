@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[2]:
+# In[ ]:
 
 
 import os
@@ -280,13 +280,13 @@ def process_data_to_s3(
     for table, sql_query in tables.items():
         for attempt in range(max_retries):
             try:
-                if not file_path
+                if not file_path:
                     df = load_data_via_query(
                         sql_query=sql_query,
                         source_type=source_type,
                         connection_string=connection_string,
                         project_id=project_id,
-                        credentials=credentials
+                        credentials=credentials,
                         file_path=file_path
                     )
                 else:
@@ -295,7 +295,7 @@ def process_data_to_s3(
                         source_type=source_type,
                         connection_string=connection_string,
                         project_id=project_id,
-                        credentials=credentials
+                        credentials=credentials,
                         file_path=file_path
                     )
                 prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
@@ -315,7 +315,7 @@ def process_data_to_s3(
 
         object_key = table + '.csv'
         try:
-            if not file_path
+            if not file_path:
                 upload_to_s3(
                     data=df,
                     bucket_name=bucket_name,
