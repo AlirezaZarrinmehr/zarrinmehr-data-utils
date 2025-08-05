@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[3]:
+# In[ ]:
 
 
 import importlib
@@ -43,10 +43,10 @@ import sys
 import ftplib
 import ast
 import winsound
-import inspect
 import base64
+import inspect
 
-modules  = [
+modules = [
     "requests",
     "pandas",
     "boto3",
@@ -73,7 +73,7 @@ modules  = [
 
 for mod in modules:
     try:
-        importlib.import_module(mod)
+        globals()[mod] = importlib.import_module(mod)
     except ImportError as e:
         print(f"[INFO] Failed to import {mod}: {str(e)}")
 
@@ -81,6 +81,7 @@ caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
     if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
         caller_globals[name] = globals()[name]
+
 
 
 
