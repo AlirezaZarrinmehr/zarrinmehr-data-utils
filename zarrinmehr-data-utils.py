@@ -27,62 +27,96 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[ ]:
+# In[3]:
 
 
 import importlib
-import os
-import datetime
-import time
-import warnings
-import io
-import csv
-import re
-import json
-import sys
-import ftplib
-import ast
-import winsound
-import base64
-import inspect
-
 modules = [
+    "os",
+    "time",
+    "warnings",
+    "io",
+    "csv",
+    "re",
+    "json",
+    "sys",
+    "ftplib",
+    "ast",
+    "winsound",
+    "base64",
+    "inspect",
     "requests",
-    "pandas",
     "boto3",
-    "tqdm",
-    "numpy",
     "pytz",
     "pyodbc",
-    "requests_oauthlib",
     "psycopg2",
-    "googleapiclient.discovery",
     "pandas_gbq",
-    "requests.auth",
-    "selenium",
-    "webdriver_manager",
-    "bs4",
+    "importlib.util",
     "botocore.exceptions",
-    "sklearn.feature_extraction.text",
-    "sklearn.multioutput",
-    "sklearn.ensemble",
-    "sklearn.preprocessing",
-    "sklearn.model_selection",
-    "sklearn.metrics"
+    "selenium.webdriver"
 ]
-
 for mod in modules:
     try:
         globals()[mod] = importlib.import_module(mod)
     except ImportError as e:
         print(f"[INFO] Failed to import {mod}: {str(e)}")
 
+modules = [
+    ("datetime" , "date"),
+    ("datetime" , "timedelta"),
+    ("datetime" , "datetime"),
+    ("requests_oauthlib" , "OAuth1"),
+    ("tqdm" , "tqdm"),
+    ("googleapiclient.discovery" , "build"),
+    ("google.oauth2" , "service_account"),
+    ("google.cloud" , "bigquery"),
+    ("requests.auth" , "HTTPBasicAuth"),
+    ("webdriver_manager.chrome" , "ChromeDriverManager"),
+    ("selenium.webdriver.common.by" , "By"),
+    ("selenium.webdriver.common.keys" , "Keys"),
+    ("selenium.webdriver.support.ui" , "WebDriverWait"),
+    ("bs4" , "BeautifulSoup"),
+    ("sklearn.feature_extraction.text" , "TfidfVectorizer"),
+    ("sklearn.multioutput" , "MultiOutputClassifier"),
+    ("sklearn.ensemble" , "RandomForestClassifier"),
+    ("sklearn.preprocessing" , "LabelEncoder"),
+    ("sklearn.model_selection" , "train_test_split"),
+    ("sklearn.metrics" , "accuracy_score")
+]
+for fr_mod, im_mod in modules:
+    try:
+        mod = importlib.import_module(fr_mod)
+        obj = getattr(mod, im_mod)
+        globals()[im_mod] = obj
+    except ImportError as e:
+        print(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
+
+modules = {
+    "pandas":  "pd",
+    "numpy":  "np",
+    "selenium.webdriver.support.expected_conditions": "EC"
+}
+for mod, alias in modules.items():
+    try:
+        globals()[alias] = importlib.import_module(mod)
+    except ImportError as e:
+        print(f"[INFO] Failed to import {mod} as {alias}: {str(e)}")
+
+modules = [
+    ("selenium.webdriver.chrome.service" , "Service", "ChromeService"),
+]
+for fr_mod, im_mod, name in modules:
+    try:
+        fr_mod = importlib.import_module(fr_mod)
+        obj = getattr(fr_mod, im_mod)
+        globals()[name] = obj
+    except ImportError as e:
+        print(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
+
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
     if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
         caller_globals[name] = globals()[name]
-
-
 
 
 
@@ -102,11 +136,11 @@ def load_data_via_query(
         chunks = []
         if not file_path:
             with pyodbc.connect(connection_string) as conn:
-                total_rows = pandas.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
+                total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
                 total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
-                for chunk in tqdm.tqdm(pandas.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
+                for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
                     chunks.append(chunk)
-            df = pandas.concat(chunks, ignore_index=True)
+            df = pd.concat(chunks, ignore_index=True)
             df.columns = df.columns.str.title()
             return df
         else:
@@ -116,7 +150,7 @@ def load_data_via_query(
                 total_rows = cursor.fetchone()[0]
                 total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
                 cursor.execute(sql_query)
-                with tqdm.tqdm(total=total_chunks, desc="Fetching rows") as pbar:
+                with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
                     if file_path:
                         if os.path.exists(file_path):
                             os.remove(file_path)
@@ -199,7 +233,7 @@ def upload_to_s3(
         clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
         csv_buffer.seek(0)
         data_size = len(csv_buffer.getvalue())
-        with tqdm.tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
+        with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
             def callback(bytes_transferred):
                 progress.update(bytes_transferred)
             bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
@@ -221,7 +255,7 @@ def upload_to_s3(
             return
         else:
             file_size = os.path.getsize(file_path)
-        progress = tqdm.tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
+        progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
         def upload_part(buffer, part_number):
             nonlocal total_bytes_uploaded
             buffer.seek(0)
@@ -361,8 +395,8 @@ def generate_open_cases_df(
     df[idCol] = df[idCol].fillna('').astype('str').str.upper().str.strip().apply(convert_to_int_or_keep)
     if excludeStatusList:
         df = df[~df[statusCol].isin(excludeStatusList)].copy()
-    open_df = pandas.DataFrame()
-    max_date = pandas.to_datetime(datetime.datetime.now(timezone).date())
+    open_df = pd.DataFrame()
+    max_date = pd.to_datetime(datetime.now(timezone).date())
     current_date = min_date
     while current_date <= max_date:
         active_df = df[
@@ -372,10 +406,10 @@ def generate_open_cases_df(
         active_df = active_df[~active_df[idCol].duplicated()]
         active_df['Age'] = (current_date - active_df[openDateCol]).dt.days
         active_df['Date'] = current_date
-        open_df = pandas.concat([open_df, active_df[
+        open_df = pd.concat([open_df, active_df[
             ['Date', 'Age', idCol]
         ]], ignore_index=True)
-        current_date += pandas.Timedelta(days=1)
+        current_date += pd.Timedelta(days=1)
     if not quantile_values:
         quantile_values = [int(open_df['Age'].quantile(i/n)) for i in range(n+1)]
     print(quantile_values)
@@ -395,29 +429,29 @@ def train_and_predict(
 
     # 2. Encode target columns
     output_encoders = {}
-    Y_encoded = pandas.DataFrame()
+    Y_encoded = pd.DataFrame()
     for col in target_cols:
-        le = sklearn.preprocessing.LabelEncoder()
+        le = LabelEncoder()
         Y_encoded[col] = le.fit_transform(labeled_df[col].astype(str))
         output_encoders[col] = le
 
     # 3. Train-test split
     X = labeled_df['combined_text']
     Y = Y_encoded
-    X_train, X_test, Y_train, Y_test = sklearn.model_selection.train_test_split(X, Y, test_size=0.2, random_state=42)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     # 4. TF-IDF vectorization
-    tfidf = sklearn.feature_extraction.text.TfidfVectorizer(max_features=500)
+    tfidf = TfidfVectorizer(max_features=500)
     X_train_tfidf = tfidf.fit_transform(X_train)
     X_test_tfidf = tfidf.transform(X_test)
 
     # 5. Train model
-    model = sklearn.multioutput.MultiOutputClassifier(sklearn.ensemble.RandomForestClassifier(random_state=42))
+    model = MultiOutputClassifier(RandomForestClassifier(random_state=42))
     model.fit(X_train_tfidf, Y_train)
 
     # 6. Evaluate model
     y_pred_array = model.predict(X_test_tfidf)
-    y_pred = pandas.DataFrame(y_pred_array, columns=Y_test.columns, index=Y_test.index)
+    y_pred = pd.DataFrame(y_pred_array, columns=Y_test.columns, index=Y_test.index)
 
     Y_test_decoded = Y_test.copy()
     for col in target_cols:
@@ -426,10 +460,10 @@ def train_and_predict(
 
     print("Per-column accuracy:")
     for col in target_cols:
-        acc = sklearn.metrics.accuracy_score(Y_test_decoded[col], y_pred[col])
+        acc = accuracy_score(Y_test_decoded[col], y_pred[col])
         print(f"{col}: {acc:.4f}")
 
-    exact_match_acc = numpy.mean(numpy.all(y_pred.values == Y_test_decoded.values, axis=1))
+    exact_match_acc = np.mean(np.all(y_pred.values == Y_test_decoded.values, axis=1))
     print(f"Exact match accuracy: {exact_match_acc:.4f}")
 
     # 7. Predict on new dataset
@@ -437,11 +471,11 @@ def train_and_predict(
     X_new_tfidf = tfidf.transform(unlabeled_df ['combined_text'])
 
     preds_array = model.predict(X_new_tfidf)
-    predicted_targets_df = pandas.DataFrame(preds_array, columns=target_cols)
+    predicted_targets_df = pd.DataFrame(preds_array, columns=target_cols)
     for col in target_cols:
         predicted_targets_df[col] = output_encoders[col].inverse_transform(predicted_targets_df[col])
 
-    final_predictions = pandas.concat([
+    final_predictions = pd.concat([
         unlabeled_df [input_cols].reset_index(drop=True),
         predicted_targets_df.reset_index(drop=True)
     ], axis=1)
@@ -451,9 +485,9 @@ def train_and_predict(
 def impute_by_group(df, group_col, target_col, method='median', mask=None):
 
     if mask is not None:
-        df.loc[mask, target_col] = df.loc[mask, target_col].replace(0, numpy.nan)
+        df.loc[mask, target_col] = df.loc[mask, target_col].replace(0, np.nan)
     else:
-        df[target_col] = df[target_col].replace(0, numpy.nan)
+        df[target_col] = df[target_col].replace(0, np.nan)
     group_stat = df.groupby(group_col)[target_col].transform(method)
     if mask is not None:
         df.loc[mask, target_col] = df.loc[mask, target_col].fillna(group_stat[mask])
@@ -480,12 +514,12 @@ def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Tota
 
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
-        sheet = googleapiclient.discovery.build('sheets', 'v4', developerKey=apiKey).spreadsheets()
+        sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
         sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=f"{sheetName}!A:Z").execute()
         sheet_values = sheet_data.get('values', [])
         if not sheet_values:
             raise ValueError("Google Sheet is empty or range is incorrect.")
-        df = pandas.DataFrame(sheet_values[1:], columns=sheet_values[0])
+        df = pd.DataFrame(sheet_values[1:], columns=sheet_values[0])
         return df
     except HttpError as e:
         raise Exception(f"Google Sheets API request failed: {e}")  
@@ -569,7 +603,7 @@ def get_full_resource(api_url):
     table_name = response.get('@odata.context', None).split('#')[-1]
     if total_number is not None:
         total_pages = total_number// 50 + (total_number % 50 > 0)
-        with tqdm.tqdm(total=total_pages, desc=f'Fetching "{table_name}"') as pbar:
+        with tqdm(total=total_pages, desc=f'Fetching "{table_name}"') as pbar:
             while True:
                 response = get_resource(api_url)
                 resources.extend(response['value'])
@@ -594,7 +628,7 @@ def get_full_resource(api_url):
                 print(f"All pages retrieved!")
                 break
 
-    df = pandas.DataFrame(resources)
+    df = pd.DataFrame(resources)
     return df, table_name
 
 def list_timestream_tables(timestream_write_client, database_name):
@@ -615,12 +649,12 @@ def fetch_data_from_timestream(timestream_query_client, query):
         if count_page['Rows']:
             total_rows = int(count_page['Rows'][0]['Data'][0]['ScalarValue'])
     if total_rows == 0:
-        return pandas.DataFrame()
+        return pd.DataFrame()
     all_rows = []
     column_headers = []
     page_iterator = paginator.paginate(QueryString=query)
     first_page = True
-    with tqdm.tqdm(total=total_rows, desc="Fetching Data", unit="row") as pbar:
+    with tqdm(total=total_rows, desc="Fetching Data", unit="row") as pbar:
         for page in page_iterator:
             if first_page:
                 column_headers = [col['Name'] for col in page['ColumnInfo']]
@@ -629,7 +663,7 @@ def fetch_data_from_timestream(timestream_query_client, query):
                 row_data = [value['ScalarValue'] if 'ScalarValue' in value else None for value in row['Data']]
                 all_rows.append(row_data)
                 pbar.update(1)
-    df = pandas.DataFrame(all_rows, columns=column_headers)
+    df = pd.DataFrame(all_rows, columns=column_headers)
     return df
 
 
@@ -647,8 +681,8 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
         write_file('log.txt' , f"{prompt}")
         raise
     try:
-        for index, row in tqdm.tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
-            timestamp = int(datetime.datetime.now().timestamp() * 1000)
+        for index, row in tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
+            timestamp = int(datetime.now().timestamp() * 1000)
             record = {
                 'Dimensions': [{'Name': dim, 'Value': str(row[dim])} for dim in df.columns.to_list()],
                 'MeasureName': '_',
@@ -711,8 +745,8 @@ def load_permissions_data(
     for user in processedAccess:
         for device in qualified_devices:
             default_permissions.append({'UserName': user, 'deviceId': device})
-    default_permissions_df = pandas.DataFrame(default_permissions)
-    updated_permissions_dataset = pandas.concat([permissions_dataset, default_permissions_df], ignore_index=True)
+    default_permissions_df = pd.DataFrame(default_permissions)
+    updated_permissions_dataset = pd.concat([permissions_dataset, default_permissions_df], ignore_index=True)
 
     if database_name and table_name:
         upload_to_timestream(timestream_write_client, updated_permissions_dataset[['UserName', 'deviceId']], database_name, table_name)
@@ -775,7 +809,7 @@ def get_ewons(base_url, developer_id, session_id=None):
         response_data = response.json()
         if response_data.get('success') == True:
             print(f"[SUCCESS] Retrieved Ewons!")
-            df = pandas.DataFrame(response_data.get('ewons'))
+            df = pd.DataFrame(response_data.get('ewons'))
             return df
         else:
             raise Exception()
@@ -807,7 +841,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
         if response.status_code == 200:
             response_text = response.text
             try:
-                soup = bs4.BeautifulSoup(response_text, 'html.parser')
+                soup = BeautifulSoup(response_text, 'html.parser')
                 rows = soup.find_all('tr')
                 parsed_data = {}
                 for row in rows:
@@ -826,7 +860,7 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
             except Exception as e:
                 print(f"[ERROR] Failed to parse HTML: {e}")
                 return {}
-            # soup = bs4.BeautifulSoup(response_text, 'html.parser')
+            # soup = BeautifulSoup(response_text, 'html.parser')
             # table = soup.find('table', {'class': 'edbt'})
             # parsed_data = {}
             # for row in table.find_all('tr'):
@@ -848,12 +882,12 @@ def fetch_iot_things(iot_client):
     things_df_list = []
     response = iot_client.list_things(maxResults=250)
     next_token = response.get('nextToken', None)
-    things_df_list.append(pandas.DataFrame(response['things']))
+    things_df_list.append(pd.DataFrame(response['things']))
     while next_token:
         response = iot_client.list_things(maxResults=250, nextToken=next_token)
-        things_df_list.append(pandas.DataFrame(response['things']))
+        things_df_list.append(pd.DataFrame(response['things']))
         next_token = response.get('nextToken', None)
-    things = pandas.concat(things_df_list, axis=0)    
+    things = pd.concat(things_df_list, axis=0)    
     return things
 
 
@@ -903,20 +937,20 @@ def delete_thing_and_certificates(iot_client, thing_name):
 def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
     print("[INFO] Restarting...")
     try:
-        options = selenium.webdriver.ChromeOptions()
+        options = webdriver.ChromeOptions()
         # options.add_argument("--headless")
         options.add_argument("--disable-extensions")
         # options.add_argument("--disable-logging")
         options.add_argument("--log-level=3")
-        driver = selenium.webdriver.Chrome(service=selenium.webdriver.chrome.service.Service(webdriver_manager.chrome.ChromeDriverManager().install()), options=options)
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         driver.get(f'http://{ip_address}')
-        wait = selenium.webdriver.support.ui.WebDriverWait(driver, wait_time)
+        wait = WebDriverWait(driver, wait_time)
 
         def find_and_act(element_id, action='click', text=None, max_attempts=10):
             attempts = 0
             while attempts < max_attempts:
                 try:
-                    element = wait.until(selenium.webdriver.support.expected_conditions.presence_of_element_located((selenium.webdriver.common.by.By.ID, element_id)))
+                    element = wait.until(EC.presence_of_element_located((By.ID, element_id)))
                     driver.execute_script("arguments[0].scrollIntoView(true);", element)
                     time.sleep(0.5)
                     if action == 'click':
@@ -924,7 +958,7 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
                     elif action == 'send_keys' and text is not None:
                         element.send_keys(text)
                     elif action == 'enter':
-                        element.send_keys(selenium.webdriver.common.keys.Keys.ENTER)
+                        element.send_keys(Keys.ENTER)
                     return True
 
                 except Exception as e:
@@ -943,7 +977,7 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
         if not find_and_act('btn_Reboot-btnInnerEl'): return False
 
         try:
-            reboot_message = wait.until(EC.presence_of_element_located((selenium.webdriver.common.by.By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
+            reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
             if reboot_message:
                 print("[INFO] Reboot message received.")
                 print("[SUCCESS] Device will reboot shortly!")
@@ -1110,7 +1144,7 @@ def stop_driver(ip_address, username, password):
     url = f"http://{ip_address}//rcgi.bin/jvmCmd?cmd=stop"  
 
     try:
-        response = requests.get(url, auth=requests.auth.HTTPBasicAuth(username, password))
+        response = requests.get(url, auth=HTTPBasicAuth(username, password))
         print()
         print()
 
@@ -1159,7 +1193,7 @@ def install_device_firmware(
                 firmware_size = len(firmware_data)
                 fp = io.BytesIO(firmware_data)
                 fp.seek(0)
-                with tqdm.tqdm.wrapattr(fp, "read", total=firmware_size, desc="Installing firmware", unit="B", unit_scale=True) as wrapped_fp:
+                with tqdm.wrapattr(fp, "read", total=firmware_size, desc="Installing firmware", unit="B", unit_scale=True) as wrapped_fp:
                     ftp.storbinary(f'STOR {firmware_file_name}', wrapped_fp, blocksize=32768)
                 print("[SUCCESS] Firmware install complete!")
                 return True
@@ -1185,7 +1219,7 @@ def timer_and_alert(seconds, sound_file):
         if seconds <= 0:
             winsound.PlaySound(sound_file, winsound.SND_FILENAME)
         else:
-            for _ in tqdm.tqdm(range(seconds), desc="[PENDING] Timer", unit="s"):
+            for _ in tqdm(range(seconds), desc="[PENDING] Timer", unit="s"):
                 time.sleep(1)
             winsound.PlaySound(sound_file, winsound.SND_FILENAME)
     except Exception as e:
@@ -1224,7 +1258,7 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
         if found_mask.any():
             itemsCategories.loc[itemsCategories['ItemId_SearchKey'] == keyword, 'Found'] = True
             itemsCategories.loc[(itemsCategories['Company'].isna())&(itemsCategories['ItemId_SearchKey'] == keyword), 'Company'] = companyName
-    itemsCategories_combined = pandas.concat([itemsCategories, itemsCategories_2], ignore_index=True)
+    itemsCategories_combined = pd.concat([itemsCategories, itemsCategories_2], ignore_index=True)
     upload_to_s3(s3_client = s3_client, data = itemsCategories_combined, bucket_name = 'manual-db', object_key = 'itemsCategories.csv')
     print(itemsCategories.Found.sum())
     itemsCategories = itemsCategories[~itemsCategories['CommonName'].duplicated()]
@@ -1232,12 +1266,12 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
     item = item.loc[item[itemLevels].isna().all(axis=1)].copy()
     item.drop(columns = itemLevels, inplace=True)
     item = item.merge(itemsCategories[['CommonName'] + itemLevels], on='CommonName', how = 'left')
-    item = pandas.concat([item, item_2], ignore_index=True)
+    item = pd.concat([item, item_2], ignore_index=True)
     item.loc[item.CommonName.isna(), 'CommonName'] = item['ItemName'].str[0:15]
     for itemLevel in itemLevels:
         item.loc[item[itemLevel].isna(), itemLevel] = 'OTHER'
-    MissingItem_row = pandas.DataFrame( { 'ItemId': ['MissingItem'], 'ItemNo': ['MissingItem'], 'ItemName':['MissingItem'], 'ItemDescription':['MissingItem'], 'ItemLevel1':['OTHER'], 'ItemLevel2':['OTHER'], 'ItemLevel3':['OTHER'], 'ItemLevel4':['OTHER'], 'ItemLevel5':['OTHER'], 'CommonName':['OTHER'] } )
-    item = pandas.concat([item, MissingItem_row], ignore_index=True)
+    MissingItem_row = pd.DataFrame( { 'ItemId': ['MissingItem'], 'ItemNo': ['MissingItem'], 'ItemName':['MissingItem'], 'ItemDescription':['MissingItem'], 'ItemLevel1':['OTHER'], 'ItemLevel2':['OTHER'], 'ItemLevel3':['OTHER'], 'ItemLevel4':['OTHER'], 'ItemLevel5':['OTHER'], 'CommonName':['OTHER'] } )
+    item = pd.concat([item, MissingItem_row], ignore_index=True)
     item['Company'] = companyName
     item = item[['Company'] + item.columns[:-1].tolist()]
     upload_to_s3(s3_client = s3_client, data = item, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
@@ -1275,7 +1309,7 @@ def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_n
         if found_mask.any():
             customersCategories.loc[customersCategories['CustId_SearchKey'] == keyword, 'Found'] = True
             customersCategories.loc[(customersCategories['Company'].isna())&(customersCategories['CustId_SearchKey'] == keyword), 'Company'] = companyName
-    customersCategories_combined = pandas.concat([customersCategories, customersCategories_2], ignore_index=True)
+    customersCategories_combined = pd.concat([customersCategories, customersCategories_2], ignore_index=True)
     upload_to_s3(s3_client = s3_client, data = customersCategories_combined, bucket_name = 'manual-db', object_key = 'customersCategories.csv')
     print(customersCategories.Found.sum())
     customersCategories = customersCategories[~customersCategories['CommonName'].duplicated()]
@@ -1283,7 +1317,7 @@ def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_n
     customers = customers.loc[customers[['ParentName'] + customerLevels].isna().all(axis=1)].copy()
     customers.drop(columns = ['ParentName'] + customerLevels, inplace=True)
     customers = customers.merge(customersCategories[['CommonName', 'ParentName'] + customerLevels], on='CommonName', how = 'left')
-    customers = pandas.concat([customers, customers_2], ignore_index=True)
+    customers = pd.concat([customers, customers_2], ignore_index=True)
     customers.loc[customers.CommonName.isna(), 'CommonName'] = customers['CustName'].str[0:15]
     customers.loc[customers.ParentName.isna(), 'ParentName'] = customers['CommonName']
     for customerLevel in customerLevels:
@@ -1318,13 +1352,13 @@ def process_qb_transactions_by_account(
     ]:
         txns, txnsLines = extract_transaction_header_line(transactions, txnsType)
         txns = txns[
-            (pandas.to_datetime(txns['DATE'], errors='coerce')>=start_date)&\
-            (pandas.to_datetime(txns['DATE'], errors='coerce')<=end_date)
+            (pd.to_datetime(txns['DATE'], errors='coerce')>=start_date)&\
+            (pd.to_datetime(txns['DATE'], errors='coerce')<=end_date)
         ].copy()
         txnsLines = txnsLines[
             (txnsLines['ACCNT'].str.upper().isin(list_of_accounts))&\
-            (pandas.to_datetime(txnsLines['DATE'], errors='coerce')>=start_date)&\
-            (pandas.to_datetime(txnsLines['DATE'], errors='coerce')<=end_date)
+            (pd.to_datetime(txnsLines['DATE'], errors='coerce')>=start_date)&\
+            (pd.to_datetime(txnsLines['DATE'], errors='coerce')<=end_date)
         ].copy()  
         txnsLines.rename(columns = {
             'SPLID':'TransactionId',
@@ -1385,7 +1419,7 @@ def process_qb_transactions_by_account(
             'AMOUNT':'Total'
         }, inplace = True)
         extra_txnsLines['ItemDescription'] = extra_txnsLines['ItemDescription'].astype('str').str.replace(r'\\n', ' ', regex=True)
-        extra_txnsLines[['ItemId', 'ItemNo', 'ItemName', 'CommonName']] = numpy.nan
+        extra_txnsLines[['ItemId', 'ItemNo', 'ItemName', 'CommonName']] = np.nan
         extra_txnsLines['Quantity'] = 0.0
         extra_txnsLines['Rate'] = 0.0
         extra_txnsLines = extra_txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'CommonName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
@@ -1393,8 +1427,8 @@ def process_qb_transactions_by_account(
         extra_txnsLines = extra_txnsLines[['Company'] + extra_txnsLines.columns[:-1].tolist()]
         extra_txns.drop(columns = ['Total'], inplace = True)
         if txnsType == 'GENERAL JOURNAL':    
-            txns = pandas.concat([txns, extra_txns[~extra_txns['TransactionId'].isin(txns['TransactionId'])]], ignore_index=True)
-            txnsLines = pandas.concat([txnsLines, extra_txnsLines], ignore_index=True)
+            txns = pd.concat([txns, extra_txns[~extra_txns['TransactionId'].isin(txns['TransactionId'])]], ignore_index=True)
+            txnsLines = pd.concat([txnsLines, extra_txnsLines], ignore_index=True)
         txns.TransactionId = txns.TransactionId.astype('str')
         txnsLines.TransactionId = txnsLines.TransactionId.astype('str')
         txns = txns.merge(
@@ -1448,13 +1482,13 @@ def process_qb_transactions_by_account(
     invoices = invoices.merge(customers[['CustNo', 'CustName', 'CommonName']], on = 'CustNo', how = 'left').copy()
     invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = invoices, df_name = 'invoices', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     #-----------------------------------------------------------------------------------------------------------
-    txns = pandas.concat([invoices, generalJournal, creditMemo, bills, deposits, payments, checks, creditCard], ignore_index=True)  
-    txnsLines = pandas.concat([invoicesLines, generalJournalLines, creditMemoLines, billsLines, depositsLines, paymentsLines, checksLines, creditCardLines], ignore_index=True)
+    txns = pd.concat([invoices, generalJournal, creditMemo, bills, deposits, payments, checks, creditCard], ignore_index=True)  
+    txnsLines = pd.concat([invoicesLines, generalJournalLines, creditMemoLines, billsLines, depositsLines, paymentsLines, checksLines, creditCardLines], ignore_index=True)
     #-----------------------------------------------------------------------------------------------------------
     txns.TransactionId = txns.TransactionId.astype('str')
     txnsLines.TransactionId = txnsLines.TransactionId.astype('str')
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
-    mismatched_txns = mismatched_txns[~numpy.isclose(mismatched_txns['subTotal'], mismatched_txns['Total_lin'], atol=0.1)]
+    mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['subTotal'], mismatched_txns['Total_lin'], atol=0.1)]
     print(f"{mismatched_txns.shape[0]} txns Total do not match orderline Total")
     txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
     txns['TransactionId'] = txns['TransactionId']
@@ -1476,7 +1510,7 @@ def read_excel_from_sharepoint(url):
             if file_get_url:
                 file_response = requests.get(file_get_url, stream=True)
                 file_size = int(file_response.headers.get('content-length', 0))
-                progress = tqdm.tqdm(total=file_size, unit='B', unit_scale=True, desc='Downloading Excel file')
+                progress = tqdm(total=file_size, unit='B', unit_scale=True, desc='Downloading Excel file')
                 xlsx_data = io.BytesIO()
                 for chunk in file_response.iter_content(chunk_size=1024 * 1024):
                     if chunk:
@@ -1484,7 +1518,7 @@ def read_excel_from_sharepoint(url):
                         progress.update(len(chunk))
                 progress.close()
                 xlsx_data.seek(0)
-                df = pandas.read_excel(xlsx_data, engine='openpyxl')
+                df = pd.read_excel(xlsx_data, engine='openpyxl')
                 return df
             else:
                 raise ValueError("FileGetUrl not found in WOPI context.")
@@ -1523,7 +1557,7 @@ def load_suiteql_data_via_query(
     query, 
     limit=1000
 ):
-    auth = requests_oauthlib.OAuth1(
+    auth = OAuth1(
         consumer_key,
         consumer_secret,
         token_key,
@@ -1540,7 +1574,7 @@ def load_suiteql_data_via_query(
     hasMore = True
     all_items = []
     total_results =0
-    with tqdm.tqdm(total=total_results, desc="Fetching data from NetSuite", unit="records") as pbar:
+    with tqdm(total=total_results, desc="Fetching data from NetSuite", unit="records") as pbar:
         while hasMore:
             suiteql_url = f'https://{realm}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit={limit}&offset={offset}'
             response = requests.post(suiteql_url, auth=auth, headers=headers, json={"q": query})
@@ -1559,7 +1593,7 @@ def load_suiteql_data_via_query(
                 raise Exception(f'Error executing SuiteQL query: {response.status_code}, {response.text}')
                 # hasMore = False
     # Convert results to DataFrame and return
-    df = pandas.DataFrame(all_items)
+    df = pd.DataFrame(all_items)
     return df
 
 
@@ -1574,7 +1608,7 @@ def read_csv_from_s3(
 ):
     obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
     file_size = obj['ContentLength']
-    progress = tqdm.tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
+    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
     def stream_with_progress(bytes_io):
         while True:
             chunk = bytes_io.read(1024 * 1024)
@@ -1589,14 +1623,14 @@ def read_csv_from_s3(
         csv_string = b''.join(stream).decode(encoding)
         csv_buffer = io.StringIO(csv_string)
         if dtype_str:
-            df = pandas.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
+            df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
         else:    
-            df = pandas.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
+            df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
     else:
         stream = stream_with_progress(body)
         xlsx_data = b''.join(stream)
         xlsx_buffer = io.BytesIO(xlsx_data)
-        df = pandas.read_excel(xlsx_buffer, engine='openpyxl')
+        df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     return df
 
 
@@ -1616,7 +1650,7 @@ def clean_df(
     col_to_date = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
     col_to_date = list(set(col_to_date))
     for col in col_to_date:
-        df[col] = pandas.to_datetime(df[col], errors='coerce')
+        df[col] = pd.to_datetime(df[col], errors='coerce')
     for col in set(df.columns)-set(id_column):
         df[col] = df[col].apply(lambda x: x.strip().upper() if isinstance(x, str) else x)
     if id_column:
@@ -1637,14 +1671,14 @@ def clean_df(
             # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
             upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
     if zip_code_columns:
-        invalid_zip_codes = pandas.DataFrame()
+        invalid_zip_codes = pd.DataFrame()
         valid_us_zip_regex = r"^\d{5}(\d{4})?$"
         valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"        
         for col in zip_code_columns:
             df[col] = df[col].astype(str).str.replace(' ','')
             df[col] = df[col].astype(str).str.replace('-','')            
             invalid_mask = ~(df[col].str.match(valid_us_zip_regex) | df[col].str.match(valid_ca_zip_regex))
-            invalid_zip_codes = pandas.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
+            invalid_zip_codes = pd.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
             df[col] = df[col].apply(lambda x: \
                                     x[0:5]+'-'+x[0:4] if isinstance(x, str) and re.match(valid_us_zip_regex, x) else \
@@ -1654,24 +1688,24 @@ def clean_df(
         upload_to_s3(s3_client = s3_client,  data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in zip_code_columns:
-                invalid_zip_codes[col] = numpy.nan
-            df = pandas.concat([df, invalid_zip_codes], ignore_index=True)        
+                invalid_zip_codes[col] = np.nan
+            df = pd.concat([df, invalid_zip_codes], ignore_index=True)        
     if state_columns:
-        invalid_states = pandas.DataFrame()
+        invalid_states = pd.DataFrame()
         valid_us_states = { "DC": "District of Columbia", "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming" }
         valid_ca_states = { "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba", "NB": "New Brunswick", "NL": "Newfoundland and Labrador", "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island", "QC": "Quebec", "SK": "Saskatchewan", "NT": "Northwest Territories", "NU": "Nunavut", "YT": "Yukon" }
         for col in state_columns:
             df[col] = df[col].astype(str).str.replace(' ','')
             df[col] = df[col].astype(str).str.replace('-','')
             invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
-            invalid_states = pandas.concat([invalid_states, df[invalid_mask]], ignore_index=True)
+            invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
         print(f"invalid_states found: {len(invalid_states)}")
         upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in state_columns:
-                invalid_states[col] = numpy.nan
-            df = pandas.concat([df, invalid_states], ignore_index=True)
+                invalid_states[col] = np.nan
+            df = pd.concat([df, invalid_states], ignore_index=True)
     if just_useful_columns:
         useful_columns = find_useful_columns(df)
         print(f"{len(useful_columns)} useful variables found!")
@@ -1688,7 +1722,7 @@ def group(
     x, 
     quantile_values
 ):
-    if pandas.isnull(x):
+    if pd.isnull(x):
         return None
     elif x <= quantile_values[1]:
         return f"{quantile_values[0]:03}-{quantile_values[1]:03}"
@@ -1722,7 +1756,7 @@ def write_file(
             f.write(data)
 
 def print_date_time():
-    now = datetime.datetime.now()
+    now = datetime.now()
     current_time = now.strftime("%D-%H:%M:%S")
     data = "Current Time = " + current_time
     return data
@@ -1738,10 +1772,10 @@ def correctCompleteDates(
     postCompletionStatuses,
     fallback_to_order_date=True
 ):
-    today = pandas.Timestamp(datetime.datetime.today().date())
+    today = pd.Timestamp(datetime.today().date())
 
     for col in [orderDateCol, completeDateCol, shipDateCol, invoiceDateCol, lastModDateCol]:
-        df[col] = pandas.to_datetime(df[col], errors='coerce')
+        df[col] = pd.to_datetime(df[col], errors='coerce')
         df[col] = df[col].mask(df[col] > today, today)
 
     postCompletionStatuses = set(postCompletionStatuses)
@@ -1773,7 +1807,7 @@ def convert_to_int_or_keep(
     x
 ):
     try:
-        return int(pandas.to_numeric(x))
+        return int(pd.to_numeric(x))
     except (ValueError, TypeError):
         return x
 
@@ -1813,7 +1847,7 @@ def read_iif_from_s3(
 
     iif_obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
     file_size = iif_obj['ContentLength']   
-    progress = tqdm.tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
+    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
 
     def stream_with_progress(bytes_io):
         while True:
@@ -1829,7 +1863,7 @@ def read_iif_from_s3(
     iif_string = b''.join(stream).decode(encoding)  
     iif_buffer = io.StringIO(iif_string)
     columns = [f'Column{i}' for i in range(1, 101)]
-    df = pandas.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
+    df = pd.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
 
     return df
 
@@ -1880,7 +1914,7 @@ def extract_lists(
     table
 ):
     df = transactions.copy()
-    columns = [ df[df['Column1'] == f'!{table}'][col].iloc[0] if not pandas.isna(df[df['Column1'] == f'!{table}'][col].iloc[0]) else col for col in df.columns ]
+    columns = [ df[df['Column1'] == f'!{table}'][col].iloc[0] if not pd.isna(df[df['Column1'] == f'!{table}'][col].iloc[0]) else col for col in df.columns ]
     df.columns = columns
     df = df[df[f'!{table}'] == f'{table}']
     df = df[[i for i in df.columns if 'Column' not in i]].copy()
@@ -1892,8 +1926,8 @@ def extract_transaction_header_line(
     trns_type
 ):
     df = transactions.copy()
-    df_columns = [ df[df['Column1'] == f'!TRNS'][col].item() if not pandas.isna(df[df['Column1'] == f'!TRNS'][col].item()) else col for col in df.columns ]
-    df_line_columns = [ df[df['Column1'] == f'!SPL'][col].item() if not pandas.isna(df[df['Column1'] == f'!SPL'][col].item()) else col for col in df.columns ]
+    df_columns = [ df[df['Column1'] == f'!TRNS'][col].item() if not pd.isna(df[df['Column1'] == f'!TRNS'][col].item()) else col for col in df.columns ]
+    df_line_columns = [ df[df['Column1'] == f'!SPL'][col].item() if not pd.isna(df[df['Column1'] == f'!SPL'][col].item()) else col for col in df.columns ]
     df = df[df['Column3'] == f'{trns_type}']
     df = df[~df['Column2'].duplicated()].copy()
     for Col in ['Column2', 'Column9']:
@@ -1931,7 +1965,7 @@ def replace_date(
     try:
         return row[date_col].replace(year=year, month=month, day=day)
     except ValueError:
-        last_valid_day = (pandas.Timestamp(f"{year}-{month}-01") + pandas.offsets.MonthEnd(0)).day
+        last_valid_day = (pd.Timestamp(f"{year}-{month}-01") + pd.offsets.MonthEnd(0)).day
         return row[date_col].replace(year=year, month=month, day=min(day, last_valid_day))
 
 def wait_for_cluster_available(
