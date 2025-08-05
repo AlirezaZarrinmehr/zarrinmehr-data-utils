@@ -27,42 +27,42 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[2]:
+# In[3]:
 
 
 import importlib
+import os
+import datetime
+import time
+import warnings
+import io
+import csv
+import re
+import json
+import sys
+import ftplib
+import ast
+import winsound
+import inspect
+import base64
 
 modules  = [
-    "os",
-    "datetime",
-    "time",
     "requests",
     "pandas",
-    "warnings",
     "boto3",
     "tqdm",
-    "io",
-    "csv",
-    "re",
     "numpy",
     "pytz",
-    "json",
     "pyodbc",
     "requests_oauthlib",
     "psycopg2",
     "googleapiclient.discovery",
     "pandas_gbq",
-    "sys",
     "requests.auth",
-    "ftplib",
     "selenium",
     "webdriver_manager",
     "bs4",
-    "ast",
-    "winsound",
     "botocore.exceptions",
-    "inspect",
-    "base64",
     "sklearn.feature_extraction.text",
     "sklearn.multioutput",
     "sklearn.ensemble",
@@ -75,7 +75,7 @@ for mod in modules:
     try:
         importlib.import_module(mod)
     except ImportError as e:
-        print("\n❌ Failed to import {mod}: {str(e)}")
+        print(f"[INFO] Failed to import {mod}: {str(e)}")
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
@@ -384,11 +384,11 @@ def generate_open_cases_df(
 
 
 def train_and_predict(
-    labeled_df: pandas.DataFrame,
-    unlabeled_df : pandas.DataFrame,
-    input_cols: list,
-    target_cols: list
-) -> pandas.DataFrame:
+    labeled_df,
+    unlabeled_df,
+    input_cols,
+    target_cols
+):
     # 1. Combine input text columns
     labeled_df['combined_text'] = labeled_df[input_cols].astype(str).agg(' '.join, axis=1)
 
