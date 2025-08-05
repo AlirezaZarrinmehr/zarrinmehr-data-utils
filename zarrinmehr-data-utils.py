@@ -83,6 +83,267 @@ for name in list(globals()):
 
 
 
+
+def load_data_via_query(
+        sql_query,
+        source_type,
+        connection_string=None,
+        project_id=None,
+        credentials=None,
+        chunksize=1000,
+        file_path=None
+):
+    print(f"\tRunning {sql_query}")
+    if source_type == "mssql":
+        if not connection_string:
+            raise ValueError("connection_string is required for MSSQL source.")
+        chunks = []
+        if not file_path:
+            with pyodbc.connect(connection_string) as conn:
+                total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
+                total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
+                for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
+                    chunks.append(chunk)
+            df = pd.concat(chunks, ignore_index=True)
+            df.columns = df.columns.str.title()
+            return df
+        else:
+            with pyodbc.connect(connection_string) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
+                total_rows = cursor.fetchone()[0]
+                total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
+                cursor.execute(sql_query)
+                with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
+                    if file_path:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                        with open(file_path, 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            first_chunk = True
+                            while True:
+                                chunk = cursor.fetchmany(chunksize)
+                                if not chunk:
+                                    break
+                                if first_chunk:
+                                    columns = [column[0] for column in cursor.description]
+                                    writer.writerow(columns)
+                                    first_chunk = False
+                                for row in chunk:
+                                    writer.writerow([str(value) for value in row])
+                                pbar.update(1)
+                    else:
+                        while True:
+                            chunk = cursor.fetchmany(chunksize)
+                            if not chunk:
+                                break
+                            chunks.extend(chunk)
+                            pbar.update(1)
+                        columns = [column[0] for column in cursor.description]
+                        data = [dict(zip(columns, row)) for row in chunks]
+                        return data
+
+    elif source_type == "bigquery":
+        if not (project_id and credentials):
+            raise ValueError("project_id and credentials are required for BigQuery source.")
+        df = pandas_gbq.read_gbq(sql_query, project_id=project_id, credentials=credentials)
+        df.columns = df.columns.str.title()
+        return df
+    else:
+        raise ValueError("source_type must be either 'mssql' or 'bigquery'")
+
+
+def upload_to_s3(
+    data,
+    bucket_name,
+    object_key,
+    s3_client,
+    CreateS3Bucket=False,
+    aws_region=None,
+    chunk_size=5 * 1024 * 1024,
+    file_path=None
+):
+
+    if CreateS3Bucket:
+        try:
+            buckets = s3_client.list_buckets()["Buckets"]
+            buckets = [bucket['Name'] for bucket in buckets]
+            if bucket_name not in buckets:
+                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{bucket_name}" created!'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            else:
+                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{bucket_name}" already exists.'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+        except Exception as e:
+            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+    if not file_path:
+        clean_data = data.copy()
+        for idx, dtype in enumerate(clean_data.dtypes):
+            if dtype == 'object' or dtype.name == 'string':
+                clean_data.iloc[:, idx] = (
+                    clean_data.iloc[:, idx]
+                    .fillna('')
+                    .astype(str)
+                    .str.replace(r'\r\n|\r|\n', ' ', regex=True)
+                    .str.replace(r'\\n', ' ', regex=True)
+                    .str.replace(r'\\', ' ', regex=True)
+                )
+        csv_buffer = io.StringIO()
+        clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
+        csv_buffer.seek(0)
+        data_size = len(csv_buffer.getvalue())
+        with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
+            def callback(bytes_transferred):
+                progress.update(bytes_transferred)
+            bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
+            s3_client.upload_fileobj(
+                Fileobj=bytes_buffer,
+                Bucket=bucket_name,
+                Key=object_key,
+                Callback=callback
+        )
+    else:
+        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=object_key)
+        parts = []
+        part_number = 1
+        total_bytes_uploaded = 0
+        if not os.path.getsize(file_path):
+            prompt = f'{print_date_time()}\t\tNo data in the table!'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+            return
+        else:
+            file_size = os.path.getsize(file_path)
+        progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
+        def upload_part(buffer, part_number):
+            nonlocal total_bytes_uploaded
+            buffer.seek(0)
+            response = s3_client.upload_part(
+                Bucket=bucket_name,
+                Key=object_key,
+                PartNumber=part_number,
+                UploadId=multipart_upload['UploadId'],
+                Body=buffer
+            )
+            uploaded_size = buffer.tell()
+            total_bytes_uploaded += uploaded_size
+            progress.update(uploaded_size)
+            return {
+                'PartNumber': part_number,
+                'ETag': response['ETag']
+            }
+        with open(file_path, 'r') as csv_file:
+            csv_reader = csv.reader(csv_file)
+            headers = next(csv_reader)
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
+            writer.writerow(headers)
+            for row in csv_reader:
+                writer.writerow(row)
+                if csv_buffer.tell() >= chunk_size:
+                    part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
+                    parts.append(part)
+                    part_number += 1
+                    csv_buffer = io.StringIO()
+                    writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
+                    writer.writerow(headers)
+            if csv_buffer.tell() > 0:
+                part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
+                parts.append(part)
+        progress.close()
+        s3_client.complete_multipart_upload(
+            Bucket=bucket_name,
+            Key=object_key,
+            UploadId=multipart_upload['UploadId'],
+            MultipartUpload={'Parts': parts}
+        )
+
+
+def process_data_to_s3(
+    tables,
+    s3_client,
+    bucket_name,
+    source_type,
+    connection_string=None,
+    project_id=None,
+    credentials=None,
+    max_retries=3,
+    CreateS3Bucket=False,
+    aws_region=None,
+    file_path=None
+):
+    for table, sql_query in tables.items():
+        for attempt in range(max_retries):
+            try:
+                if not file_path
+                    df = load_data_via_query(
+                        sql_query=sql_query,
+                        source_type=source_type,
+                        connection_string=connection_string,
+                        project_id=project_id,
+                        credentials=credentials
+                        file_path=file_path
+                    )
+                else:
+                    load_data_via_query(
+                        sql_query=sql_query,
+                        source_type=source_type,
+                        connection_string=connection_string,
+                        project_id=project_id,
+                        credentials=credentials
+                        file_path=file_path
+                    )
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+                break
+            except Exception as e:
+                prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+                time.sleep(60)
+        else:
+            prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+            continue
+
+        object_key = table + '.csv'
+        try:
+            if not file_path
+                upload_to_s3(
+                    data=df,
+                    bucket_name=bucket_name,
+                    object_key=object_key,
+                    s3_client=s3_client,
+                    CreateS3Bucket=CreateS3Bucket,
+                    aws_region=aws_region,
+                    file_path = file_path
+                )
+            else:
+                upload_to_s3(
+                    data=None,
+                    bucket_name=bucket_name,
+                    object_key=object_key,
+                    s3_client=s3_client,
+                    CreateS3Bucket=CreateS3Bucket,
+                    aws_region=aws_region,
+                    file_path = file_path
+                )
+            prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+        except Exception as e:
+            prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+
+
 def generate_open_cases_df(
     df,
     min_date,
@@ -930,110 +1191,6 @@ def timer_and_alert(seconds, sound_file):
         print(f"[ERROR] Failed to play sound: {e}")
 
 
-def upload_to_s3(
-    data,
-    bucket_name,
-    object_key,
-    s3_client,
-    CreateS3Bucket=False,
-    aws_region=None,
-    from_dataframe=True,
-    chunk_size=5 * 1024 * 1024
-):
-
-    if CreateS3Bucket:
-        try:
-            buckets = s3_client.list_buckets()["Buckets"]
-            buckets = [bucket['Name'] for bucket in buckets]
-            if bucket_name not in buckets:
-                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{bucket_name}" created!'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-            else:
-                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{bucket_name}" already exists.'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-        except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-    if from_dataframe:
-        clean_data = data.copy()
-        for idx, dtype in enumerate(clean_data.dtypes):
-            if dtype == 'object' or dtype.name == 'string':
-                clean_data.iloc[:, idx] = (
-                    clean_data.iloc[:, idx]
-                    .fillna('')
-                    .astype(str)
-                    .str.replace(r'\r\n|\r|\n', ' ', regex=True)
-                    .str.replace(r'\\n', ' ', regex=True)
-                    .str.replace(r'\\', ' ', regex=True)
-                )
-        csv_buffer = io.StringIO()
-        clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
-        csv_buffer.seek(0)
-        data_size = len(csv_buffer.getvalue())
-        with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
-            def callback(bytes_transferred):
-                progress.update(bytes_transferred)
-            bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
-            s3_client.upload_fileobj(
-                Fileobj=bytes_buffer,
-                Bucket=bucket_name,
-                Key=object_key,
-                Callback=callback
-        )
-    else:
-        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=object_key)
-        parts = []
-        part_number = 1
-        total_bytes_uploaded = 0
-        file_size = os.path.getsize(data)
-        progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
-        def upload_part(buffer, part_number):
-            nonlocal total_bytes_uploaded
-            buffer.seek(0)
-            response = s3_client.upload_part(
-                Bucket=bucket_name,
-                Key=object_key,
-                PartNumber=part_number,
-                UploadId=multipart_upload['UploadId'],
-                Body=buffer
-            )
-            uploaded_size = buffer.tell()
-            total_bytes_uploaded += uploaded_size
-            progress.update(uploaded_size)
-            return {
-                'PartNumber': part_number,
-                'ETag': response['ETag']
-            }
-        with open(data, 'r') as csv_file:
-            csv_reader = csv.reader(csv_file)
-            headers = next(csv_reader)
-            csv_buffer = io.StringIO()
-            writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
-            writer.writerow(headers)
-            for row in csv_reader:
-                writer.writerow(row)
-                if csv_buffer.tell() >= chunk_size:
-                    part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
-                    parts.append(part)
-                    part_number += 1
-                    csv_buffer = io.StringIO()
-                    writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
-                    writer.writerow(headers)
-            if csv_buffer.tell() > 0:
-                part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
-                parts.append(part)
-        progress.close()
-        s3_client.complete_multipart_upload(
-            Bucket=bucket_name,
-            Key=object_key,
-            UploadId=multipart_upload['UploadId'],
-            MultipartUpload={'Parts': parts}
-        )
-
 def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name):
 
     item = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = item, df_name = 'item', id_column = ['ItemId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1336,49 +1493,6 @@ def read_excel_from_sharepoint(url):
         raise Exception(f"[ERROR] Failed to fetch the URL. Status code: {response.status_code}")
 
 
-def process_data_to_s3(
-    tables,
-    s3_client,
-    bucket_name,
-    source_type,
-    connection_string=None,
-    project_id=None,
-    credentials=None,
-    max_retries=3,
-    CreateS3Bucket=False,
-    aws_region=None
-):
-    for table, sql_query in tables.items():
-        for attempt in range(max_retries):
-            try:
-                df = load_data_via_query(sql_query=sql_query, source_type=source_type, connection_string=connection_string, project_id=project_id, credentials=credentials)
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-                break
-            except Exception as e:
-                prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-                time.sleep(60)
-        else:
-            prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-            continue
-
-        object_key = table + '.csv'
-        try:
-            upload_to_s3(data=df, bucket_name=bucket_name, object_key=object_key, s3_client=s3_client, CreateS3Bucket=CreateS3Bucket, aws_region=aws_region)
-            prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-        except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-
-
 def generate_table_select_queries(
     project_id,
     bigquery_client,
@@ -1446,74 +1560,6 @@ def load_suiteql_data_via_query(
     # Convert results to DataFrame and return
     df = pd.DataFrame(all_items)
     return df
-
-
-def load_data_via_query(
-        sql_query,
-        source_type,
-        connection_string=None,
-        project_id=None,
-        credentials=None,
-        chunksize=1000,
-        to_dataframe=True,
-        output_file=None
-):
-    print(f"\tRunning {sql_query}")
-    if source_type == "mssql":
-        if not connection_string:
-            raise ValueError("connection_string is required for MSSQL source.")
-        chunks = []
-        if to_dataframe:
-            with pyodbc.connect(connection_string) as conn:
-                total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
-                total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
-                for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
-                    chunks.append(chunk)
-            df = pd.concat(chunks, ignore_index=True)
-            df.columns = df.columns.str.title()
-            return df
-        else:
-            with pyodbc.connect(connection_string) as conn:
-                cursor = conn.cursor()
-                cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
-                total_rows = cursor.fetchone()[0]
-                total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
-                cursor.execute(sql_query)
-                with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
-                    if output_file:
-                        with open(output_file, 'w', newline='') as f:
-                            writer = csv.writer(f)
-                            first_chunk = True
-                            while True:
-                                chunk = cursor.fetchmany(chunksize)
-                                if not chunk:
-                                    break
-                                if first_chunk:
-                                    columns = [column[0] for column in cursor.description]
-                                    writer.writerow(columns)
-                                    first_chunk = False
-                                for row in chunk:
-                                    writer.writerow([str(value) for value in row])
-                                pbar.update(1)
-                    else:
-                        while True:
-                            chunk = cursor.fetchmany(chunksize)
-                            if not chunk:
-                                break
-                            chunks.extend(chunk)
-                            pbar.update(1)
-                        columns = [column[0] for column in cursor.description]
-                        data = [dict(zip(columns, row)) for row in chunks]
-                        return data
-
-    elif source_type == "bigquery":
-        if not (project_id and credentials):
-            raise ValueError("project_id and credentials are required for BigQuery source.")
-        df = pandas_gbq.read_gbq(sql_query, project_id=project_id, credentials=credentials)
-        df.columns = df.columns.str.title()
-        return df
-    else:
-        raise ValueError("source_type must be either 'mssql' or 'bigquery'")
 
 
 def read_csv_from_s3(
