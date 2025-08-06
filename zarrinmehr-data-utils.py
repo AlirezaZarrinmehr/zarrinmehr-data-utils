@@ -27,7 +27,7 @@ fetch_data_from_timestream(timestream_query_client, query
 
 # ## Functions
 
-# In[3]:
+# In[2]:
 
 
 import importlib
@@ -248,13 +248,7 @@ def upload_to_s3(
         parts = []
         part_number = 1
         total_bytes_uploaded = 0
-        if not os.path.getsize(file_path):
-            prompt = f'{print_date_time()}\t\tNo data in the table!'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-            return
-        else:
-            file_size = os.path.getsize(file_path)
+        file_size = os.path.getsize(file_path)
         progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
         def upload_part(buffer, part_number):
             nonlocal total_bytes_uploaded
@@ -350,7 +344,12 @@ def process_data_to_s3(
             continue
         object_key = table + '.csv'
         try:
+            prompt = f'{print_date_time()}\t\t[INFO] "{object_key}" table is empty and was not loaded to S3 "{bucket_name}" bucket !'
             if not file_path:
+                if df.empty:
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    continue
                 upload_to_s3(
                     data=df,
                     bucket_name=bucket_name,
@@ -358,9 +357,12 @@ def process_data_to_s3(
                     s3_client=s3_client,
                     CreateS3Bucket=CreateS3Bucket,
                     aws_region=aws_region,
-                    file_path = file_path
                 )
             else:
+                if not os.path.getsize(file_path):
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    continue
                 upload_to_s3(
                     data=None,
                     bucket_name=bucket_name,
