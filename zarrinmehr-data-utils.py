@@ -127,7 +127,8 @@ def load_data_via_query(
         project_id=None,
         credentials=None,
         chunksize=1000,
-        file_path=None
+        file_path=None,
+        encoding='utf-8'
 ):
     print(f"\tRunning {sql_query}")
     if source_type == "mssql":
@@ -171,7 +172,7 @@ def load_data_via_query(
                 with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
                         if os.path.exists(file_path):
                             os.remove(file_path)
-                        with open(file_path, 'w', newline='') as f:
+                        with open(file_path, 'w', newline='', encoding=encoding) as f:
                             writer = csv.writer(f)
                             first_chunk = True
                             while True:
@@ -312,7 +313,8 @@ def process_data_to_s3(
     max_retries=3,
     CreateS3Bucket=False,
     aws_region=None,
-    file_path=None
+    file_path=None,
+    encoding='utf-8'
 ):
     for table, sql_query in tables.items():
         for attempt in range(max_retries):
@@ -332,7 +334,8 @@ def process_data_to_s3(
                         connection_string=connection_string,
                         project_id=project_id,
                         credentials=credentials,
-                        file_path=file_path
+                        file_path=file_path,
+                        encoding=encoding
                     )
                 prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
                 print(prompt)
