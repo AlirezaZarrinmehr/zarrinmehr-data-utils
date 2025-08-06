@@ -134,7 +134,7 @@ def load_data_via_query(
         if not connection_string:
             raise ValueError("connection_string is required for MSSQL source.")
         chunks = []
-        if not file_path:
+        try:
             with pyodbc.connect(connection_string) as conn:
                 total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
                 total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
@@ -143,7 +143,7 @@ def load_data_via_query(
             df = pd.concat(chunks, ignore_index=True)
             df.columns = df.columns.str.title()
             return df
-        else:
+        except:
             with pyodbc.connect(connection_string) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
