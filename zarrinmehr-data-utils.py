@@ -134,16 +134,34 @@ def load_data_via_query(
         if not connection_string:
             raise ValueError("connection_string is required for MSSQL source.")
         chunks = []
-        try:
-            with pyodbc.connect(connection_string) as conn:
-                total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
-                total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
-                for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
-                    chunks.append(chunk)
-            df = pd.concat(chunks, ignore_index=True)
-            df.columns = df.columns.str.title()
-            return df
-        except:
+        if not file_path:
+            try:
+                with pyodbc.connect(connection_string) as conn:
+                    total_rows = pd.read_sql_query("SELECT COUNT(*) FROM ({}) subquery".format(sql_query), conn).iloc[0, 0]
+                    total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
+                    for chunk in tqdm(pd.read_sql_query(sql_query, conn, chunksize=chunksize), total=total_chunks):
+                        chunks.append(chunk)
+                df = pd.concat(chunks, ignore_index=True)
+                df.columns = df.columns.str.title()
+                return df
+            except:
+                with pyodbc.connect(connection_string) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
+                    total_rows = cursor.fetchone()[0]
+                    total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
+                    cursor.execute(sql_query)
+                    with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
+                        while True:
+                            chunk = cursor.fetchmany(chunksize)
+                            if not chunk:
+                                break
+                            chunks.extend(chunk)
+                            pbar.update(1)
+                        columns = [column[0] for column in cursor.description]
+                        data = [dict(zip(columns, row)) for row in chunks]
+                        return data
+        else:
             with pyodbc.connect(connection_string) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
@@ -151,7 +169,6 @@ def load_data_via_query(
                 total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
                 cursor.execute(sql_query)
                 with tqdm(total=total_chunks, desc="Fetching rows") as pbar:
-                    if file_path:
                         if os.path.exists(file_path):
                             os.remove(file_path)
                         with open(file_path, 'w', newline='') as f:
@@ -168,16 +185,6 @@ def load_data_via_query(
                                 for row in chunk:
                                     writer.writerow([str(value) for value in row])
                                 pbar.update(1)
-                    else:
-                        while True:
-                            chunk = cursor.fetchmany(chunksize)
-                            if not chunk:
-                                break
-                            chunks.extend(chunk)
-                            pbar.update(1)
-                        columns = [column[0] for column in cursor.description]
-                        data = [dict(zip(columns, row)) for row in chunks]
-                        return data
 
     elif source_type == "bigquery":
         if not (project_id and credentials):
@@ -316,8 +323,7 @@ def process_data_to_s3(
                         source_type=source_type,
                         connection_string=connection_string,
                         project_id=project_id,
-                        credentials=credentials,
-                        file_path=file_path
+                        credentials=credentials
                     )
                 else:
                     load_data_via_query(
