@@ -119,7 +119,6 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
-
 def load_data_via_query(
         sql_query,
         source_type,
@@ -233,6 +232,7 @@ def upload_to_s3(
                 clean_data.iloc[:, idx] = (
                     clean_data.iloc[:, idx]
                     .fillna('')
+                    .apply(lambda x: x.hex() if isinstance(x, bytes) else str(x))
                     .astype(str)
                     .str.replace(r'\r\n|\r|\n', ' ', regex=True)
                     .str.replace(r'\\n', ' ', regex=True)
