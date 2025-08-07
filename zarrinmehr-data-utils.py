@@ -205,7 +205,8 @@ def upload_to_s3(
     CreateS3Bucket=False,
     aws_region=None,
     chunk_size=5 * 1024 * 1024,
-    file_path=None
+    file_path=None,
+    encoding='utf-8'
 ):
 
     if CreateS3Bucket:
@@ -238,7 +239,7 @@ def upload_to_s3(
                     .str.replace(r'\\', ' ', regex=True)
                 )
         csv_buffer = io.StringIO()
-        clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding='utf-8')
+        clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding=encoding)
         csv_buffer.seek(0)
         data_size = len(csv_buffer.getvalue())
         with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
@@ -366,6 +367,7 @@ def process_data_to_s3(
                     s3_client=s3_client,
                     CreateS3Bucket=CreateS3Bucket,
                     aws_region=aws_region,
+                    encoding=encoding
                 )
             else:
                 if not os.path.getsize(file_path):
@@ -379,7 +381,8 @@ def process_data_to_s3(
                     s3_client=s3_client,
                     CreateS3Bucket=CreateS3Bucket,
                     aws_region=aws_region,
-                    file_path = file_path
+                    file_path = file_path,
+                    encoding=encoding
                 )
             prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
             print(prompt)
