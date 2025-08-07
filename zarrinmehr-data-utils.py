@@ -276,7 +276,7 @@ def upload_to_s3(
                 'PartNumber': part_number,
                 'ETag': response['ETag']
             }
-        with open(file_path, 'r') as csv_file:
+        with open(file_path, 'r', encoding=encoding) as csv_file:
             csv_reader = csv.reader(csv_file)
             headers = next(csv_reader)
             csv_buffer = io.StringIO()
