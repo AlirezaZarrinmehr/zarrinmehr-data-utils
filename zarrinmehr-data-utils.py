@@ -119,6 +119,125 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
+def get_reporting_period_label(latest_date):
+    date_diff_days = (datetime.today().date() - latest_date.date()).days
+    period_thresholds = {
+        7: '7 days',
+        30: '1 month',
+        90: '3 months',
+        180: '6 months',
+        365: '1 year',
+        3 * 365: '3 years',
+        5 * 365: '5 years',
+        10 * 365: '10 years',
+    }
+    for threshold in sorted(period_thresholds):
+        if date_diff_days < threshold:
+            return period_thresholds[threshold]
+    return 'All time'
+
+
+def get_exchange_rates(
+    from_currency,
+    to_currency,
+    frequency='daily',
+    reporting_period='7 days',
+    max_attempts = 10
+):
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+    driver.get('https://www.ofx.com/en-us/forex-news/historical-exchange-rates/')
+    wait = WebDriverWait(driver, 120)
+
+    def find_and_act(element_id, action='click', text=None, max_attempts=max_attempts):
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                element = wait.until(EC.presence_of_element_located((By.ID, element_id)))
+                driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                time.sleep(0.5)
+                if action == 'click':
+                    element.click()
+                elif action == 'send_keys' and text is not None:
+                    element.send_keys(text)
+                elif action == 'enter':
+                    element.send_keys(Keys.ENTER)
+                return True
+
+            except Exception as e:
+                print(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
+                attempts += 1
+                time.sleep(1)
+        print(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
+        return False
+
+    find_and_act("react-select-ofx-historical-rates-select-from-field-input", action='send_keys', text=from_currency)
+    find_and_act("react-select-ofx-historical-rates-select-from-field-input", action='enter')
+    find_and_act("react-select-ofx-historical-rates-select-to-field-input", action='send_keys', text=to_currency)
+    find_and_act("react-select-ofx-historical-rates-select-to-field-input", action='enter')
+    find_and_act(f"choice_frequency_{frequency}")
+    find_and_act("react-select-ofx-historical-rates-select-period-field-input", action='send_keys', text=reporting_period)
+    find_and_act("react-select-ofx-historical-rates-select-period-field-input", action='enter')
+    table = driver.find_element(By.CLASS_NAME, "ofx-historical-rates__table")
+    old_table_html = table.get_attribute("innerHTML")
+    retrieve_button = wait.until(EC.element_to_be_clickable(
+        (By.CSS_SELECTOR, "button.wp-block-button__link")
+    ))
+    retrieve_button.click()
+    time.sleep(1)
+    wait.until(lambda d: d.find_element(By.CLASS_NAME, "ofx-historical-rates__table").get_attribute("innerHTML") != old_table_html)
+    table = driver.find_element(By.CLASS_NAME, "ofx-historical-rates__table")
+    rows = table.find_elements(By.XPATH, ".//tbody/tr")
+    data = []
+    for row in rows:
+        cols = row.find_elements(By.TAG_NAME, "td")
+        if len(cols) == 2:
+            date = cols[0].text.strip()
+            rate = cols[1].text.strip()
+            data.append([date, rate])
+    driver.quit()
+    df = pd.DataFrame(data, columns=["Date", f"{from_currency}/{to_currency}"])
+    df = df.loc[df['Date']!='Average']
+    df['Date']= pd.to_datetime(df['Date'], errors='coerce')
+    return df
+
+
+def process_exchange_rates(
+    from_currency,
+    to_currency,
+    s3_client,
+    bucket_name,
+    object_key,
+    aws_region=None,
+    CreateS3Bucket=True
+):
+
+    try:
+        df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key)
+        df['Date']= pd.to_datetime(df['Date'], errors='coerce')
+        reporting_period = get_reporting_period_label(df['Date'].max())
+        dfNew = get_exchange_rates(
+            from_currency=from_currency,
+            to_currency=to_currency,
+            frequency='daily',
+            reporting_period=reporting_period
+        )
+        df = pd.concat([df[df['Date'] < dfNew['Date'].min()], dfNew], ignore_index=True)
+    except:
+        df = get_exchange_rates(
+            from_currency=from_currency,
+            to_currency=to_currency,
+            frequency='daily',
+            reporting_period='All time'
+        )
+
+    upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, aws_region=aws_region)
+    df[f'{from_currency}/{to_currency}'] = pd.to_numeric(df[f'{from_currency}/{to_currency}'], errors='coerce')
+    dfAvg = df[df['Date'].dt.day != 1].groupby([df['Date'].dt.year, df['Date'].dt.month]).agg({f'{from_currency}/{to_currency}': 'mean'})
+    dfAvg.index.set_names(['Year', 'Month'], inplace=True)
+
+    return dfAvg
+
+
 def load_data_via_query(
         sql_query,
         source_type,
