@@ -52,8 +52,7 @@ modules = [
     "psycopg2",
     "pandas_gbq",
     "importlib.util",
-    "botocore.exceptions",
-    "selenium.webdriver"
+    "botocore.exceptions"
 ]
 for mod in modules:
     try:
@@ -94,7 +93,8 @@ for fr_mod, im_mod in modules:
 modules = {
     "pandas":  "pd",
     "numpy":  "np",
-    "selenium.webdriver.support.expected_conditions": "EC"
+    "selenium.webdriver.support.expected_conditions": "EC",
+    "selenium.webdriver": "webdriver"
 }
 for mod, alias in modules.items():
     try:
