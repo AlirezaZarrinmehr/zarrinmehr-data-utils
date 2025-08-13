@@ -291,7 +291,7 @@ def process_qb_transactions(
     return txns, txnsLines
 
 def process_s50_transactions(
-    list_of_accounts
+    list_of_accounts,
     companyName,
     JrnlHdr,
     JrnlRow,
