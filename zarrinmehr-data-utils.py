@@ -442,6 +442,17 @@ def process_s50_transactions(
     
 
 def process_s50_orders(
+    companyName,
+    JrnlHdr,
+    JrnlRow,
+    employees,
+    billToAdds,
+    item,
+    customers,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name,
     txnsType,
     txnsType2,
     txnsType3,
