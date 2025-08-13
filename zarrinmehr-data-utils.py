@@ -296,6 +296,7 @@ def process_s50_transactions(
     JrnlHdr,
     JrnlRow,
     employees,
+    billToAdds,
     item,
     customers,
     start_date,
