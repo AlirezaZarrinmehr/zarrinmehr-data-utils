@@ -295,6 +295,7 @@ def process_s50_transactions(
     companyName,
     JrnlHdr,
     JrnlRow,
+    employees,
     item,
     customers,
     start_date,
