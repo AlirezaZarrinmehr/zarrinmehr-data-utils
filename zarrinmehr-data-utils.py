@@ -448,7 +448,7 @@ def process_s50_orders(
     employees,
     billToAdds,
     item,
-    customers,
+    customersORvendors,
     start_date,
     end_date,
     s3_client,
@@ -460,6 +460,7 @@ def process_s50_orders(
     txnsType5,
     rename_map,
     orderCloseDates,
+    DBIA,
     itemsCategoriesV3
 ):
     #------------------------------------------------------------
