@@ -172,8 +172,8 @@ def process_qb_transactions(
         txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
         txnsLines.ItemId = txnsLines.ItemId.astype('str')
         item.ItemId = item.ItemId.astype('str')
-        txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName', 'CommonName']], on='ItemId', how='left')
-        txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'CommonName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
         txnsLines['Company'] = companyName
         txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
         txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
