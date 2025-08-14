@@ -524,7 +524,7 @@ def process_s50_orders(
     txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].astype(str)
     txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].apply(convert_to_int_or_keep)
     txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float') * -1
+    txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float')
     txnsLines['Quantity'] = txnsLines['Quantity'].astype('str').str.replace(',', '').astype('float')
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
