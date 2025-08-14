@@ -494,7 +494,7 @@ def process_s50_orders(
     txns_df[f'{txnsType2}No'] = txns_df[f'{txnsType2}No'].astype(str).apply(convert_to_int_or_keep)
     txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txns_df['Total'] = txns_df['Total'].astype('str').str.replace(',', '').astype('float')
+    txns_df['Total'] = txns_df['Total'].astype('str').str.replace(',', '').astype('float')*-1
     txns_df[f'{txnsType2}Status'] = txns_df[f'{txnsType2}Status'].astype('str').replace({'1': 'Closed', '0': 'Open'})
     txns_df[txnsType4] = txns_df[txnsType4].fillna('').str.split(':').str[-1]    
     txns_df.drop(columns=['ShipDate'], inplace=True)
