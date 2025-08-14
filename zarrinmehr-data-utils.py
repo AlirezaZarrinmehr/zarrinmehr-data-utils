@@ -557,7 +557,7 @@ def process_s50_orders(
         
         itemsCategoriesV3_pred = ordersLines[key_cols].merge(itemsCategoriesV3[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
         itemsCategoriesV3_pred = itemsCategoriesV3_pred[itemsCategoriesV3_pred['_merge']=='left_only']
-        if not itemsCategoriesV3_pred.empty:
+        if not itemsCategoriesV3_pred.empty and not itemsCategoriesV3.empty:
             itemsCategoriesV3_pred = train_and_predict(
                 labeled_df = itemsCategoriesV3.dropna().sample(len(itemsCategoriesV3) if len(itemsCategoriesV3)<10000 else 10000),
                 unlabeled_df  = itemsCategoriesV3_pred,
