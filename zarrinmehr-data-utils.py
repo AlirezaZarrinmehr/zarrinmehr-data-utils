@@ -1852,7 +1852,7 @@ def timer_and_alert(seconds, sound_file):
         print(f"[ERROR] Failed to play sound: {e}")
 
 
-def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA=False, itemsCategoriesV3=None):
+def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA=False, itemsCategoriesV3=None, txnsLines=None):
 
     if DBIA:
         key_cols = ['ItemId', 'ItemDescription']
