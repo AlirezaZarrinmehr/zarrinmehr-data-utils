@@ -549,36 +549,17 @@ def process_s50_orders(
     orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
     orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
 
-    if DBIA:
-        
-        key_cols = ['ItemId', 'ItemDescription']
-        for col in key_cols:
-            ordersLines[col] = ordersLines[col].fillna('').astype('str').str.upper().str.strip()
-        
-        itemsCategoriesV3_pred = ordersLines[key_cols].merge(itemsCategoriesV3[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
-        itemsCategoriesV3_pred = itemsCategoriesV3_pred[itemsCategoriesV3_pred['_merge']=='left_only']
-        if not itemsCategoriesV3_pred.empty and not itemsCategoriesV3.empty:
-            itemsCategoriesV3_pred = train_and_predict(
-                labeled_df = itemsCategoriesV3.dropna().sample(len(itemsCategoriesV3) if len(itemsCategoriesV3)<10000 else 10000),
-                unlabeled_df  = itemsCategoriesV3_pred,
-                input_cols = ['ItemId', 'ItemDescription'],
-                target_cols = ['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5', 'CommonName']
-            )
-            itemsCategoriesV3_pred['CommonName'] = 'ITEM MISSING : LEVELS ARE PREDICTED'
-            itemsCategoriesV3_pred.reset_index(drop=True, inplace=True)
-            itemsCategoriesV3_pred.index = itemsCategoriesV3_pred.index + 1 + itemsCategoriesV3['index'].astype('int').max()
-            itemsCategoriesV3_pred.reset_index(inplace=True)
-            itemsCategoriesV3_pred['index'] = itemsCategoriesV3_pred['index'].astype('int').astype('str')
-            itemsCategoriesV3 = pd.concat([itemsCategoriesV3, itemsCategoriesV3_pred], ignore_index=True)
-        
-        item_df = itemsCategoriesV3.merge(item[['ItemId', 'ItemNo', 'ItemName']], on ='ItemId', how ='left').rename(columns = {'ItemId':'ERPItemId'}).rename(columns = {'index':'ItemId'}).copy()
-        item_df['Company'] = companyName
-        item_df = item_df[['Company'] + item_df.columns[:-1].tolist()]
-        upload_to_s3(s3_client = s3_client, data = item_df, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
-        
-        ordersLines = ordersLines.merge(itemsCategoriesV3[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {'ItemId':'ERPItemId'}).rename(columns = {'index':'ItemId'}).copy()
-        ordersLines.drop(columns = ['ERPItemId'], inplace = True)
-
+    #-------------------------------------
+    ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
+        item, 
+        companyName, 
+        s3_client, 
+        s3_bucket_name, 
+        DBIA, 
+        itemsCategoriesV3,
+        ordersLines
+    )
+    #-----------------------------------------------------------------------------------------------------------
     orderTypes = ordersLines.merge(
                         itemsCategoriesV3[['index', 'ItemLevel2']] \
                         .rename(columns = {'index':'ItemId'}) \
