@@ -306,7 +306,8 @@ def process_qb_orders(
     txnsType5,
     orderCloseDates,
     DBIA,
-    itemsCategoriesV3
+    itemsCategoriesV3,
+    SalesOrderLinkedTxn
 ):
     prompt = f'{txnsType2}...'
     print(prompt)
@@ -481,18 +482,9 @@ def process_qb_orders(
         'InstallDate'
     ] = np.nan
     #-----------------------------------------------------------------------------------------------------------
-    SalesOrderLinkedTxn = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrderLinkedTxn.xlsx', encoding = 'Windows-1252', is_csv_file=False)
-    SalesOrderLinkedTxn = SalesOrderLinkedTxn[SalesOrderLinkedTxn['LinkedTxnTxnType']=='Invoice'].copy()
-    SalesOrderLinkedTxn.rename(columns = {
-        'RefNumber':f'{txnsType2}No',
-        'LinkedTxnRefNumber':'TransactionNo',                   
-    }, inplace = True)
-    SalesOrderLinkedTxn = SalesOrderLinkedTxn[[f'{txnsType2}No','TransactionNo']].copy()
-    SalesOrderLinkedTxn.TransactionNo = SalesOrderLinkedTxn.TransactionNo.astype(str)
-    txns.TransactionNo = txns.TransactionNo.astype(str)
     SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].astype(str)
     ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].astype(str)
-    ordersLines = ordersLines.merge(SalesOrderLinkedTxn.merge(txns[['TransactionNo', 'TransactionDate']], on='TransactionNo', how = 'left').drop(columns=['TransactionNo']).dropna().drop_duplicates(subset=[f'{txnsType2}No']).rename(columns={'TransactionDate':'InvoiceDate'}), on = f'{txnsType2}No', how = 'left')
+    ordersLines = ordersLines.merge(SalesOrderLinkedTxn, on = f'{txnsType2}No', how = 'left')
     #-----------------------------------------------------------------------------------------------------------
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype(str)
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype(str)
