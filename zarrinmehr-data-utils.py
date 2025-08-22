@@ -2062,11 +2062,11 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         itemsCategoriesV3_pred = itemsCategoriesV3_pred[itemsCategoriesV3_pred['_merge']=='left_only']
         if not itemsCategoriesV3_pred.empty and not itemsCategoriesV3.empty:
             labeled_df = itemsCategoriesV3.dropna().sample(len(itemsCategoriesV3) if len(itemsCategoriesV3)<10000 else 10000)
-            labeled_df['target_col'] = labeled_df['ItemLevel1'].fillna('') + ' :: ' + \
-                                        labeled_df['ItemLevel2'].fillna('') + ' :: ' + \
-                                        labeled_df['ItemLevel3'].fillna('') + ' :: ' + \
-                                        labeled_df['ItemLevel4'].fillna('') + ' :: ' + \
-                                        labeled_df['ItemLevel5'].fillna('') + ' :: ' + \
+            labeled_df['target_col'] = labeled_df['ItemLevel1'].fillna('') + ' :|: ' + \
+                                        labeled_df['ItemLevel2'].fillna('') + ' :|: ' + \
+                                        labeled_df['ItemLevel3'].fillna('') + ' :|: ' + \
+                                        labeled_df['ItemLevel4'].fillna('') + ' :|: ' + \
+                                        labeled_df['ItemLevel5'].fillna('') + ' :|: ' + \
                                         labeled_df['CommonName'].fillna('')
             itemsCategoriesV3_pred = train_and_predict(
                 labeled_df = labeled_df,
@@ -2074,7 +2074,7 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
                 input_cols = ['ItemId', 'ItemDescription'],
                 target_cols = ['target_col']
             )
-            split_cols = itemsCategoriesV3_pred['target_col'].str.split(' :: ', expand=True)
+            split_cols = itemsCategoriesV3_pred['target_col'].str.split(' :|: ', expand=True)
             split_cols.columns = ['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5', 'CommonName']
             itemsCategoriesV3_pred = pd.concat([itemsCategoriesV3_pred, split_cols], axis=1)
             itemsCategoriesV3_pred.drop(columns = 'target_col', inplace=True)
