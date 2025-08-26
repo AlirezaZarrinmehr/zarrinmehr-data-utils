@@ -2059,23 +2059,21 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         for col in key_cols:
             txnsLines[col] = txnsLines[col].fillna('ITEM').astype('str').str.upper().str.strip()
         itemsCategoriesV3_pred = txnsLines[key_cols].merge(itemsCategoriesV3[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
-        itemsCategoriesV3_pred = itemsCategoriesV3_pred[itemsCategoriesV3_pred['_merge']=='left_only']
+        itemsCategoriesV3_pred = itemsCategoriesV3_pred.query("_merge == 'left_only'").copy()
         if not itemsCategoriesV3_pred.empty and not itemsCategoriesV3.empty:
-            labeled_df = itemsCategoriesV3.dropna().sample(len(itemsCategoriesV3) if len(itemsCategoriesV3)<10000 else 10000)
-            labeled_df['target_col'] = labeled_df['ItemLevel1'].fillna('') + ' :|: ' + \
-                                        labeled_df['ItemLevel2'].fillna('') + ' :|: ' + \
-                                        labeled_df['ItemLevel3'].fillna('') + ' :|: ' + \
-                                        labeled_df['ItemLevel4'].fillna('') + ' :|: ' + \
-                                        labeled_df['ItemLevel5'].fillna('') + ' :|: ' + \
-                                        labeled_df['CommonName'].fillna('')
+            sample_size = min(len(itemsCategoriesV3), 10000)
+            labeled_df = itemsCategoriesV3.dropna().sample(sample_size)
+            delimiter = " :|: "
+            level_cols = ['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5', 'CommonName']
+            labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
             itemsCategoriesV3_pred = train_and_predict(
                 labeled_df = labeled_df,
-                unlabeled_df  = itemsCategoriesV3_pred,
-                input_cols = ['ItemId', 'ItemDescription'],
+                unlabeled_df = itemsCategoriesV3_pred,
+                input_cols = key_cols,
                 target_cols = ['target_col']
             )
-            split_cols = itemsCategoriesV3_pred['target_col'].str.split(' :|: ', expand=True)
-            split_cols.columns = ['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5', 'CommonName']
+            split_cols = itemsCategoriesV3_pred['target_col'].str.split(delimiter, expand=True, regex=False)
+            split_cols.columns = level_cols
             itemsCategoriesV3_pred = pd.concat([itemsCategoriesV3_pred, split_cols], axis=1)
             itemsCategoriesV3_pred.drop(columns = 'target_col', inplace=True)
             itemsCategoriesV3_pred['CommonName'] = 'ITEM MISSING : LEVELS ARE PREDICTED'
@@ -2084,11 +2082,11 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
             itemsCategoriesV3_pred.reset_index(inplace=True)
             itemsCategoriesV3_pred['index'] = itemsCategoriesV3_pred['index'].astype('int').astype('str')
             itemsCategoriesV3 = pd.concat([itemsCategoriesV3, itemsCategoriesV3_pred], ignore_index=True)
-        item_df = itemsCategoriesV3.merge(item[['ItemId', 'ItemNo', 'ItemName']], on ='ItemId', how ='left').rename(columns = {'ItemId':'ERPItemId'}).rename(columns = {'index':'ItemId'}).copy()
+        item_df = itemsCategoriesV3.merge(item[['ItemId', 'ItemNo', 'ItemName']], on ='ItemId', how ='left').rename(columns = {'ItemId': 'ERPItemId', 'index': 'ItemId'}).copy()
         item_df['Company'] = companyName
         item_df = item_df[['Company'] + item_df.columns[:-1].tolist()]
         upload_to_s3(s3_client = s3_client, data = item_df, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
-        txnsLines = txnsLines.merge(itemsCategoriesV3[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {'ItemId':'ERPItemId'}).rename(columns = {'index':'ItemId'}).copy()
+        txnsLines = txnsLines.merge(itemsCategoriesV3[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {'ItemId': 'ERPItemId', 'index': 'ItemId'}).copy()
         txnsLines.drop(columns = ['ERPItemId'], inplace = True)
         return txnsLines, itemsCategoriesV3, item_df
     else:
@@ -2143,6 +2141,7 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         print(prompt)
         write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
         return item
+
 
 def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
 
