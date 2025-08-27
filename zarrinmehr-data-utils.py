@@ -2076,7 +2076,7 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
             split_cols.columns = level_cols
             itemsCategoriesV3_pred = pd.concat([itemsCategoriesV3_pred, split_cols], axis=1)
             itemsCategoriesV3_pred.drop(columns = 'target_col', inplace=True)
-            itemsCategoriesV3_pred['CommonName'] = 'ITEM MISSING : LEVELS ARE PREDICTED'
+            # itemsCategoriesV3_pred['CommonName'] = 'ITEM MISSING : LEVELS ARE PREDICTED'
             itemsCategoriesV3_pred.reset_index(drop=True, inplace=True)
             itemsCategoriesV3_pred.index = itemsCategoriesV3_pred.index + 1 + itemsCategoriesV3['index'].astype('int').max()
             itemsCategoriesV3_pred.reset_index(inplace=True)
