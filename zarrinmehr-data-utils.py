@@ -294,6 +294,7 @@ def process_qb_orders(
     companyName,
     transactions,
     item,
+    item_df,
     customersORvendors,
     start_date,
     end_date,
@@ -435,7 +436,7 @@ def process_qb_orders(
     ordersLines = ordersLines[ordersLines[f'{txnsType2}No'].isin(orders[f'{txnsType2}No'])]
     #-------------------------------------
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item, 
+        item_df, 
         companyName, 
         s3_client, 
         s3_bucket_name, 
@@ -655,6 +656,7 @@ def process_s50_orders(
     employees,
     billToAdds,
     item,
+    item_df,
     customersORvendors,
     start_date,
     end_date,
@@ -770,7 +772,7 @@ def process_s50_orders(
 
     #-------------------------------------
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item, 
+        item_df, 
         companyName, 
         s3_client, 
         s3_bucket_name, 
