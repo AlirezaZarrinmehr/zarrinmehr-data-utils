@@ -2082,9 +2082,11 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
             itemsCategoriesV3_pred.reset_index(inplace=True)
             itemsCategoriesV3_pred['index'] = itemsCategoriesV3_pred['index'].astype('int').astype('str')
             itemsCategoriesV3 = pd.concat([itemsCategoriesV3, itemsCategoriesV3_pred], ignore_index=True)
-        item_df = itemsCategoriesV3.merge(item[['ItemId', 'ItemNo', 'ItemName']], on ='ItemId', how ='left').rename(columns = {'ItemId': 'ERPItemId', 'index': 'ItemId'}).copy()
-        item_df['Company'] = companyName
-        item_df = item_df[['Company'] + item_df.columns[:-1].tolist()]
+        item_df = item.copy()
+        item_df_pred = itemsCategoriesV3_pred.rename(columns = {'ItemId': 'ERPItemId'}).astype({'ERPItemId':'str'}).merge(item_df[['ERPItemId', 'ItemNo', 'ItemName']].drop_duplicates(subset = ['ERPItemId']).astype({'ERPItemId':'str'}), on ='ERPItemId', how ='left').rename(columns = {'index': 'ItemId'}).copy()
+        item_df_pred['Company'] = companyName
+        item_df_pred = item_df_pred[['Company'] + item_df_pred.columns[:-1].tolist()]
+        item_df = pd.concat([item_df, item_df_pred], ignore_index=True)
         upload_to_s3(s3_client = s3_client, data = item_df, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
         txnsLines = txnsLines.merge(itemsCategoriesV3[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {'ItemId': 'ERPItemId', 'index': 'ItemId'}).copy()
         txnsLines.drop(columns = ['ERPItemId'], inplace = True)
