@@ -2143,6 +2143,36 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         return item
 
 
+def classify_items_rrs(
+    transactions,
+    transactionsLines,
+    items,
+    runner_threshold = 0.4,
+    repeater_threshold = 0.1
+):
+
+    df = transactions.merge(transactionsLines, on='TransactionId').merge(items, on='ItemId')
+    df = df[df['TransactionDate'] >= datetime.now() - timedelta(days=365)]
+    df = df.groupby('CommonName').agg({'TransactionDate': 'nunique'}).reset_index()
+    df.rename(columns={'TransactionDate': 'DaysSold'}, inplace=True)
+    max_days = df['DaysSold'].max()
+    runner_threshold = runner_threshold * max_days
+    repeater_threshold = repeater_threshold * max_days
+    
+    def classify_item(days_sold):
+        if days_sold >= runner_threshold:
+            return 'Runner'
+        elif days_sold >= repeater_threshold:
+            return 'Repeater'
+        else:
+            return 'Stranger'
+    
+    df['RRS'] = df['DaysSold'].apply(classify_item)
+    df.sort_values('DaysSold', ascending=False)
+    items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName')
+    return items
+
+
 def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_name):
 
     customers = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customers, df_name = 'customers', id_column = ['CustId'], additional_date_columns = [], zip_code_columns = ['CustZip'], state_columns = ['CustState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
