@@ -2173,7 +2173,7 @@ def classify_items_rrs(
     
     df['RRS'] = df['DaysSold'].apply(classify_item)
     df.sort_values('DaysSold', ascending=False)
-    items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName')
+    items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName', how = 'left')
     return items
 
 
