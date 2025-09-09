@@ -233,6 +233,9 @@ def process_qb_transactions(
         txns = txns[[i for i in txns.columns if i in ['TransactionId', 'TransactionNo', 'TransactionType', 'TransactionDate', 'TransactionStatus', 'ShipDate', 'SalesRepID', 'CustPo', 'CustNo', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']]].copy()
         if txnsType == 'GENERAL JOURNAL':
             generalJournalLines = txnsLines.copy()
+            generalJournalLines['ItemId'] = 'GENERAL JOURNAL'
+            generalJournalLines['ItemNo'] = 'GENERAL JOURNAL'
+            generalJournalLines['ItemName'] = 'GENERAL JOURNAL'
             generalJournal = txns.copy()
         elif txnsType == 'CREDIT MEMO':
             creditMemoLines = txnsLines.copy()
@@ -242,9 +245,15 @@ def process_qb_transactions(
             invoices = txns.copy()
         elif txnsType == 'BILL':
             billsLines = txnsLines.copy()
+            billsLines['ItemId'] = 'BILL'
+            billsLines['ItemNo'] = 'BILL'
+            billsLines['ItemName'] = 'BILL'
             bills = txns.copy()
         elif txnsType == 'DEPOSIT':
             depositsLines = txnsLines.copy()
+            depositsLines['ItemId'] = 'DEPOSIT'
+            depositsLines['ItemNo'] = 'DEPOSIT'
+            depositsLines['ItemName'] = 'DEPOSIT'
             deposits = txns.copy()
         elif txnsType == 'PAYMENT':
             paymentsLines = txnsLines.copy()
