@@ -2164,7 +2164,13 @@ def classify_items_rrs(
     repeater_threshold = 0.1
 ):
 
-    df = transactions[['TransactionId', 'TransactionDate']].merge(transactionsLines[['TransactionId', 'ItemId']], on='TransactionId').merge(items[['ItemId', 'CommonName']], on='ItemId')
+    df = transactions[['TransactionId', 'TransactionDate']].drop_duplicates(subset='TransactionId').merge(
+        transactionsLines[['TransactionId', 'ItemId']], 
+        on='TransactionId'
+    ).merge(
+        items[['ItemId', 'CommonName']].drop_duplicates(subset='ItemId'), 
+        on='ItemId'
+    )
     df = df[df['TransactionDate'] >= datetime.now() - timedelta(days=365)]
     df = df.groupby('CommonName').agg({'TransactionDate': 'nunique'}).reset_index()
     df.rename(columns={'TransactionDate': 'DaysSold'}, inplace=True)
