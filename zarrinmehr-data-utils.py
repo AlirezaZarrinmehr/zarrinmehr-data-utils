@@ -163,9 +163,9 @@ def process_qb_transactions(
         txnsLines['ItemDescription'] = txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
         txnsLines['TransactionId'] = txnsLines['TransactionId'].fillna('').astype('str').apply(convert_to_int_or_keep)
         txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
-        txnsLines['Rate'] = txnsLines['Rate'].fillna('').astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
-        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Rate'] = txnsLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
         txnsLines.loc[txnsLines['TransactionNo'].isna(), 'Total'] = txnsLines['Total'] * -1
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
         txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
@@ -383,12 +383,12 @@ def process_qb_orders(
     txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
     txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     if txnsType == 'PURCHORD':
-        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
-        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
     else:
-        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0) * -1
-        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0) * -1
-    txnsLines['Rate'] = txnsLines['Rate'].fillna('').astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
+    txnsLines['Rate'] = txnsLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines = txnsLines.copy()
     txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
