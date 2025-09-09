@@ -160,18 +160,17 @@ def process_qb_transactions(
             'PRICE':'Rate',
             'AMOUNT':'Total'
         }, inplace = True)
-        txnsLines['ItemDescription'] = txnsLines['ItemDescription'].astype('str').str.replace(r'\\n', ' ', regex=True)
-        txnsLines['TransactionId'] = txnsLines['TransactionId'].astype(str)
-        txnsLines['TransactionId'] = txnsLines['TransactionId'].apply(convert_to_int_or_keep)
+        txnsLines['ItemDescription'] = txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
+        txnsLines['TransactionId'] = txnsLines['TransactionId'].fillna('').astype('str').apply(convert_to_int_or_keep)
         txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        txnsLines['Quantity'] = txnsLines['Quantity'].astype('str').str.replace(',', '').astype('float') * -1
-        txnsLines['Rate'] = txnsLines['Rate'].astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
-        txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Rate'] = txnsLines['Rate'].fillna('').astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
         txnsLines.loc[txnsLines['TransactionNo'].isna(), 'Total'] = txnsLines['Total'] * -1
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
         txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
-        txnsLines.ItemId = txnsLines.ItemId.astype('str')
-        item.ItemId = item.ItemId.astype('str')
+        txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+        item.ItemId = item.ItemId.fillna('').astype('str')
         txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
         txnsLines['Company'] = companyName
@@ -199,7 +198,7 @@ def process_qb_transactions(
         }, inplace = True)
         extra_txns = txns[ (txns['ACCNT'].str.upper().isin(list_of_accounts)) ].copy()
         extra_txns.rename(columns = { 'AMOUNT':'Total' }, inplace = True)
-        extra_txns['Total'] = extra_txns['Total'].astype('str').str.replace(',', '').astype('float') * -1
+        extra_txns['Total'] = extra_txns['Total'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
         extra_txnsLines = extra_txns.copy()
         extra_txnsLines.rename(columns = {
             'TRNSID':'TransactionId',
@@ -208,7 +207,7 @@ def process_qb_transactions(
             'MEMO':'ItemDescription',
             'AMOUNT':'Total'
         }, inplace = True)
-        extra_txnsLines['ItemDescription'] = extra_txnsLines['ItemDescription'].astype('str').str.replace(r'\\n', ' ', regex=True)
+        extra_txnsLines['ItemDescription'] = extra_txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
         extra_txnsLines[['ItemId', 'ItemNo', 'ItemName', 'CommonName']] = np.nan
         extra_txnsLines['Quantity'] = 0.0
         extra_txnsLines['Rate'] = 0.0
@@ -219,16 +218,16 @@ def process_qb_transactions(
         if txnsType == 'GENERAL JOURNAL':    
             txns = pd.concat([txns, extra_txns[~extra_txns['TransactionId'].isin(txns['TransactionId'])]], ignore_index=True)
             txnsLines = pd.concat([txnsLines, extra_txnsLines], ignore_index=True)
-        txns.TransactionId = txns.TransactionId.astype('str')
-        txnsLines.TransactionId = txnsLines.TransactionId.astype('str')
+        txns.TransactionId = txns.TransactionId.fillna('').astype('str')
+        txnsLines.TransactionId = txnsLines.TransactionId.fillna('').astype('str')
         txns = txns.merge(
             txnsLines.groupby('TransactionId').agg(Total = ('Total', 'sum')).reset_index(),
             on='TransactionId',
         )     
         txns['subTotal'] = txns['Total']
-        txns['TransactionId'] = txns['TransactionId'].astype(str)
+        txns['TransactionId'] = txns['TransactionId'].fillna('').astype('str')
         txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep)
-        txns['TransactionStatus'] = txns['TransactionStatus'].astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
+        txns['TransactionStatus'] = txns['TransactionStatus'].fillna('').astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
         txns.SalesRepID = txns.SalesRepID.fillna('').astype('str').str.split(':').str[-1]
         txns = txns[[i for i in txns.columns if i in ['TransactionId', 'TransactionNo', 'TransactionType', 'TransactionDate', 'TransactionStatus', 'ShipDate', 'SalesRepID', 'CustPo', 'CustNo', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']]].copy()
         if txnsType == 'GENERAL JOURNAL':
@@ -272,20 +271,20 @@ def process_qb_transactions(
         'LinkedTxnRefNumber':'TransactionNo',                   
     }, inplace = True)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[['OrderNo','TransactionNo']].copy()
-    SalesOrderLinkedTxn.TransactionNo = SalesOrderLinkedTxn.TransactionNo.astype(str)
-    invoices.TransactionNo = invoices.TransactionNo.astype(str)
+    SalesOrderLinkedTxn.TransactionNo = SalesOrderLinkedTxn.TransactionNo.fillna('').astype('str')
+    invoices.TransactionNo = invoices.TransactionNo.fillna('').astype('str')
     invoices = invoices.merge(SalesOrderLinkedTxn.drop_duplicates(subset=['TransactionNo']), on='TransactionNo', how = 'left')
     # #-----------------------------------------------------------------------------------------------------------
-    invoices.CustNo = invoices.CustNo.astype(str)
-    customers.CustNo = customers.CustNo.astype(str)
+    invoices.CustNo = invoices.CustNo.fillna('').astype('str')
+    customers.CustNo = customers.CustNo.fillna('').astype('str')
     invoices = invoices.merge(customers[['CustNo', 'CustName', 'CommonName']], on = 'CustNo', how = 'left').copy()
     invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = invoices, df_name = 'invoices', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     #-----------------------------------------------------------------------------------------------------------
     txns = pd.concat([invoices, generalJournal, creditMemo, bills, deposits, payments, checks, creditCard], ignore_index=True)  
     txnsLines = pd.concat([invoicesLines, generalJournalLines, creditMemoLines, billsLines, depositsLines, paymentsLines, checksLines, creditCardLines], ignore_index=True)
     #-----------------------------------------------------------------------------------------------------------
-    txns.TransactionId = txns.TransactionId.astype('str')
-    txnsLines.TransactionId = txnsLines.TransactionId.astype('str')
+    txns.TransactionId = txns.TransactionId.fillna('').astype('str')
+    txnsLines.TransactionId = txnsLines.TransactionId.fillna('').astype('str')
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['subTotal'], mismatched_txns['Total_lin'], atol=0.1)]
     print(f"{mismatched_txns.shape[0]} txns Total do not match orderline Total")
@@ -293,7 +292,7 @@ def process_qb_transactions(
     txns['TransactionId'] = txns['TransactionId']
     txns['TransactionId'] = txns['TransactionId'].str.split(' :: ').str[0]
     txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustNo', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
-    txns = txns[~txns['TransactionId'].astype('str').str.upper().duplicated()]
+    txns = txns[~txns['TransactionId'].fillna('').astype('str').str.upper().duplicated()]
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
@@ -333,10 +332,10 @@ def process_qb_orders(
         suffixes=('_iif', '_lines')
     )
     if txnsType == 'PURCHORD':
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].astype('str').str.replace(',', '').astype('float').fillna(0)*-1
+        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)*-1
     else:
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].astype('str').str.replace(',', '').astype('float').fillna(0)
-    txns_df['TAX'] = txns_df['TAX'].astype('str').str.replace(',', '').astype('float').fillna(0)
+        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
+    txns_df['TAX'] = txns_df['TAX'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
     txns_df['subTotal'] = txns_df['AMOUNT'] + txns_df['TAX']
     txns_df.rename(columns = {
         'TRNSID':f'{txnsType2}Id',
@@ -357,10 +356,10 @@ def process_qb_orders(
         'ShippingAddressZip':'ShipZip',
         'AMOUNT':'Total',
     }, inplace = True)
-    txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].astype(str)
+    txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].fillna('').astype('str')
     txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
-    txns_df[f'{txnsType2}Status'] = txns_df[f'{txnsType2}Status'].astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
-    txns_df[txnsType4] = txns_df[txnsType4].fillna('').str.split(':').str[-1]
+    txns_df[f'{txnsType2}Status'] = txns_df[f'{txnsType2}Status'].fillna('').astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
+    txns_df[txnsType4] = txns_df[txnsType4].fillna('').astype('str').str.split(':').str[-1]
     txns_df = txns_df[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5, f'{txnsType3}No', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
     txns_df = txns_df.copy()
     txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date'], errors='coerce') > start_date]
@@ -378,54 +377,54 @@ def process_qb_orders(
         'PRICE':'Rate',
         'AMOUNT':'Total'
     }, inplace = True)
-    txnsLines['ItemDescription'] = txnsLines['ItemDescription'].astype('str').str.replace(r'\\n', ' ', regex=True)
+    txnsLines['ItemDescription'] = txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     txnsLines = txnsLines[~txnsLines[f'{txnsType2}Id'].isna()].copy()
-    txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].astype(str)
+    txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].fillna('').astype('str')
     txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
     txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     if txnsType == 'PURCHORD':
-        txnsLines['Quantity'] = txnsLines['Quantity'].astype('str').str.replace(',', '').astype('float').fillna(0)
-        txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float').fillna(0)
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
+        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
     else:
-        txnsLines['Quantity'] = txnsLines['Quantity'].astype('str').str.replace(',', '').astype('float').fillna(0) * -1
-        txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float').fillna(0) * -1
-    txnsLines['Rate'] = txnsLines['Rate'].astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        txnsLines['Quantity'] = txnsLines['Quantity'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0) * -1
+        txnsLines['Total'] = txnsLines['Total'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0) * -1
+    txnsLines['Rate'] = txnsLines['Rate'].fillna('').astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines = txnsLines.copy()
     txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
-    txnsLines.ItemId = txnsLines.ItemId.astype('str')
-    item.ItemId = item.ItemId.astype('str')
+    txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+    item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     ordersLines = txnsLines.copy()
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype(str)
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype(str)
+    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id','ShipDate']], on = f'{txnsType2}Id', how = 'left')
     orders.drop(columns=['ShipDate'], inplace=True)
 
-    orders.loc[orders[f'{txnsType2}Status'].astype('str') == 'NOT INVOICED IN FULL', f'{txnsType2}Status'] = 'Open'
-    orders.loc[orders[f'{txnsType2}Status'].astype('str') == 'INVOICED IN FULL', f'{txnsType2}Status'] = 'Closed'
+    orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'NOT INVOICED IN FULL', f'{txnsType2}Status'] = 'Open'
+    orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'INVOICED IN FULL', f'{txnsType2}Status'] = 'Closed'
     SalesOrder = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrder.xlsx', encoding = 'Windows-1252', is_csv_file=False)
     closedOrders = SalesOrder.loc[(SalesOrder['IsManuallyClosed']==1)|(SalesOrder['IsFullyInvoiced']==1)]
-    closedOrders = closedOrders['RefNumber'].astype('str')
-    orders.loc[orders[f'{txnsType2}No'].astype('str').isin(closedOrders), f'{txnsType2}Status'] = 'Closed'
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype(str)
-    orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].astype(str)
+    closedOrders = closedOrders['RefNumber'].fillna('').astype('str')
+    orders.loc[orders[f'{txnsType2}No'].fillna('').astype('str').isin(closedOrders), f'{txnsType2}Status'] = 'Closed'
+    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+    orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].fillna('').astype('str')
     orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
     if not orders.empty:
         orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
     else:
         orders['CloseDate'] = pd.NaT
-    orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].astype(str)
-    customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].astype(str)
+    orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
+    customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
     orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}No'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}No'].str.upper().duplicated()]
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype('str')
-    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].astype('str')
+    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
     mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}No', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}No').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['subTotal'], mismatched_orders['Total_lin'], atol=0.1)]
     print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
@@ -437,7 +436,7 @@ def process_qb_orders(
     #-----------------------------------------------------------------------------------------------------------
     #-------------------------------------
     orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
-    orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
+    orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].fillna('').astype('str').str.strip() != '')]
     orders['Company'] = companyName
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
 
@@ -463,8 +462,8 @@ def process_qb_orders(
                     .sort_values([f'{txnsType2}No', 'Total'], ascending=[True, False]) \
                     .groupby(f'{txnsType2}No').agg({f'{txnsType2}Type': 'first'}).reset_index()
 
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype(str)
-    orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].astype(str)
+    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+    orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].fillna('').astype('str')
     orders = orders.merge(orderTypes, on = f'{txnsType2}No', how = 'left')
     #-----------------------------------------------------------------------------------------------------------
     if companyName == 'KOMAR':  
@@ -474,8 +473,8 @@ def process_qb_orders(
         )
         shipInstallDates = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
         shipInstallDates = shipInstallDates[~shipInstallDates.SerialNo.duplicated()]
-        shipInstallDates.SerialNo = shipInstallDates.SerialNo.astype('str')
-        ordersLines.SerialNo = ordersLines.SerialNo.astype('str')
+        shipInstallDates.SerialNo = shipInstallDates.SerialNo.fillna('').astype('str')
+        ordersLines.SerialNo = ordersLines.SerialNo.fillna('').astype('str')
         shipInstallDates['InstallDate'] = pd.to_datetime(shipInstallDates['InstallDate'], errors='coerce')
         ordersLines = ordersLines.merge(shipInstallDates, on = 'SerialNo', how = 'left')
     else:
@@ -492,12 +491,12 @@ def process_qb_orders(
         'InstallDate'
     ] = np.nan
     #-----------------------------------------------------------------------------------------------------------
-    SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].astype(str)
-    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].astype(str)
+    SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].fillna('').astype('str')
+    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
     ordersLines = ordersLines.merge(SalesOrderLinkedTxn, on = f'{txnsType2}No', how = 'left')
     #-----------------------------------------------------------------------------------------------------------
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype(str)
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype(str)
+    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}Status']], on = f'{txnsType2}Id', how = 'left').rename(columns={f'{txnsType2}Status':'ItemStatus'})
     ordersLines.loc[(ordersLines['ShipDate'].notna()), 'ItemStatus'] = 'SHIPPED'
     ordersLines.loc[(ordersLines['InstallDate'].notna()), 'ItemStatus'] = 'INSTALLED'
@@ -545,8 +544,8 @@ def process_s50_transactions(
         
         txnNos = JrnlHdr[JrnlHdr['JrnlKey_Journal']==txnsType][['PostOrder', 'Reference']].copy()
         txnNos = txnNos[~txnNos['PostOrder'].duplicated() & ~txnNos['Reference'].duplicated()]
-        txnNos.PostOrder = txnNos.PostOrder.astype(str)
-        txnsLines.PostOrder = txnsLines.PostOrder.astype(str)
+        txnNos.PostOrder = txnNos.PostOrder.astype('str')
+        txnsLines.PostOrder = txnsLines.PostOrder.astype('str')
         txnsLines = txnsLines.merge(txnNos, on = 'PostOrder', how = 'left')
         txnsLines.rename(columns = {
             'PostOrder':'TransactionId',
@@ -558,7 +557,7 @@ def process_s50_transactions(
             'UnitCost':'Rate',
             'Amount':'Total'
         }, inplace = True)    
-        txnsLines['TransactionNo'] = txnsLines['TransactionNo'].astype(str)
+        txnsLines['TransactionNo'] = txnsLines['TransactionNo'].astype('str')
         txnsLines['TransactionNo'] = txnsLines['TransactionNo'].apply(convert_to_int_or_keep)
         txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float') * -1
@@ -568,8 +567,8 @@ def process_s50_transactions(
         txnsLines['Quantity'] = txnsLines['Quantity'].astype('float').round(2)
         txnsLines['Rate'] = txnsLines['Rate'].astype('float').round(2)
         txnsLines['Total'] = txnsLines['Total'].astype('float').round(2)   
-        item.ItemId = item.ItemId.astype(str)
-        txnsLines.ItemId = txnsLines.ItemId.astype(str)
+        item.ItemId = item.ItemId.astype('str')
+        txnsLines.ItemId = txnsLines.ItemId.astype('str')
         txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]        
         txnsLines['Company'] = companyName
@@ -581,11 +580,11 @@ def process_s50_transactions(
         ].copy()
         EmpNames = employees[['EmpRecordNumber', 'EmployeeName']].copy()
         EmpNames = EmpNames[~EmpNames['EmpRecordNumber'].duplicated()]
-        EmpNames.EmpRecordNumber = EmpNames.EmpRecordNumber.astype(str)
-        txns_df.EmpRecordNumber = txns_df.EmpRecordNumber.astype(str)
+        EmpNames.EmpRecordNumber = EmpNames.EmpRecordNumber.astype('str')
+        txns_df.EmpRecordNumber = txns_df.EmpRecordNumber.astype('str')
         txns_df = txns_df.merge(EmpNames, on = 'EmpRecordNumber', how = 'left')
-        billToAdds.CustVendId = billToAdds.CustVendId.astype(str)
-        txns_df.CustVendId = txns_df.CustVendId.astype(str)
+        billToAdds.CustVendId = billToAdds.CustVendId.astype('str')
+        txns_df.CustVendId = txns_df.CustVendId.astype('str')
         txns_df = txns_df.merge(billToAdds, on = 'CustVendId', how = 'left')
         txns_df.rename(columns = {
             'PostOrder':'TransactionId',
@@ -601,7 +600,7 @@ def process_s50_transactions(
             'ShipToZIP':'ShipZip',
             'MainAmount':'Total',
         }, inplace = True)
-        txns_df['TransactionNo'] = txns_df['TransactionNo'].astype(str)
+        txns_df['TransactionNo'] = txns_df['TransactionNo'].astype('str')
         txns_df['TransactionNo'] = txns_df['TransactionNo'].apply(convert_to_int_or_keep)
         txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -614,8 +613,8 @@ def process_s50_transactions(
             'PurchOrder':'CustPo',
         }, inplace = True)
         txns_df.drop(columns = ['Total'], inplace = True)
-        txns_df['TransactionId'] = txns_df['TransactionId'].astype(str)
-        txnsLines['TransactionId'] = txnsLines['TransactionId'].astype(str)
+        txns_df['TransactionId'] = txns_df['TransactionId'].astype('str')
+        txnsLines['TransactionId'] = txnsLines['TransactionId'].astype('str')
         txns_df = txns_df.merge(
             txnsLines.groupby('TransactionId').agg(Total = ('Total', 'sum')).reset_index(),
             on='TransactionId',
@@ -640,8 +639,8 @@ def process_s50_transactions(
     txns = pd.concat([invoices, generalJournal, bills, deposits, payments], ignore_index=True)  
     txnsLines = pd.concat([invoicesLines, generalJournalLines, billsLines, depositsLines, paymentsLines], ignore_index=True)
     #-----------------------------------------------------------------------------------------------------------
-    txns.CustId = txns.CustId.astype(str)
-    customers.CustId = customers.CustId.astype(str)
+    txns.CustId = txns.CustId.astype('str')
+    customers.CustId = customers.CustId.astype('str')
     txns = txns.merge(customers[['CustId', 'CustName', 'CommonName']], on = 'CustId', how = 'left').copy()
     txns = txns[['OrderNo', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns = txns[~txns['TransactionId'].astype('str').str.upper().duplicated()]
@@ -690,11 +689,11 @@ def process_s50_orders(
     txns_df = JrnlHdr[JrnlHdr['JrnlKey_Journal']==txnsType].copy()    
     EmpNames = employees[['EmpRecordNumber', 'EmployeeName']].copy()
     EmpNames = EmpNames[~EmpNames['EmpRecordNumber'].duplicated()]
-    EmpNames.EmpRecordNumber = EmpNames.EmpRecordNumber.astype(str)
-    txns_df.EmpRecordNumber = txns_df.EmpRecordNumber.astype(str)
+    EmpNames.EmpRecordNumber = EmpNames.EmpRecordNumber.astype('str')
+    txns_df.EmpRecordNumber = txns_df.EmpRecordNumber.astype('str')
     txns_df = txns_df.merge(EmpNames, on = 'EmpRecordNumber', how = 'left')    
-    billToAdds.CustVendId = billToAdds.CustVendId.astype(str)
-    txns_df.CustVendId = txns_df.CustVendId.astype(str)
+    billToAdds.CustVendId = billToAdds.CustVendId.astype('str')
+    txns_df.CustVendId = txns_df.CustVendId.astype('str')
     txns_df = txns_df.merge(billToAdds, on = 'CustVendId', how = 'left')    
     txns_df.rename(columns = {
         'PostOrder':f'{txnsType2}Id',
@@ -709,7 +708,7 @@ def process_s50_orders(
         'ShipToZIP':'ShipZip',
         'MainAmount':'Total',
     }, inplace = True)    
-    txns_df[f'{txnsType2}No'] = txns_df[f'{txnsType2}No'].astype(str).apply(convert_to_int_or_keep)
+    txns_df[f'{txnsType2}No'] = txns_df[f'{txnsType2}No'].astype('str').apply(convert_to_int_or_keep)
     txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     
@@ -731,8 +730,8 @@ def process_s50_orders(
     txnsLines = JrnlRow[JrnlRow['Journal']==txnsType].copy()
     txnNos = JrnlHdr[JrnlHdr['JrnlKey_Journal']==txnsType][['PostOrder', 'Reference']].copy()
     txnNos = txnNos[~txnNos['PostOrder'].duplicated() & ~txnNos['Reference'].duplicated()]
-    txnNos.PostOrder = txnNos.PostOrder.astype(str)
-    txnsLines.PostOrder = txnsLines.PostOrder.astype(str)
+    txnNos.PostOrder = txnNos.PostOrder.astype('str')
+    txnsLines.PostOrder = txnsLines.PostOrder.astype('str')
     txnsLines = txnsLines.merge(txnNos, on = 'PostOrder', how = 'left')
     txnsLines.rename(columns = {
         'PostOrder':f'{txnsType2}Id',
@@ -744,7 +743,7 @@ def process_s50_orders(
         'Amount':'Total'
     }, inplace = True)    
     txnsLines = txnsLines[~txnsLines[f'{txnsType2}No'].isna()].copy()
-    txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].astype(str)
+    txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].astype('str')
     txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].apply(convert_to_int_or_keep)
     txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     
@@ -759,20 +758,20 @@ def process_s50_orders(
     txnsLines['Quantity'] = txnsLines['Quantity'].astype('float').round(2)
     txnsLines['Rate'] = txnsLines['Rate'].astype('float').round(2)
     txnsLines['Total'] = txnsLines['Total'].astype('float').round(2)    
-    item.ItemId = item.ItemId.astype(str)
-    txnsLines.ItemId = txnsLines.ItemId.astype(str)
+    item.ItemId = item.ItemId.astype('str')
+    txnsLines.ItemId = txnsLines.ItemId.astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')  
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     ordersLines = txnsLines.copy() 
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype(str)
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype(str)
+    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype('str')
+    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype('str')
     ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id','ShipDate']], on = f'{txnsType2}Id', how = 'left')
     orders.drop(columns=['ShipDate'], inplace=True)
 
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype(str)
-    orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].astype(str)
+    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype('str')
+    orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].astype('str')
     orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
     if not orders.empty:
         orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
@@ -799,11 +798,11 @@ def process_s50_orders(
                     .sort_values([f'{txnsType2}No', 'Total'], ascending=[True, False]) \
                     .groupby(f'{txnsType2}No').agg({f'{txnsType2}Type': 'first'}).reset_index()
 
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype(str)
-    orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].astype(str)
+    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].astype('str')
+    orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].astype('str')
     orders = orders.merge(orderTypes, on = f'{txnsType2}No', how = 'left')
-    orders[f'{txnsType3}Id'] = orders[f'{txnsType3}Id'].astype(str)
-    customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].astype(str)
+    orders[f'{txnsType3}Id'] = orders[f'{txnsType3}Id'].astype('str')
+    customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].astype('str')
     orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}Id', how = 'left')
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders['Company'] = companyName
@@ -1056,7 +1055,7 @@ def upload_to_s3(
                     clean_data.iloc[:, idx]
                     .fillna('')
                     .apply(lambda x: x.hex() if isinstance(x, bytes) else str(x))
-                    .astype(str)
+                    .astype('str')
                     .str.replace(r'\r\n|\r|\n', ' ', regex=True)
                     .str.replace(r'\\n', ' ', regex=True)
                     .str.replace(r'\\', ' ', regex=True)
@@ -1262,14 +1261,14 @@ def train_and_predict(
     target_cols
 ):
     # 1. Combine input text columns
-    labeled_df['combined_text'] = labeled_df[input_cols].astype(str).agg(' '.join, axis=1)
+    labeled_df['combined_text'] = labeled_df[input_cols].astype('str').agg(' '.join, axis=1)
 
     # 2. Encode target columns
     output_encoders = {}
     Y_encoded = pd.DataFrame()
     for col in target_cols:
         le = LabelEncoder()
-        Y_encoded[col] = le.fit_transform(labeled_df[col].astype(str))
+        Y_encoded[col] = le.fit_transform(labeled_df[col].astype('str'))
         output_encoders[col] = le
 
     # 3. Train-test split
@@ -1304,7 +1303,7 @@ def train_and_predict(
     print(f"Exact match accuracy: {exact_match_acc:.4f}")
 
     # 7. Predict on new dataset
-    unlabeled_df ['combined_text'] = unlabeled_df [input_cols].astype(str).agg(' '.join, axis=1)
+    unlabeled_df ['combined_text'] = unlabeled_df [input_cols].astype('str').agg(' '.join, axis=1)
     X_new_tfidf = tfidf.transform(unlabeled_df ['combined_text'])
 
     preds_array = model.predict(X_new_tfidf)
@@ -2104,8 +2103,8 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         return txnsLines, itemsCategoriesV3, item_df
     else:
         item = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = item, df_name = 'item', id_column = ['ItemId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        item['ItemName'] = item['ItemName'].astype(str).fillna('')
-        item['ItemDescription'] = item['ItemDescription'].astype(str).fillna('')
+        item['ItemName'] = item['ItemName'].astype('str').fillna('')
+        item['ItemDescription'] = item['ItemDescription'].astype('str').fillna('')
         item = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = item, df_name = 'item', id_column = ['ItemId'], additional_date_columns = [], zip_code_columns = [], state_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         itemLevels =['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5']
         itemsCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'itemsCategories.csv')
@@ -2115,7 +2114,7 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         itemsCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = itemsCategories, df_name = 'itemsCategories', id_column = ['ItemId_SearchKey'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
         itemsCategories = itemsCategories.sort_values(by='ItemId_SearchKey', key=lambda x: x.str.len(), ascending=False)
         itemsCategories = itemsCategories[itemsCategories['ItemId_SearchKey'].notna()]
-        item['ItemId'] = item['ItemId'].astype(str).str.upper()
+        item['ItemId'] = item['ItemId'].astype('str').str.upper()
         itemsCategories['ItemId_SearchKey'] = itemsCategories['ItemId_SearchKey'].astype('str').str.upper()
         item = item.merge(itemsCategories[['ItemId_SearchKey', 'CommonName'] + itemLevels], left_on = 'ItemId', right_on = 'ItemId_SearchKey', how = 'left')
         itemsCategories.loc[itemsCategories['ItemId_SearchKey'].isin(item['ItemId_SearchKey']), 'Found'] = True
@@ -2203,7 +2202,7 @@ def enrich_and_classify_customers(customers, companyName, s3_client, s3_bucket_n
     customersCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = customersCategories, df_name = 'customersCategories', id_column = ['CustId_SearchKey'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
     customersCategories = customersCategories.sort_values(by='CustId_SearchKey', key=lambda x: x.str.len(), ascending=False)
     customersCategories = customersCategories[customersCategories['CustId_SearchKey'].notna()]
-    customers['CustId'] = customers['CustId'].astype(str).str.upper()
+    customers['CustId'] = customers['CustId'].astype('str').str.upper()
     customersCategories['CustId_SearchKey'] = customersCategories['CustId_SearchKey'].astype('str').str.upper()
     customers = customers.merge(customersCategories[['CustId_SearchKey', 'CommonName', 'ParentName'] + customerLevels], left_on = 'CustId', right_on = 'CustId_SearchKey', how = 'left')
     customersCategories.loc[customersCategories['CustId_SearchKey'].isin(customers['CustId_SearchKey']), 'Found'] = True
@@ -2396,8 +2395,8 @@ def clean_df(
         df[col] = df[col].apply(lambda x: x.strip().upper() if isinstance(x, str) else x)
     if id_column:
         if numeric_id:
-            invalid_mask = ~df[id_column].astype(str).apply(lambda x: x.str.isdigit()).any(axis=1)
-            # invalid_mask = ~df[id_column].astype(str).str.isdigit()
+            invalid_mask = ~df[id_column].astype('str').apply(lambda x: x.str.isdigit()).any(axis=1)
+            # invalid_mask = ~df[id_column].astype('str').str.isdigit()
             invalid_id = df[invalid_mask]
             df = df[~invalid_mask].copy()
             print(f"invalid {id_column} found and removed: {len(invalid_id)}")
@@ -2416,8 +2415,8 @@ def clean_df(
         valid_us_zip_regex = r"^\d{5}(\d{4})?$"
         valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"        
         for col in zip_code_columns:
-            df[col] = df[col].astype(str).str.replace(' ','')
-            df[col] = df[col].astype(str).str.replace('-','')            
+            df[col] = df[col].astype('str').str.replace(' ','')
+            df[col] = df[col].astype('str').str.replace('-','')            
             invalid_mask = ~(df[col].str.match(valid_us_zip_regex) | df[col].str.match(valid_ca_zip_regex))
             invalid_zip_codes = pd.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
@@ -2436,8 +2435,8 @@ def clean_df(
         valid_us_states = { "DC": "District of Columbia", "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming" }
         valid_ca_states = { "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba", "NB": "New Brunswick", "NL": "Newfoundland and Labrador", "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island", "QC": "Quebec", "SK": "Saskatchewan", "NT": "Northwest Territories", "NU": "Nunavut", "YT": "Yukon" }
         for col in state_columns:
-            df[col] = df[col].astype(str).str.replace(' ','')
-            df[col] = df[col].astype(str).str.replace('-','')
+            df[col] = df[col].astype('str').str.replace(' ','')
+            df[col] = df[col].astype('str').str.replace('-','')
             invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
             invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
@@ -3028,11 +3027,11 @@ def upload_to_redshift(
                     create_table_query += ");"
                 else:
                     global max_lengths
-                    max_lengths = df.astype(str).apply(lambda x: x.str.encode('utf-8').str.len().max()).fillna(0).astype(int)
+                    max_lengths = df.astype('str').apply(lambda x: x.str.encode('utf-8').str.len().max()).fillna(0).astype('int')
                     max_lengths = max_lengths.replace(0,1)
                     cols_to_truncate = max_lengths[max_lengths > max_allowed_length].index.tolist()
                     # for col in cols_to_truncate:
-                    #     df[col] = df[col].astype(str).apply(lambda x: truncate_with_etc(x, max_allowed_length))
+                    #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc(x, max_allowed_length))
                     #     max_lengths[col] = max_allowed_length
                     create_table_query = f'CREATE TABLE "{table_name}" ('
                     create_table_query += ", ".join([f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()])
