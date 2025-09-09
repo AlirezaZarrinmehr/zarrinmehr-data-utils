@@ -119,6 +119,19 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
+def truncate_with_etc_1(s, truncate_len):
+    return s[:truncate_len - 5] + ' etc.' if len(s) > truncate_len else s
+
+def truncate_with_etc_2(s, truncate_len):
+
+    byte_len = len(s.encode('utf-8'))
+    if byte_len > truncate_len:
+        truncated_str = s.encode('utf-8')[:truncate_len - 5]
+        truncated_str = truncated_str.decode('utf-8', errors='ignore')
+        return truncated_str + ' etc.'
+    else:
+        return s
+
 def process_qb_transactions(
     list_of_accounts,
     companyName,
@@ -3031,7 +3044,7 @@ def upload_to_redshift(
                     max_lengths = max_lengths.replace(0,1)
                     cols_to_truncate = max_lengths[max_lengths > max_allowed_length].index.tolist()
                     # for col in cols_to_truncate:
-                    #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc(x, max_allowed_length))
+                    #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc_2(x, max_allowed_length))
                     #     max_lengths[col] = max_allowed_length
                     create_table_query = f'CREATE TABLE "{table_name}" ('
                     create_table_query += ", ".join([f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()])
