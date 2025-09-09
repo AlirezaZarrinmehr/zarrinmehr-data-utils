@@ -198,7 +198,7 @@ def process_qb_transactions(
         }, inplace = True)
         extra_txns = txns[ (txns['ACCNT'].str.upper().isin(list_of_accounts)) ].copy()
         extra_txns.rename(columns = { 'AMOUNT':'Total' }, inplace = True)
-        extra_txns['Total'] = extra_txns['Total'].fillna('').astype('str').str.replace(',', '').astype('float') * -1
+        extra_txns['Total'] = extra_txns['Total'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
         extra_txnsLines = extra_txns.copy()
         extra_txnsLines.rename(columns = {
             'TRNSID':'TransactionId',
@@ -332,10 +332,10 @@ def process_qb_orders(
         suffixes=('_iif', '_lines')
     )
     if txnsType == 'PURCHORD':
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)*-1
+        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')*-1
     else:
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
-    txns_df['TAX'] = txns_df['TAX'].fillna('').astype('str').str.replace(',', '').astype('float').fillna(0)
+        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')
+    txns_df['TAX'] = txns_df['TAX'].fillna(0).astype('str').str.replace(',', '').astype('float')
     txns_df['subTotal'] = txns_df['AMOUNT'] + txns_df['TAX']
     txns_df.rename(columns = {
         'TRNSID':f'{txnsType2}Id',
