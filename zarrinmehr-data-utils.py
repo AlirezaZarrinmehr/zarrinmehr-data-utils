@@ -3088,6 +3088,7 @@ def upload_to_redshift(
             raise
     cur.close()
     conn.close()
+    wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     prompt = f'{print_date_time()}\t\t🚀 Upload process completed.'
     print(prompt)
