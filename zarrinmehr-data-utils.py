@@ -408,9 +408,9 @@ def process_qb_orders(
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-    txnsLines[txnsLines['ItemId']=='0', 'ItemId']=='ITEM'
-    txnsLines[txnsLines['ItemId']=='0', 'ItemNo']=='ITEM'
-    txnsLines[txnsLines['ItemId']=='0', 'ItemName']=='ITEM'
+    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemId']='ITEM'
+    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemNo']='ITEM'
+    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemName']='ITEM'
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
@@ -586,9 +586,9 @@ def process_s50_transactions(
         txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
         item.ItemId = item.ItemId.fillna('').astype('str')
         txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-        txnsLines[txnsLines['ItemId']=='0', 'ItemId']=='ITEM'
-        txnsLines[txnsLines['ItemId']=='0', 'ItemNo']=='ITEM'
-        txnsLines[txnsLines['ItemId']=='0', 'ItemName']=='ITEM'
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemId']='ITEM'
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemNo']='ITEM'
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemName']='ITEM'
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]        
         txnsLines['Company'] = companyName
         txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
