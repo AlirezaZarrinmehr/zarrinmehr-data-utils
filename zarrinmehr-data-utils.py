@@ -408,6 +408,9 @@ def process_qb_orders(
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    txnsLines[txnsLines['ItemId']=='0', 'ItemId']=='ITEM'
+    txnsLines[txnsLines['ItemId']=='0', 'ItemNo']=='ITEM'
+    txnsLines[txnsLines['ItemId']=='0', 'ItemName']=='ITEM'
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
@@ -580,9 +583,12 @@ def process_s50_transactions(
         txnsLines['Quantity'] = txnsLines['Quantity'].astype('float').round(2)
         txnsLines['Rate'] = txnsLines['Rate'].astype('float').round(2)
         txnsLines['Total'] = txnsLines['Total'].astype('float').round(2)   
-        item.ItemId = item.ItemId.astype('str')
-        txnsLines.ItemId = txnsLines.ItemId.astype('str')
+        txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+        item.ItemId = item.ItemId.fillna('').astype('str')
         txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        txnsLines[txnsLines['ItemId']=='0', 'ItemId']=='ITEM'
+        txnsLines[txnsLines['ItemId']=='0', 'ItemNo']=='ITEM'
+        txnsLines[txnsLines['ItemId']=='0', 'ItemName']=='ITEM'
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]        
         txnsLines['Company'] = companyName
         txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
@@ -771,8 +777,8 @@ def process_s50_orders(
     txnsLines['Quantity'] = txnsLines['Quantity'].astype('float').round(2)
     txnsLines['Rate'] = txnsLines['Rate'].astype('float').round(2)
     txnsLines['Total'] = txnsLines['Total'].astype('float').round(2)    
-    item.ItemId = item.ItemId.astype('str')
-    txnsLines.ItemId = txnsLines.ItemId.astype('str')
+    txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+    item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')  
     txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     txnsLines['Company'] = companyName
