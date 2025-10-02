@@ -80,7 +80,9 @@ modules = [
     ("sklearn.ensemble" , "RandomForestClassifier"),
     ("sklearn.preprocessing" , "LabelEncoder"),
     ("sklearn.model_selection" , "train_test_split"),
-    ("sklearn.metrics" , "accuracy_score")
+    ("sklearn.metrics" , "accuracy_score"),
+    ("psycopg2.errors", "DuplicateObject"),
+    ("psycopg2.errors", "UndefinedTable")
 ]
 for fr_mod, im_mod in modules:
     try:
@@ -2933,6 +2935,7 @@ def upload_to_redshift(
     redshift_db_name,
     redshift_master_username,
     redshift_master_password,
+    redshift_users,
     role_name,
     redshift_node_type,
     redshift_cluster_type,
@@ -3092,6 +3095,40 @@ def upload_to_redshift(
             print(prompt)
             write_file('log.txt' , f"{prompt}")
             raise
+            
+    for redshift_user in redshift_users:
+        try:
+            create_user_query = f"CREATE USER {redshift_user['username']} WITH PASSWORD '{redshift_user['password']}';"
+            cur.execute(create_user_query)
+            conn.commit()
+            prompt = f'{print_date_time()}\t\t[SUCCESS] User {redshift_user["username"]} created successfully.'
+            print(prompt)
+            write_file('log.txt', f"{prompt}")
+        except DuplicateObject:
+            conn.rollback()
+            prompt = f'{print_date_time()}\t\t[INFO] User {redshift_user["username"]} already exists. Skipping creation.'
+            print(prompt)
+            write_file('log.txt', f"{prompt}")
+        grant_usage_query = f'GRANT USAGE ON SCHEMA public TO {redshift_user['username']};'
+        cur.execute(grant_usage_query)
+        conn.commit()
+        for table in redshift_user['access']:
+            try:
+                grant_select_query = f'GRANT SELECT ON TABLE public."{table}" TO {redshift_user['username']};'
+                cur.execute(grant_select_query)
+                conn.commit()
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.'
+                print(prompt)
+                write_file('log.txt', f"{prompt}")
+            except UndefinedTable:
+                conn.rollback()
+                prompt = f'{print_date_time()}\t\t[ERROR] Table "{table}" does not exist. Skipping grant.'
+                print(prompt)
+                write_file('log.txt', f"{prompt}")
+        prompt = f'{print_date_time()}\t\tPermissions granted successfully for {redshift_user["username"]}.'
+        print(prompt)
+        write_file('log.txt', f"{prompt}")
+
     cur.close()
     conn.close()
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
@@ -3099,4 +3136,3 @@ def upload_to_redshift(
     prompt = f'{print_date_time()}\t\t🚀 Upload process completed.'
     print(prompt)
     write_file('log.txt' , f"{prompt}")
-
