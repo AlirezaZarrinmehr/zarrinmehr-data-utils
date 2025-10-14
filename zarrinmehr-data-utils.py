@@ -67,6 +67,7 @@ modules = [
     ("requests_oauthlib" , "OAuth1"),
     ("tqdm" , "tqdm"),
     ("googleapiclient.discovery" , "build"),
+    ("googleapiclient.errors" , "HttpError"),
     ("google.oauth2" , "service_account"),
     ("google.cloud" , "bigquery"),
     ("requests.auth" , "HTTPBasicAuth"),
