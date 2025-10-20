@@ -1373,11 +1373,26 @@ def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Tota
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
     try:
         sheet = build('sheets', 'v4', developerKey=apiKey).spreadsheets()
-        sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=f"{sheetName}!A:Z").execute()
+        sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=f"{sheetName}").execute()
         sheet_values = sheet_data.get('values', [])
         if not sheet_values:
             raise ValueError("Google Sheet is empty or range is incorrect.")
-        df = pd.DataFrame(sheet_values[1:], columns=sheet_values[0])
+        
+        max_cols = max(len(row) for row in sheet_values)
+        
+        def col_letter(n):
+            result = ''
+            while n > 0:
+                n, remainder = divmod(n-1, 26)
+                result = chr(65 + remainder) + result
+            return result
+        last_col_letter = col_letter(max_cols)
+        dynamic_range = f"{sheetName}!A:{last_col_letter}"
+        sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=dynamic_range).execute()
+        sheet_values = sheet_data.get('values', [])
+        headers = sheet_values[0]
+        data_rows = [row + ['']*(len(headers)-len(row)) for row in sheet_values[1:]]
+        df = pd.DataFrame(data_rows, columns=headers)
         return df
     except HttpError as e:
         raise Exception(f"Google Sheets API request failed: {e}")  
