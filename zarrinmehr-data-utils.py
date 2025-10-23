@@ -1390,7 +1390,7 @@ def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
         dynamic_range = f"{sheetName}!A:{last_col_letter}"
         sheet_data = sheet.values().get(spreadsheetId=spreadsheetId, range=dynamic_range).execute()
         sheet_values = sheet_data.get('values', [])
-        headers = sheet_values[0]
+        headers = [h.strip() for h in sheet_values[0]]
         data_rows = [row + ['']*(len(headers)-len(row)) for row in sheet_values[1:]]
         df = pd.DataFrame(data_rows, columns=headers)
         return df
