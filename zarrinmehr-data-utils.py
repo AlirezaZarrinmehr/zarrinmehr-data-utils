@@ -280,7 +280,7 @@ def process_qb_transactions(
             creditCardLines = txnsLines.copy()
             creditCard = txns.copy()    
     # #-----------------------------------------------------------------------------------------------------------
-    SalesOrderLinkedTxn = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrderLinkedTxn.xlsx', encoding = 'Windows-1252', is_csv_file=False)
+    SalesOrderLinkedTxn = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrderLinkedTxnV1.xlsx', encoding = 'Windows-1252', is_csv_file=False)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[SalesOrderLinkedTxn['LinkedTxnTxnType']=='Invoice'].copy()
     SalesOrderLinkedTxn.rename(columns = {
         'RefNumber':'OrderNo',
@@ -425,7 +425,7 @@ def process_qb_orders(
 
     orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'NOT INVOICED IN FULL', f'{txnsType2}Status'] = 'Open'
     orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'INVOICED IN FULL', f'{txnsType2}Status'] = 'Closed'
-    SalesOrder = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrder.xlsx', encoding = 'Windows-1252', is_csv_file=False)
+    SalesOrder = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrderV1.xlsx', encoding = 'Windows-1252', is_csv_file=False)
     closedOrders = SalesOrder.loc[(SalesOrder['IsManuallyClosed']==1)|(SalesOrder['IsFullyInvoiced']==1)]
     closedOrders = closedOrders['RefNumber'].fillna('').astype('str')
     orders.loc[orders[f'{txnsType2}No'].fillna('').astype('str').isin(closedOrders), f'{txnsType2}Status'] = 'Closed'
