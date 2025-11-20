@@ -1036,9 +1036,49 @@ def load_data_via_query(
         df = pandas_gbq.read_gbq(sql_query, project_id=project_id, credentials=credentials)
         df.columns = df.columns.str.title()
         return df
-    else:
-        raise ValueError("source_type must be either 'mssql' or 'bigquery'")
 
+    elif source_type == "qodbc":
+        if not connection_string:
+            raise ValueError("connection_string is required for QODBC source.")
+        conn = pyodbc.connect(connection_string, autocommit=True)
+        cursor = conn.cursor()
+        cursor.execute(sql_query)
+        chunks = []
+        first_chunk = True
+        with tqdm(desc="Fetching rows (QODBC – no row count)", unit="chunk") as pbar:
+            while True:
+                rows = cursor.fetchmany(chunksize)
+                if not rows:
+                    break
+                if file_path:
+                    if first_chunk:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                        with open(file_path, "w", newline='', encoding=encoding) as f:
+                            writer = csv.writer(f)
+                            columns = [col[0] for col in cursor.description]
+                            writer.writerow(columns)
+                        first_chunk = False
+                    with open(file_path, "a", newline='', encoding=encoding) as f:
+                        writer = csv.writer(f)
+                        for r in rows:
+                            writer.writerow([str(v) for v in r])
+                else:
+                    if first_chunk:
+                        columns = [col[0] for col in cursor.description]
+                        first_chunk = False
+                    for r in rows:
+                        chunks.append(dict(zip(columns, r)))
+                pbar.update(1)
+        cursor.close()
+        conn.close()
+        if not file_path:
+            df = pd.DataFrame(chunks)
+            df.columns = df.columns.str.title()
+            return df
+
+    else:
+        raise ValueError("source_type must be 'mssql', 'bigquery', or 'qodbc'")
 
 def upload_to_s3(
     data,
