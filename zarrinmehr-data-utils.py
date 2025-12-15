@@ -3165,12 +3165,12 @@ def upload_to_redshift(
             prompt = f'{print_date_time()}\t\t[INFO] User {redshift_user["username"]} already exists. Skipping creation.'
             print(prompt)
             write_file('log.txt', f"{prompt}")
-        grant_usage_query = f'GRANT USAGE ON SCHEMA public TO {redshift_user['username']};'
+        grant_usage_query = f"""GRANT USAGE ON SCHEMA public TO "{redshift_user['username']}";"""
         cur.execute(grant_usage_query)
         conn.commit()
         for table in redshift_user['access']:
             try:
-                grant_select_query = f'GRANT SELECT ON TABLE public."{table}" TO {redshift_user['username']};'
+                grant_select_query = f"""GRANT SELECT ON TABLE public."{table}" TO "{redshift_user['username']}";"""
                 cur.execute(grant_select_query)
                 conn.commit()
                 prompt = f'{print_date_time()}\t\t[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.'
