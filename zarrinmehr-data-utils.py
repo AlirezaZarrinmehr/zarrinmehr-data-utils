@@ -3154,7 +3154,7 @@ def upload_to_redshift(
             
     for redshift_user in redshift_users:
         try:
-            create_user_query = f"CREATE USER {redshift_user['username']} WITH PASSWORD '{redshift_user['password']}';"
+            create_user_query = f"CREATE USER "{redshift_user['username']}" WITH PASSWORD '{redshift_user['password']}';"
             cur.execute(create_user_query)
             conn.commit()
             prompt = f'{print_date_time()}\t\t[SUCCESS] User {redshift_user["username"]} created successfully.'
