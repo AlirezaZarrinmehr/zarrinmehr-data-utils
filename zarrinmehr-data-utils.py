@@ -222,6 +222,24 @@ def process_qb_transactions(
             (pd.to_datetime(txnsLines['Txndate'], errors='coerce')>=start_date)&\
             (pd.to_datetime(txnsLines['Txndate'], errors='coerce')<=end_date)
         ].copy()  
+        txnsLines.rename(columns = {
+            'Txnid':'TransactionId',
+            'Refnumber':'TransactionNo',
+            'Accountreffullname':'Account',
+            'Invoicelineitemreffullname':'ItemId',
+            'Invoicelinedesc':'ItemDescription',
+            'Invoicelinequantity':'Quantity',
+            'Invoicelinerate':'Rate',
+        }, inplace = True)
+        txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+        item.ItemId = item.ItemId.fillna('').astype('str')
+        txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        txnsLines['Company'] = companyName
+        txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
+        txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['Txnid'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         txns.rename(columns = {
             'Txnid':'TransactionId',
             'Refnumber':'TransactionNo',
@@ -243,32 +261,18 @@ def process_qb_transactions(
             'Shipaddresspostalcode':'ShipZip',
             'Subtotal':'Total',
         }, inplace = True)
-        txnsLines.rename(columns = {
-            'Txnid':'TransactionId',
-            'Refnumber':'TransactionNo',
-            'Accountreffullname':'Account',
-            'Invoicelineitemreffullname':'ItemId',
-            'Invoicelinedesc':'ItemDescription',
-            'Invoicelinequantity':'Quantity',
-            'Invoicelinerate':'Rate',
-            # 'Invoicelineamount':'Total'
-        }, inplace = True)
         txns['subTotal'] = txns['Total']
-        txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
-        item.ItemId = item.ItemId.fillna('').astype('str')
-        txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-        txnsLines['Company'] = companyName
-        txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-        txns['Company'] = companyName
-        txns = txns[['Company'] + txns.columns[:-1].tolist()]
         txns['TransactionStatus'] = txns['Ispaid'].fillna('').astype('str').replace({'True': 'INVOICED IN FULL', 'False': 'NOT INVOICED IN FULL', '': 'NOT INVOICED IN FULL'})
+
         txns.CustNo = txns.CustNo.fillna('').astype('str')
         customers.CustNo = customers.CustNo.fillna('').astype('str')
         txns = txns.merge(customers[['CustNo', 'CustName', 'CommonName']], on = 'CustNo', how = 'left').copy()
-        txns['CustId'] = txns['CustNo'].copy()
-        txns['OrderId'] = txns['OrderNo'].copy()
-        txns=txns[['Company', 'OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustNo', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total', 'CustId', 'OrderId']]
-        txnsLines=txnsLines[['Company', 'TransactionId', 'TransactionNo', 'Account', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'ItemId']]
+        invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+
+        txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustNo', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+        txns['Company'] = companyName
+        txns = txns[['Company'] + txns.columns[:-1].tolist()]
+        txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
 
     else:
         for txnsType in [
