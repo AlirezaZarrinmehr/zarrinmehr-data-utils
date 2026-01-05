@@ -461,197 +461,377 @@ def process_qb_orders(
     orderCloseDates,
     DBIA,
     itemsCategoriesV3,
-    SalesOrderLinkedTxn
+    SalesOrderLinkedTxn,
+    qodbc=False
 ):
-    prompt = f'{txnsType2}...'
-    print(prompt)
-    write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
-    #### orders
-    txns_df, txnsLines = extract_transaction_header_line(transactions, txnsType)
-    txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = ['TRNSID'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txns_df = txns_df.merge(
-        txnsLines[txnsLines['EXTRA'] == 'AUTOSTAX'][['DOCNUM', 'AMOUNT']].rename(columns = {'AMOUNT':'TAX'}),
-        on='DOCNUM',
-        how='left',
-        suffixes=('_iif', '_lines')
-    )
-    if txnsType == 'PURCHORD':
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')*-1
-    else:
-        txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')
-    txns_df['TAX'] = txns_df['TAX'].fillna(0).astype('str').str.replace(',', '').astype('float')
-    txns_df['subTotal'] = txns_df['AMOUNT'] + txns_df['TAX']
-    txns_df.rename(columns = {
-        'TRNSID':f'{txnsType2}Id',
-        'DOCNUM':f'{txnsType2}No',
-        'DATE':f'{txnsType2}Date',
-        'PAID':f'{txnsType2}Status',
-        'REP':txnsType4,
-        'NAME':f'{txnsType3}No',
-        'PONUM':txnsType5,
-        'SHIPDATE':'ShipDate',
-        'AddressName':'BillName',
-        'AddressCity':'BillCity',
-        'AddressState':'BillState',
-        'AddressZip':'BillZip',
-        'ShippingAddressName':'ShipName',
-        'ShippingAddressCity':'ShipCity',
-        'ShippingAddressState':'ShipState',
-        'ShippingAddressZip':'ShipZip',
-        'AMOUNT':'Total',
-    }, inplace = True)
-    txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].fillna('').astype('str')
-    txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
-    txns_df[f'{txnsType2}Status'] = txns_df[f'{txnsType2}Status'].fillna('').astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
-    txns_df[txnsType4] = txns_df[txnsType4].fillna('').astype('str').str.split(':').str[-1]
-    txns_df = txns_df[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5, f'{txnsType3}No', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
-    txns_df = txns_df.copy()
-    txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date'], errors='coerce') > start_date]
-    txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date'], errors='coerce') < end_date]
-    orders = txns_df.copy()
-    #### Lines
-    _, txnsLines = extract_transaction_header_line(transactions, txnsType)
-    txnsLines = txnsLines[txnsLines['EXTRA'] != 'AUTOSTAX']
-    txnsLines.rename(columns = {
-        'SPLID':f'{txnsType2}Id',
-        'DOCNUM':f'{txnsType2}No',
-        'INVITEM':'ItemId',
-        'MEMO':'ItemDescription',
-        'QNTY':'Quantity',
-        'PRICE':'Rate',
-        'AMOUNT':'Total'
-    }, inplace = True)
-    txnsLines['ItemDescription'] = txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
-    txnsLines = txnsLines[~txnsLines[f'{txnsType2}Id'].isna()].copy()
-    txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].fillna('').astype('str')
-    txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
-    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    if txnsType == 'PURCHORD':
-        txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
-        txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
-    else:
-        txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
-        txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
-    txnsLines['Rate'] = txnsLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
-    txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
-    txnsLines = txnsLines.copy()
-    txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
-    txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
-    item.ItemId = item.ItemId.fillna('').astype('str')
-    txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemId']='ITEM'
-    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemNo']='ITEM'
-    txnsLines.loc[txnsLines['ItemId']=='0', 'ItemName']='ITEM'
-    txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
-    txnsLines['Company'] = companyName
-    txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    ordersLines = txnsLines.copy()
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id','ShipDate']], on = f'{txnsType2}Id', how = 'left')
-    orders.drop(columns=['ShipDate'], inplace=True)
+    if qodbc:
+        prompt = f'{txnsType2}...'
+        print(prompt)
+        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        #### orders
+        if txnsType == 'PURCHORD':
+            object_key_1 = 'PurchaseOrder.csv'
+            object_key_2 = 'PurchaseOrderLine.csv'
+            object_key_3 = 'Isfullyreceived'
+            object_key_4 = 'Inventorysitereffullname'
+            object_key_5 = 'Vendorreffullname'
+            object_key_6 = 'Txnnumber'
+            object_key_7 = 'Expecteddate'
+            object_key_8 = 'Totalamount'
+            object_key_9 = 'Purchase'
+        else:
+            object_key_1 = 'SalesOrder.csv'
+            object_key_2 = 'SalesOrderLine.csv'
+            object_key_3 = 'Isfullyinvoiced'
+            object_key_4 = 'Salesrepreffullname'
+            object_key_5 = 'Customerreffullname'
+            object_key_6 = 'Ponumber'
+            object_key_7 = 'Shipdate'
+            object_key_8 = 'Subtotal'
+            object_key_9 = 'Sales'
+        orders = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_1, is_csv_file=True )
+        ordersLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_2, is_csv_file=True )
+        orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        orders.rename(columns = {
+            'Txnid':f'{txnsType2}Id',
+            'Refnumber':f'{txnsType2}No',
+            'Txndate':f'{txnsType2}Date',
+            object_key_4:txnsType4,
+            object_key_5:f'{txnsType3}No',
+            object_key_6:txnsType5,
+            object_key_7:'ShipDate',
+            'Shipaddressaddr1':'ShipName',
+            'Shipaddresscity':'ShipCity',
+            'Shipaddressstate':'ShipState',
+            'Shipaddresspostalcode':'ShipZip',
+            object_key_8:'Total'
+        }, inplace = True)
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        orders[f'{txnsType2}Status'] = 'Open'
+        orders.loc[(orders['Ismanuallyclosed']==1)|(orders[object_key_3]==1), f'{txnsType2}Status'] = 'Closed'
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5, f'{txnsType3}No', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+        orders = orders.copy()
+        orders = orders[
+            (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')>=start_date)&\
+            (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')<=end_date)
+        ].copy()
+        orders = orders.copy()
+        #### Lines
+        ordersLines.rename(columns = {
+            'Txnid':f'{txnsType2}Id',
+            'Refnumber':f'{txnsType2}No',
+            f'{object_key_9}orderlineitemreffullname':'ItemId',
+            f'{object_key_9}orderlinedesc':'ItemDescription',
+            f'{object_key_9}orderlinequantity':'Quantity',
+            f'{object_key_9}orderlinerate':'Rate',
+            f'{object_key_9}orderlineamount':'Total'
+        }, inplace = True)
+        ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
+        ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        ordersLines = ordersLines.copy()
+        ordersLines[['Quantity', 'Rate', 'Total']] = ordersLines[['Quantity', 'Rate', 'Total']].fillna(0)
+        ordersLines.ItemId = ordersLines.ItemId.fillna('').astype('str')
+        item.ItemId = item.ItemId.fillna('').astype('str')
+        ordersLines = ordersLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        ordersLines.loc[ordersLines['ItemId']=='0', 'ItemId']='ITEM'
+        ordersLines.loc[ordersLines['ItemId']=='0', 'ItemNo']='ITEM'
+        ordersLines.loc[ordersLines['ItemId']=='0', 'ItemName']='ITEM'
+        ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        ordersLines['Company'] = companyName
+        ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
+        ordersLines = ordersLines.copy()
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id','ShipDate']], on = f'{txnsType2}Id', how = 'left')
+        orders.drop(columns=['ShipDate'], inplace=True)
+        orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+        orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].fillna('').astype('str')
+        orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
+        if not orders.empty:
+            orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
+        else:
+            orders['CloseDate'] = pd.NaT
+        orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
+        customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
+        orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+        orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
+        mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
+        print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+        orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
+        #-----------------------------------------------------------------------------------------------------------
+        orders[f'{txnsType3}Id'] = orders[f'{txnsType3}No'].copy()
+        #-----------------------------------------------------------------------------------------------------------
+        #-------------------------------------
+        orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
+        orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].fillna('').astype('str').str.strip() != '')]
+        orders['Company'] = companyName
+        orders = orders[['Company'] + orders.columns[:-1].tolist()]
 
-    orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'NOT INVOICED IN FULL', f'{txnsType2}Status'] = 'Open'
-    orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'INVOICED IN FULL', f'{txnsType2}Status'] = 'Closed'
-    SalesOrder = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrder.xlsx', encoding = 'Windows-1252', is_csv_file=False)
-    closedOrders = SalesOrder.loc[(SalesOrder['IsManuallyClosed']==1)|(SalesOrder['IsFullyInvoiced']==1)]
-    closedOrders = closedOrders['RefNumber'].fillna('').astype('str')
-    orders.loc[orders[f'{txnsType2}No'].fillna('').astype('str').isin(closedOrders), f'{txnsType2}Status'] = 'Closed'
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
-    orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].fillna('').astype('str')
-    orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
-    if not orders.empty:
-        orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
-    else:
-        orders['CloseDate'] = pd.NaT
-    orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
-    customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
-    orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}No'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    orders = orders[~orders[f'{txnsType2}No'].str.upper().duplicated()]
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
-    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
-    mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}No', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}No').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
-    mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['subTotal'], mismatched_orders['Total_lin'], atol=0.1)]
-    print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
-    orders = orders[~orders[f'{txnsType2}No'].isin(mismatched_orders[f'{txnsType2}No'])]
-    #-----------------------------------------------------------------------------------------------------------
-    orders.drop(columns = 'Total', inplace=True)
-    orders.rename(columns = {'subTotal':'Total'}, inplace = True)
-    orders[f'{txnsType3}Id'] = orders[f'{txnsType3}No'].copy()
-    #-----------------------------------------------------------------------------------------------------------
-    #-------------------------------------
-    orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
-    orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].fillna('').astype('str').str.strip() != '')]
-    orders['Company'] = companyName
-    orders = orders[['Company'] + orders.columns[:-1].tolist()]
-
-    #-------------------------------------
-    ordersLines = ordersLines[ordersLines[f'{txnsType2}No'].isin(orders[f'{txnsType2}No'])]
-    #-------------------------------------
-    ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        s3_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
-    )
-    #-----------------------------------------------------------------------------------------------------------
-    orderTypes = ordersLines.merge(
-                        itemsCategoriesV3[['index', 'ItemLevel2']] \
-                        .rename(columns = {'index':'ItemId'}) \
-                        .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
-                    ) \
-                    .rename(columns={'ItemLevel2': f'{txnsType2}Type'}) \
-                    .sort_values([f'{txnsType2}No', 'Total'], ascending=[True, False]) \
-                    .groupby(f'{txnsType2}No').agg({f'{txnsType2}Type': 'first'}).reset_index()
-
-    orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
-    orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].fillna('').astype('str')
-    orders = orders.merge(orderTypes, on = f'{txnsType2}No', how = 'left')
-    #-----------------------------------------------------------------------------------------------------------
-    if companyName == 'KOMAR':  
-        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType3}No']], on = f'{txnsType2}Id', how = 'left').rename(columns = {f'{txnsType3}No' : 'SerialNo'})
-        ordersLines['SerialNo'] = ordersLines['SerialNo'].apply(
-            lambda x: re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)).group() if re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)) else None
+        #-------------------------------------
+        ordersLines = ordersLines[ordersLines[f'{txnsType2}Id'].isin(orders[f'{txnsType2}Id'])]
+        #-------------------------------------
+        ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
+            item_df, 
+            companyName, 
+            s3_client, 
+            s3_bucket_name, 
+            DBIA, 
+            itemsCategoriesV3,
+            ordersLines
         )
-        shipInstallDates = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
-        shipInstallDates = shipInstallDates[~shipInstallDates.SerialNo.duplicated()]
-        shipInstallDates.SerialNo = shipInstallDates.SerialNo.fillna('').astype('str')
-        ordersLines.SerialNo = ordersLines.SerialNo.fillna('').astype('str')
-        shipInstallDates['InstallDate'] = pd.to_datetime(shipInstallDates['InstallDate'], errors='coerce')
-        ordersLines = ordersLines.merge(shipInstallDates, on = 'SerialNo', how = 'left')
+        #-----------------------------------------------------------------------------------------------------------
+        orderTypes = ordersLines.merge(
+                            itemsCategoriesV3[['index', 'ItemLevel2']] \
+                            .rename(columns = {'index':'ItemId'}) \
+                            .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
+                        ) \
+                        .rename(columns={'ItemLevel2': f'{txnsType2}Type'}) \
+                        .sort_values([f'{txnsType2}Id', 'Total'], ascending=[True, False]) \
+                        .groupby(f'{txnsType2}Id').agg({f'{txnsType2}Type': 'first'}).reset_index()
+
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        orderTypes[f'{txnsType2}Id'] = orderTypes[f'{txnsType2}Id'].fillna('').astype('str')
+        orders = orders.merge(orderTypes, on = f'{txnsType2}Id', how = 'left')
+        #-----------------------------------------------------------------------------------------------------------
+        if companyName == 'KOMAR':  
+            ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType3}No']], on = f'{txnsType2}Id', how = 'left').rename(columns = {f'{txnsType3}No' : 'SerialNo'})
+            ordersLines['SerialNo'] = ordersLines['SerialNo'].apply(
+                lambda x: re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)).group() if re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)) else None
+            )
+            shipInstallDates = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
+            shipInstallDates = shipInstallDates[~shipInstallDates.SerialNo.duplicated()]
+            shipInstallDates.SerialNo = shipInstallDates.SerialNo.fillna('').astype('str')
+            ordersLines.SerialNo = ordersLines.SerialNo.fillna('').astype('str')
+            shipInstallDates['InstallDate'] = pd.to_datetime(shipInstallDates['InstallDate'], errors='coerce')
+            ordersLines = ordersLines.merge(shipInstallDates, on = 'SerialNo', how = 'left')
+        else:
+            ordersLines['InstallDate'] = np.nan
+        #-----------------------------------------------------------------------------------------------------------
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
+            (pd.to_datetime(ordersLines['ShipDate']) > end_date),
+            'ShipDate'
+        ] = np.nan
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
+            (pd.to_datetime(ordersLines['InstallDate']) > end_date),
+            'InstallDate'
+        ] = np.nan
+        #-----------------------------------------------------------------------------------------------------------
+        SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(SalesOrderLinkedTxn, on = f'{txnsType2}No', how = 'left')
+        #-----------------------------------------------------------------------------------------------------------
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}Status']], on = f'{txnsType2}Id', how = 'left').rename(columns={f'{txnsType2}Status':'ItemStatus'})
+        ordersLines.loc[(ordersLines['ShipDate'].notna()), 'ItemStatus'] = 'SHIPPED'
+        ordersLines.loc[(ordersLines['InstallDate'].notna()), 'ItemStatus'] = 'INSTALLED'
+        ordersLines.loc[(ordersLines['InvoiceDate'].notna()), 'ItemStatus'] = 'INVOICED'
+        #-----------------------------------------------------------------------------------------------------------
+        ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
+        #-----------------------------------------------------------------------------------------------------------
     else:
-        ordersLines['InstallDate'] = np.nan
-    #-----------------------------------------------------------------------------------------------------------
-    ordersLines.loc[
-        (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
-        (pd.to_datetime(ordersLines['ShipDate']) > end_date),
-        'ShipDate'
-    ] = np.nan
-    ordersLines.loc[
-        (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
-        (pd.to_datetime(ordersLines['InstallDate']) > end_date),
-        'InstallDate'
-    ] = np.nan
-    #-----------------------------------------------------------------------------------------------------------
-    SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].fillna('').astype('str')
-    ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
-    ordersLines = ordersLines.merge(SalesOrderLinkedTxn, on = f'{txnsType2}No', how = 'left')
-    #-----------------------------------------------------------------------------------------------------------
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}Status']], on = f'{txnsType2}Id', how = 'left').rename(columns={f'{txnsType2}Status':'ItemStatus'})
-    ordersLines.loc[(ordersLines['ShipDate'].notna()), 'ItemStatus'] = 'SHIPPED'
-    ordersLines.loc[(ordersLines['InstallDate'].notna()), 'ItemStatus'] = 'INSTALLED'
-    ordersLines.loc[(ordersLines['InvoiceDate'].notna()), 'ItemStatus'] = 'INVOICED'
-    #-----------------------------------------------------------------------------------------------------------
-    ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
-    #-----------------------------------------------------------------------------------------------------------
+        prompt = f'{txnsType2}...'
+        print(prompt)
+        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        #### orders
+        txns_df, txnsLines = extract_transaction_header_line(transactions, txnsType)
+        txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = ['TRNSID'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txns_df = txns_df.merge(
+            txnsLines[txnsLines['EXTRA'] == 'AUTOSTAX'][['DOCNUM', 'AMOUNT']].rename(columns = {'AMOUNT':'TAX'}),
+            on='DOCNUM',
+            how='left',
+            suffixes=('_iif', '_lines')
+        )
+        if txnsType == 'PURCHORD':
+            txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')*-1
+        else:
+            txns_df['AMOUNT'] = txns_df['AMOUNT'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        txns_df['TAX'] = txns_df['TAX'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        txns_df['subTotal'] = txns_df['AMOUNT'] + txns_df['TAX']
+        txns_df.rename(columns = {
+            'TRNSID':f'{txnsType2}Id',
+            'DOCNUM':f'{txnsType2}No',
+            'DATE':f'{txnsType2}Date',
+            'PAID':f'{txnsType2}Status',
+            'REP':txnsType4,
+            'NAME':f'{txnsType3}No',
+            'PONUM':txnsType5,
+            'SHIPDATE':'ShipDate',
+            'AddressName':'BillName',
+            'AddressCity':'BillCity',
+            'AddressState':'BillState',
+            'AddressZip':'BillZip',
+            'ShippingAddressName':'ShipName',
+            'ShippingAddressCity':'ShipCity',
+            'ShippingAddressState':'ShipState',
+            'ShippingAddressZip':'ShipZip',
+            'AMOUNT':'Total',
+        }, inplace = True)
+        txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].fillna('').astype('str')
+        txns_df[f'{txnsType2}Id'] = txns_df[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
+        txns_df[f'{txnsType2}Status'] = txns_df[f'{txnsType2}Status'].fillna('').astype('str').replace({'Y': 'INVOICED IN FULL', 'N': 'NOT INVOICED IN FULL'})
+        txns_df[txnsType4] = txns_df[txnsType4].fillna('').astype('str').str.split(':').str[-1]
+        txns_df = txns_df[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5, f'{txnsType3}No', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        txns_df = txns_df.copy()
+        txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date'], errors='coerce') > start_date]
+        txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date'], errors='coerce') < end_date]
+        orders = txns_df.copy()
+        #### Lines
+        _, txnsLines = extract_transaction_header_line(transactions, txnsType)
+        txnsLines = txnsLines[txnsLines['EXTRA'] != 'AUTOSTAX']
+        txnsLines.rename(columns = {
+            'SPLID':f'{txnsType2}Id',
+            'DOCNUM':f'{txnsType2}No',
+            'INVITEM':'ItemId',
+            'MEMO':'ItemDescription',
+            'QNTY':'Quantity',
+            'PRICE':'Rate',
+            'AMOUNT':'Total'
+        }, inplace = True)
+        txnsLines['ItemDescription'] = txnsLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
+        txnsLines = txnsLines[~txnsLines[f'{txnsType2}Id'].isna()].copy()
+        txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].fillna('').astype('str')
+        txnsLines[f'{txnsType2}Id'] = txnsLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep)
+        txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        if txnsType == 'PURCHORD':
+            txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
+            txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
+        else:
+            txnsLines['Quantity'] = txnsLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
+            txnsLines['Total'] = txnsLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float') * -1
+        txnsLines['Rate'] = txnsLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+        txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        txnsLines = txnsLines.copy()
+        txnsLines[['Quantity', 'Rate', 'Total']] = txnsLines[['Quantity', 'Rate', 'Total']].fillna(0)
+        txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+        item.ItemId = item.ItemId.fillna('').astype('str')
+        txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemId']='ITEM'
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemNo']='ITEM'
+        txnsLines.loc[txnsLines['ItemId']=='0', 'ItemName']='ITEM'
+        txnsLines = txnsLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+        txnsLines['Company'] = companyName
+        txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
+        ordersLines = txnsLines.copy()
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id','ShipDate']], on = f'{txnsType2}Id', how = 'left')
+        orders.drop(columns=['ShipDate'], inplace=True)
+
+        orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'NOT INVOICED IN FULL', f'{txnsType2}Status'] = 'Open'
+        orders.loc[orders[f'{txnsType2}Status'].fillna('').astype('str') == 'INVOICED IN FULL', f'{txnsType2}Status'] = 'Closed'
+        SalesOrder = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesOrder.xlsx', encoding = 'Windows-1252', is_csv_file=False)
+        closedOrders = SalesOrder.loc[(SalesOrder['IsManuallyClosed']==1)|(SalesOrder['IsFullyInvoiced']==1)]
+        closedOrders = closedOrders['RefNumber'].fillna('').astype('str')
+        orders.loc[orders[f'{txnsType2}No'].fillna('').astype('str').isin(closedOrders), f'{txnsType2}Status'] = 'Closed'
+        orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+        orderCloseDates[f'{txnsType2}No'] = orderCloseDates[f'{txnsType2}No'].fillna('').astype('str')
+        orders = orders.merge(orderCloseDates, on = f'{txnsType2}No', how = 'left')
+        if not orders.empty:
+            orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
+        else:
+            orders['CloseDate'] = pd.NaT
+        orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
+        customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
+        orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}No'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        orders = orders[~orders[f'{txnsType2}No'].str.upper().duplicated()]
+        orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
+        mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}No', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}No').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
+        mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['subTotal'], mismatched_orders['Total_lin'], atol=0.1)]
+        print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+        orders = orders[~orders[f'{txnsType2}No'].isin(mismatched_orders[f'{txnsType2}No'])]
+        #-----------------------------------------------------------------------------------------------------------
+        orders.drop(columns = 'Total', inplace=True)
+        orders.rename(columns = {'subTotal':'Total'}, inplace = True)
+        orders[f'{txnsType3}Id'] = orders[f'{txnsType3}No'].copy()
+        #-----------------------------------------------------------------------------------------------------------
+        #-------------------------------------
+        orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
+        orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].fillna('').astype('str').str.strip() != '')]
+        orders['Company'] = companyName
+        orders = orders[['Company'] + orders.columns[:-1].tolist()]
+
+        #-------------------------------------
+        ordersLines = ordersLines[ordersLines[f'{txnsType2}No'].isin(orders[f'{txnsType2}No'])]
+        #-------------------------------------
+        ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
+            item_df, 
+            companyName, 
+            s3_client, 
+            s3_bucket_name, 
+            DBIA, 
+            itemsCategoriesV3,
+            ordersLines
+        )
+        #-----------------------------------------------------------------------------------------------------------
+        orderTypes = ordersLines.merge(
+                            itemsCategoriesV3[['index', 'ItemLevel2']] \
+                            .rename(columns = {'index':'ItemId'}) \
+                            .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
+                        ) \
+                        .rename(columns={'ItemLevel2': f'{txnsType2}Type'}) \
+                        .sort_values([f'{txnsType2}No', 'Total'], ascending=[True, False]) \
+                        .groupby(f'{txnsType2}No').agg({f'{txnsType2}Type': 'first'}).reset_index()
+
+        orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
+        orderTypes[f'{txnsType2}No'] = orderTypes[f'{txnsType2}No'].fillna('').astype('str')
+        orders = orders.merge(orderTypes, on = f'{txnsType2}No', how = 'left')
+        #-----------------------------------------------------------------------------------------------------------
+        if companyName == 'KOMAR':  
+            ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType3}No']], on = f'{txnsType2}Id', how = 'left').rename(columns = {f'{txnsType3}No' : 'SerialNo'})
+            ordersLines['SerialNo'] = ordersLines['SerialNo'].apply(
+                lambda x: re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)).group() if re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)) else None
+            )
+            shipInstallDates = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
+            shipInstallDates = shipInstallDates[~shipInstallDates.SerialNo.duplicated()]
+            shipInstallDates.SerialNo = shipInstallDates.SerialNo.fillna('').astype('str')
+            ordersLines.SerialNo = ordersLines.SerialNo.fillna('').astype('str')
+            shipInstallDates['InstallDate'] = pd.to_datetime(shipInstallDates['InstallDate'], errors='coerce')
+            ordersLines = ordersLines.merge(shipInstallDates, on = 'SerialNo', how = 'left')
+        else:
+            ordersLines['InstallDate'] = np.nan
+        #-----------------------------------------------------------------------------------------------------------
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
+            (pd.to_datetime(ordersLines['ShipDate']) > end_date),
+            'ShipDate'
+        ] = np.nan
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
+            (pd.to_datetime(ordersLines['InstallDate']) > end_date),
+            'InstallDate'
+        ] = np.nan
+        #-----------------------------------------------------------------------------------------------------------
+        SalesOrderLinkedTxn[f'{txnsType2}No'] = SalesOrderLinkedTxn[f'{txnsType2}No'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}No'] = ordersLines[f'{txnsType2}No'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(SalesOrderLinkedTxn, on = f'{txnsType2}No', how = 'left')
+        #-----------------------------------------------------------------------------------------------------------
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}Status']], on = f'{txnsType2}Id', how = 'left').rename(columns={f'{txnsType2}Status':'ItemStatus'})
+        ordersLines.loc[(ordersLines['ShipDate'].notna()), 'ItemStatus'] = 'SHIPPED'
+        ordersLines.loc[(ordersLines['InstallDate'].notna()), 'ItemStatus'] = 'INSTALLED'
+        ordersLines.loc[(ordersLines['InvoiceDate'].notna()), 'ItemStatus'] = 'INVOICED'
+        #-----------------------------------------------------------------------------------------------------------
+        ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
+        #-----------------------------------------------------------------------------------------------------------
     return orders, ordersLines
 
 def process_s50_transactions(
