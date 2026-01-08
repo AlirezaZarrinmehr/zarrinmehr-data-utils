@@ -135,6 +135,12 @@ def truncate_with_etc_2(s, truncate_len):
     else:
         return s
 
+def kill_qb_processes():
+    processes = ["QBW.EXE", "axlbridge.exe"]
+    for proc in processes:
+        os.system(f"taskkill /f /im {proc} /t 2>nul")
+    print("Cleaned up lingering QB/QODBC processes.")
+    
 def process_qb_transactions(
     list_of_accounts,
     companyName,
@@ -1383,7 +1389,8 @@ def load_data_via_query(
         conn.close()
         if not file_path:
             df = pd.DataFrame(chunks)
-            df.columns = df.columns.str.title()
+            if not df.empty:
+                df.columns = df.columns.str.title()
             return df
 
     else:
