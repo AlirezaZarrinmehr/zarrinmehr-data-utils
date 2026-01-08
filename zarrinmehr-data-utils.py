@@ -83,7 +83,8 @@ modules = [
     ("sklearn.model_selection" , "train_test_split"),
     ("sklearn.metrics" , "accuracy_score"),
     ("psycopg2.errors", "DuplicateObject"),
-    ("psycopg2.errors", "UndefinedTable")
+    ("psycopg2.errors", "UndefinedTable"),
+    ("itertools", "islice")
 ]
 for fr_mod, im_mod in modules:
     try:
