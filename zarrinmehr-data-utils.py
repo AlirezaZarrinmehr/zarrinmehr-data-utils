@@ -142,6 +142,108 @@ def kill_qb_processes():
         os.system(f"taskkill /f /im {proc} /t 2>nul")
     print("Cleaned up lingering QB/QODBC processes.")
     
+def process_qb_expense_transactions(
+    list_of_accounts,
+    companyName,
+    transactions,
+    item,
+    vendors,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name
+):
+    transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
+    generalJournal = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv', is_csv_file=True )
+    generalJournalLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv', is_csv_file=True )
+    generalJournalLines.rename(columns = {
+        'Journallineaccountreffullname':'Accountreffullname',
+        'Fqtransactionlinkkey':'Fqtxnlinkkey',
+        'Journallineamount':'Total'
+    }, inplace = True)
+    generalJournalLines['Total']=-generalJournalLines['Total']
+    bills = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv', is_csv_file=True )
+    billsLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillItemLine.csv', is_csv_file=True )
+    billsLines=billsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
+    billsLines.rename(columns = {
+        'Itemlineamount':'Total'
+    }, inplace = True)
+    BillExpenseLine = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillExpenseLine.csv', is_csv_file=True )
+    BillExpenseLine.rename(columns = {
+        'Expenselineaccountreffullname':'Accountreffullname',
+        'Expenselineamount':'Total'
+    }, inplace = True)
+    vendorCredit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCredit.csv', is_csv_file=True )
+    vendorCreditLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditItemLine.csv', is_csv_file=True )
+    vendorCreditLines=vendorCreditLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
+    vendorCreditLines.rename(columns = {
+        'Itemlineamount':'Total'
+    }, inplace = True)
+    vendorCreditLines['Total']=-vendorCreditLines['Total']
+    VendorCreditExpenseLine = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditExpenseLine.csv', is_csv_file=True )
+    VendorCreditExpenseLine.rename(columns = {
+        'Expenselineaccountreffullname':'Accountreffullname',
+        'Expenselineamount':'Total'
+    }, inplace = True)
+    VendorCreditExpenseLine['Total']=-VendorCreditExpenseLine['Total']
+    generalJournal['TransactionType'] = 'GENERAL JOURNAL'
+    bills['TransactionType'] = 'BILL'
+    vendorCredit['TransactionType'] = 'VENDOR CREDIT'
+    txns = pd.concat([generalJournal, bills, vendorCredit], ignore_index=True)
+    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine], ignore_index=True)
+    txns = txns[
+        (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
+        (pd.to_datetime(txns['Txndate'], errors='coerce')<=end_date)
+    ].copy()
+    txnsLines = txnsLines[
+        (txnsLines['Accountreffullname'].str.upper().isin(list_of_accounts))&\
+        (pd.to_datetime(txnsLines['Txndate'], errors='coerce')>=start_date)&\
+        (pd.to_datetime(txnsLines['Txndate'], errors='coerce')<=end_date)
+    ].copy()  
+    txnsLines.rename(columns = {
+        'Txnid':'TransactionId',
+        'Refnumber':'TransactionNo',
+        'Accountreffullname':'Account',
+        'Itemlineitemreffullname':'ItemId',
+        'Itemlinedesc':'ItemDescription',
+        'Itemlinequantity':'Quantity',
+        'Itemlinecost':'Rate',
+    }, inplace = True)
+    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
+    item.ItemId = item.ItemId.fillna('').astype('str')
+    txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+    txnsLines['Company'] = companyName
+    txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
+    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['Txnid'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns.rename(columns = {
+        'Txnid':'TransactionId',
+        'Refnumber':'TransactionNo',
+        'Memo':'PurchaseOrderNo',
+        'Txndate':'TransactionDate',
+        'Vendorreffullname':'VendNo',
+        'Vendoraddressaddr1':'BillName',
+        'Vendoraddresscity':'BillCity',
+        'Vendoraddressstate':'BillState',
+        'Vendoraddresspostalcode':'BillZip',
+        'Amountdue':'Total',        
+    }, inplace = True)
+    txns['subTotal'] = txns['Total']
+    txns['TransactionStatus'] = txns['Ispaid'].fillna('').astype('str').replace({'True': 'PAID IN FULL', 'False': 'NOT PAID IN FULL', '': 'NOT PAID IN FULL'})
+    
+    txns.VendNo = txns.VendNo.fillna('').astype('str')
+    vendors.VendNo = vendors.VendNo.fillna('').astype('str')
+    txns = txns.merge(vendors[['VendNo', 'VendName', 'CommonName']], on = 'VendNo', how = 'left').copy()
+    invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    
+    txns = txns[['PurchaseOrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'VendNo', 'VendName', 'CommonName', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns['Company'] = companyName
+    txns = txns[['Company'] + txns.columns[:-1].tolist()]
+    txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
+    return txns, txnsLines
+
 def process_qb_transactions(
     list_of_accounts,
     companyName,
