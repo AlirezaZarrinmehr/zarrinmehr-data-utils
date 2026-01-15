@@ -142,6 +142,7 @@ def kill_qb_processes():
         os.system(f"taskkill /f /im {proc} /t 2>nul")
     print("Cleaned up lingering QB/QODBC processes.")
     
+
 def process_qb_expense_transactions(
     list_of_accounts,
     companyName,
@@ -186,11 +187,22 @@ def process_qb_expense_transactions(
         'Expenselineamount':'Total'
     }, inplace = True)
     VendorCreditExpenseLine['Total']=-VendorCreditExpenseLine['Total']
+
+    checks = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv', is_csv_file=True )
+    checksLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckItemLine.csv', is_csv_file=True )
+    checksLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
+    checksLines=checksLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
+    checksLines.rename(columns = {
+        'Itemlinecost':'Total'
+    }, inplace = True)
+
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     bills['TransactionType'] = 'BILL'
     vendorCredit['TransactionType'] = 'VENDOR CREDIT'
-    txns = pd.concat([generalJournal, bills, vendorCredit], ignore_index=True)
-    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine], ignore_index=True)
+    checks['TransactionType'] = 'CHECK'
+    
+    txns = pd.concat([generalJournal, bills, vendorCredit, checks], ignore_index=True)
+    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine, checksLines], ignore_index=True)
     txns = txns[
         (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
         (pd.to_datetime(txns['Txndate'], errors='coerce')<=end_date)
