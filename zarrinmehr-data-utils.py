@@ -52,7 +52,8 @@ modules = [
     "psycopg2",
     "pandas_gbq",
     "importlib.util",
-    "botocore.exceptions"
+    "botocore.exceptions",
+    "gc"
 ]
 for mod in modules:
     try:
@@ -1714,6 +1715,9 @@ def process_data_to_s3(
             prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
             print(prompt)
             write_file('log.txt' , f"{prompt}")
+        if 'df' in locals():
+            del df
+        gc.collect()
 
 
 def generate_open_cases_df(
