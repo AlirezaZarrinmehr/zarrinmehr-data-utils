@@ -196,13 +196,21 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Total'
     }, inplace = True)
 
+    salesReceipts = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceipt.csv', is_csv_file=True )
+    salesReceiptsLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceiptLine.csv', is_csv_file=True )
+    salesReceiptsLines=salesReceiptsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
+    salesReceiptsLines.rename(columns = {
+        'Amount':'Total'
+    }, inplace = True)
+    
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     bills['TransactionType'] = 'BILL'
     vendorCredit['TransactionType'] = 'VENDOR CREDIT'
     checks['TransactionType'] = 'CHECK'
+    salesReceipts['TransactionType'] = 'SALES RECEIPT'
     
-    txns = pd.concat([generalJournal, bills, vendorCredit, checks], ignore_index=True)
-    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine, checksLines], ignore_index=True)
+    txns = pd.concat([generalJournal, bills, vendorCredit, checks, salesReceipts], ignore_index=True)
+    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine, checksLines, salesReceiptsLines], ignore_index=True)
     txns = txns[
         (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
         (pd.to_datetime(txns['Txndate'], errors='coerce')<=end_date)
