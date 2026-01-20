@@ -233,6 +233,14 @@ def process_qb_expense_transactions(
         'Appliedtotxndiscountamount':'Total'
     }, inplace = True)
     billPaymentCheckLines['Total']=-billPaymentCheckLines['Total']
+
+    invoice = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
+    invoiceLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
+    invoiceLines = invoiceLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
+    invoiceLines.rename(columns = {
+        'Invoicelineamount':'Total'
+    }, inplace = True)
+    invoiceLines['Total']=-invoiceLines['Total']
     
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     bills['TransactionType'] = 'BILL'
@@ -242,6 +250,7 @@ def process_qb_expense_transactions(
     receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
     deposit['TransactionType'] = 'DEPOSIT'
     billPaymentCheck['TransactionType'] = 'BILLPAYMENTCHECK'
+    invoice['TransactionType'] = 'INVOICE'
     
     txns = pd.concat([
         generalJournal,
@@ -251,7 +260,8 @@ def process_qb_expense_transactions(
         salesReceipts, 
         receivePayment, 
         deposit,
-        billPaymentCheck
+        billPaymentCheck,
+        invoice
     ], ignore_index=True)
     txnsLines = pd.concat([
         generalJournalLines, 
@@ -264,7 +274,8 @@ def process_qb_expense_transactions(
         salesReceiptsLines,
         receivePaymentLines,
         depositLines,
-        billPaymentCheckLines
+        billPaymentCheckLines,
+        invoiceLines
     ], ignore_index=True)
     txns = txns[
         (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
