@@ -240,7 +240,6 @@ def process_qb_expense_transactions(
     invoiceLines.rename(columns = {
         'Amount':'Total'
     }, inplace = True)
-    invoiceLines['Total']=-invoiceLines['Total']
 
     creditCardCharge = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCharge.csv', is_csv_file=True )
     creditCardChargeLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardChargeExpenseLine.csv', is_csv_file=True )
