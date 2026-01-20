@@ -142,7 +142,7 @@ def kill_qb_processes():
     for proc in processes:
         os.system(f"taskkill /f /im {proc} /t 2>nul")
     print("Cleaned up lingering QB/QODBC processes.")
-    
+
 
 def process_qb_expense_transactions(
     list_of_accounts,
@@ -241,7 +241,24 @@ def process_qb_expense_transactions(
         'Invoicelineamount':'Total'
     }, inplace = True)
     invoiceLines['Total']=-invoiceLines['Total']
-    
+
+    creditCardCharge = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCharge.csv', is_csv_file=True )
+    creditCardChargeLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardChargeExpenseLine.csv', is_csv_file=True )
+    creditCardChargeLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
+    creditCardChargeLines.rename(columns = {
+        'Expenselineaccountreffullname':'Accountreffullname',
+        'Expenselineamount':'Total'
+    }, inplace = True)
+
+    creditCardCredit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCredit.csv', is_csv_file=True )
+    creditCardCreditLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCreditExpenseLine.csv', is_csv_file=True )
+    creditCardCreditLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
+    creditCardCreditLines.rename(columns = {
+        'Expenselineaccountreffullname':'Accountreffullname',
+        'Expenselineamount':'Total'
+    }, inplace = True)
+    creditCardCreditLines['Total']=-creditCardCreditLines['Total']
+
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     bills['TransactionType'] = 'BILL'
     vendorCredit['TransactionType'] = 'VENDOR CREDIT'
@@ -249,8 +266,10 @@ def process_qb_expense_transactions(
     salesReceipts['TransactionType'] = 'SALES RECEIPT'
     receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
     deposit['TransactionType'] = 'DEPOSIT'
-    billPaymentCheck['TransactionType'] = 'BILLPAYMENTCHECK'
+    billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
     invoice['TransactionType'] = 'INVOICE'
+    creditCardCharge['TransactionType'] = 'CREDIT CARD CHARGE'
+    creditCardCredit['TransactionType'] = 'CREDIT CARD CREDIT'
     
     txns = pd.concat([
         generalJournal,
@@ -261,7 +280,9 @@ def process_qb_expense_transactions(
         receivePayment, 
         deposit,
         billPaymentCheck,
-        invoice
+        invoice,
+        creditCardCharge,
+        creditCardCredit
     ], ignore_index=True)
     txnsLines = pd.concat([
         generalJournalLines, 
@@ -275,7 +296,9 @@ def process_qb_expense_transactions(
         receivePaymentLines,
         depositLines,
         billPaymentCheckLines,
-        invoiceLines
+        invoiceLines,
+        creditCardChargeLines,
+        creditCardCreditLines
     ], ignore_index=True)
     txns = txns[
         (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
