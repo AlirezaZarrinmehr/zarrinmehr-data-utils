@@ -1767,12 +1767,12 @@ def process_data_to_s3(
             continue
         object_key = table + '.csv'
         try:
-            prompt = f'{print_date_time()}\t\t[INFO] "{object_key}" table is empty and was not loaded to S3 "{bucket_name}" bucket !'
+            # prompt = f'{print_date_time()}\t\t[INFO] "{object_key}" table is empty and was not loaded to S3 "{bucket_name}" bucket !'
             if not file_path:
-                if df.empty:
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
-                    continue
+                # if df.empty:
+                #     print(prompt)
+                #     write_file('log.txt' , f"{prompt}")
+                #     continue
                 upload_to_s3(
                     data=df,
                     bucket_name=bucket_name,
