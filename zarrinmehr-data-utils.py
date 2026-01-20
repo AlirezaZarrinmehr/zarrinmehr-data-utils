@@ -236,9 +236,9 @@ def process_qb_expense_transactions(
 
     invoice = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
     invoiceLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
-    invoiceLines = invoiceLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
+    invoiceLines = invoiceLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
     invoiceLines.rename(columns = {
-        'Invoicelineamount':'Total'
+        'Amount':'Total'
     }, inplace = True)
     invoiceLines['Total']=-invoiceLines['Total']
 
