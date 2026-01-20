@@ -197,21 +197,75 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Total'
     }, inplace = True)
 
+    checkExpenseLine = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv', is_csv_file=True )
+    checkExpenseLine.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
+    checkExpenseLine.rename(columns = {
+        'Expenselineaccountreffullname':'Accountreffullname',
+        'Expenselineamount':'Total'
+    }, inplace = True)
+
     salesReceipts = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceipt.csv', is_csv_file=True )
     salesReceiptsLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceiptLine.csv', is_csv_file=True )
     salesReceiptsLines=salesReceiptsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
     salesReceiptsLines.rename(columns = {
         'Amount':'Total'
     }, inplace = True)
+
+    receivePayment = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePayment.csv', is_csv_file=True )
+    receivePaymentLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePaymentLine.csv', is_csv_file=True )
+    receivePaymentLines.rename(columns = {
+        'Appliedtotxndiscountaccountreffullname':'Accountreffullname',
+        'Appliedtotxndiscountamount':'Total'
+    }, inplace = True)
+
+    deposit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Deposit.csv', is_csv_file=True )
+    depositLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'DepositLine.csv', is_csv_file=True )
+    depositLines.rename(columns = {
+        'Depositlineaccountreffullname':'Accountreffullname',
+        'Depositlineamount':'Total'
+    }, inplace = True)
+    depositLines['Total']=-depositLines['Total']
+
+    billPaymentCheck = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheck.csv', is_csv_file=True )
+    billPaymentCheckLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheckLine.csv', is_csv_file=True )
+    billPaymentCheckLines.rename(columns = {
+        'Appliedtotxndiscountaccountreffullname':'Accountreffullname',
+        'Appliedtotxndiscountamount':'Total'
+    }, inplace = True)
+    billPaymentCheckLines['Total']=-billPaymentCheckLines['Total']
     
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     bills['TransactionType'] = 'BILL'
     vendorCredit['TransactionType'] = 'VENDOR CREDIT'
     checks['TransactionType'] = 'CHECK'
     salesReceipts['TransactionType'] = 'SALES RECEIPT'
+    receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
+    deposit['TransactionType'] = 'DEPOSIT'
+    billPaymentCheck['TransactionType'] = 'BILLPAYMENTCHECK'
     
-    txns = pd.concat([generalJournal, bills, vendorCredit, checks, salesReceipts], ignore_index=True)
-    txnsLines = pd.concat([generalJournalLines, billsLines, BillExpenseLine, vendorCreditLines, VendorCreditExpenseLine, checksLines, salesReceiptsLines], ignore_index=True)
+    txns = pd.concat([
+        generalJournal,
+        bills, 
+        vendorCredit, 
+        checks, 
+        salesReceipts, 
+        receivePayment, 
+        deposit,
+        billPaymentCheck
+    ], ignore_index=True)
+    txnsLines = pd.concat([
+        generalJournalLines, 
+        billsLines, 
+        BillExpenseLine, 
+        vendorCreditLines, 
+        VendorCreditExpenseLine, 
+        checksLines, 
+        checkExpenseLine,
+        salesReceiptsLines,
+        receivePaymentLines,
+        depositLines,
+        billPaymentCheckLines
+    ], ignore_index=True)
     txns = txns[
         (pd.to_datetime(txns['Txndate'], errors='coerce')>=start_date)&\
         (pd.to_datetime(txns['Txndate'], errors='coerce')<=end_date)
@@ -264,6 +318,7 @@ def process_qb_expense_transactions(
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
+
 
 def process_qb_transactions(
     list_of_accounts,
