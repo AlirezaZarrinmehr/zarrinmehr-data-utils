@@ -1489,7 +1489,6 @@ def process_exchange_rates(
 
     return dfAvg
 
-
 def load_data_via_query(
         sql_query,
         source_type,
@@ -1570,6 +1569,7 @@ def load_data_via_query(
         conn = pyodbc.connect(connection_string, autocommit=True)
         cursor = conn.cursor()
         cursor.execute(sql_query)
+        columns = [col[0] for col in cursor.description]
         chunks = []
         first_chunk = True
         with tqdm(desc="Fetching rows (QODBC – no row count)", unit="chunk") as pbar:
@@ -1583,7 +1583,6 @@ def load_data_via_query(
                             os.remove(file_path)
                         with open(file_path, "w", newline='', encoding=encoding) as f:
                             writer = csv.writer(f)
-                            columns = [col[0] for col in cursor.description]
                             writer.writerow(columns)
                         first_chunk = False
                     with open(file_path, "a", newline='', encoding=encoding) as f:
@@ -1591,18 +1590,15 @@ def load_data_via_query(
                         for r in rows:
                             writer.writerow([str(v) for v in r])
                 else:
-                    if first_chunk:
-                        columns = [col[0] for col in cursor.description]
-                        first_chunk = False
                     for r in rows:
                         chunks.append(dict(zip(columns, r)))
+                    first_chunk = False
                 pbar.update(1)
         cursor.close()
         conn.close()
         if not file_path:
-            df = pd.DataFrame(chunks)
-            if not df.empty:
-                df.columns = df.columns.str.title()
+            df = pd.DataFrame(chunks, columns=columns)
+            df.columns = df.columns.str.title()
             return df
 
     else:
