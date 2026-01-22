@@ -401,7 +401,6 @@ def process_qb_expense_transactions(
         depositLines[col] = depositLines[col].fillna('').astype(str)
 
     deposit = depositLines.groupby(['TransactionId']).agg({'TransactionNo':'max', 'PurchaseOrderNo':'max', 'TransactionDate':'max', 'VendNo':'max', 'Total':'sum'}).reset_index()
-    deposit['TransactionType'] = 'DEPOSIT'
     deposit = deposit [['TransactionId','TransactionNo','PurchaseOrderNo','TransactionDate','VendNo','Total']]
     deposit['TransactionType'] = 'DEPOSIT'
     depositLines = depositLines [['TransactionId','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
