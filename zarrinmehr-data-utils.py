@@ -227,12 +227,34 @@ def process_qb_expense_transactions(
     depositLines['Total']=-depositLines['Total']
 
     billPaymentCheck = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheck.csv', is_csv_file=True )
+    billPaymentCheck.rename(columns = {
+        'Txnid':'TransactionId',
+        'Refnumber':'TransactionNo',
+        'Memo':'PurchaseOrderNo',
+        'Txndate':'TransactionDate',
+        'Payeeentityreffullname':'VendNo',
+        'Addressaddr1':'BillName',
+        'Addresscity':'BillCity',
+        'Addressstate':'BillState',
+        'Addresspostalcode':'BillZip',
+        'Amount':'Total',        
+    }, inplace = True)
+    billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
+    billPaymentCheck = billPaymentCheck [['TransactionId','TransactionNo','PurchaseOrderNo','TransactionDate','VendNo','BillName','BillCity','BillState','BillZip','Total']]
+
     billPaymentCheckLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheckLine.csv', is_csv_file=True )
     billPaymentCheckLines.rename(columns = {
-        'Appliedtotxndiscountaccountreffullname':'Accountreffullname',
+        'Txnid':'TransactionId',
+        'Refnumber':'TransactionNo',
+        'Appliedtotxndiscountaccountreffullname':'Account',
+        'Appliedtotxnrefnumber':'ItemId',
         'Appliedtotxndiscountamount':'Total'
     }, inplace = True)
     billPaymentCheckLines['Total']=-billPaymentCheckLines['Total']
+    billPaymentCheckLines['ItemDescription']=billPaymentCheckLines['ItemId']
+    billPaymentCheckLines['Quantity']=1
+    billPaymentCheckLines['Rate']=billPaymentCheckLines['Total']
+    billPaymentCheckLines = billPaymentCheckLines [['TransactionId','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
     invoice = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
     invoiceLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
@@ -265,7 +287,7 @@ def process_qb_expense_transactions(
     salesReceipts['TransactionType'] = 'SALES RECEIPT'
     receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
     deposit['TransactionType'] = 'DEPOSIT'
-    billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
+    # billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
     invoice['TransactionType'] = 'INVOICE'
     creditCardCharge['TransactionType'] = 'CREDIT CARD CHARGE'
     creditCardCredit['TransactionType'] = 'CREDIT CARD CREDIT'
