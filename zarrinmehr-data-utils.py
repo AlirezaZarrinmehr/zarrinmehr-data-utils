@@ -155,7 +155,6 @@ def process_qb_expense_transactions(
     s3_client,
     s3_bucket_name
 ):
-    list_of_accounts=expense_accounts
     transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
     generalJournal = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv', is_csv_file=True )
     generalJournal.rename(columns = {
