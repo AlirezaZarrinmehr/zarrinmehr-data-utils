@@ -2949,6 +2949,9 @@ def enrich_and_classify_items(item, companyName, s3_client, s3_bucket_name, DBIA
         item_df_pred['Company'] = companyName
         item_df_pred = item_df_pred[['Company'] + item_df_pred.columns[:-1].tolist()]
         item_df = pd.concat([item_df, item_df_pred], ignore_index=True)
+        for col in ['ItemNo', 'ItemName']:
+            mask = item_df[col].isna()
+            item_df.loc[mask, col] = item_df.loc[mask, 'ERPItemId']
         upload_to_s3(s3_client = s3_client, data = item_df, bucket_name = s3_bucket_name + '-c', object_key = 'item.csv')
         txnsLines = txnsLines.merge(itemsCategoriesV3[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {'ItemId': 'ERPItemId', 'index': 'ItemId'}).copy()
         txnsLines.drop(columns = ['ERPItemId'], inplace = True)
