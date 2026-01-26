@@ -1026,8 +1026,8 @@ def process_qb_orders(
             orders['CloseDate'] = pd.NaT
         orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
         customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
-        orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
-        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+        orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}No', how = 'left')
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
         orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
@@ -1214,8 +1214,8 @@ def process_qb_orders(
             orders['CloseDate'] = pd.NaT
         orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
         customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
-        orders = orders.merge(customersORvendors[[f'{txnsType3}No', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}No', how = 'left')
-        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}No', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}No', how = 'left')
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}No'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders = orders[~orders[f'{txnsType2}No'].str.upper().duplicated()]
         orders[f'{txnsType2}No'] = orders[f'{txnsType2}No'].fillna('').astype('str')
@@ -1300,6 +1300,7 @@ def process_qb_orders(
         ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
         #-----------------------------------------------------------------------------------------------------------
     return orders, ordersLines
+
 
 def process_s50_transactions(
     list_of_accounts,
