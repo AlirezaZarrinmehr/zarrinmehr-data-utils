@@ -606,7 +606,7 @@ def process_qb_transactions(
     companyName,
     transactions,
     item,
-    customers,
+    customer,
     start_date,
     end_date,
     s3_client,
@@ -731,11 +731,11 @@ def process_qb_transactions(
         txns['TransactionStatus'] = txns['Ispaid'].fillna('').astype('str').replace({'True': 'INVOICED IN FULL', 'False': 'NOT INVOICED IN FULL', '': 'NOT INVOICED IN FULL'})
 
         txns.CustNo = txns.CustNo.fillna('').astype('str')
-        customers.CustNo = customers.CustNo.fillna('').astype('str')
-        txns = txns.merge(customers[['CustNo', 'CustName', 'CommonName']], on = 'CustNo', how = 'left').copy()
+        customer.CustNo = customer.CustNo.fillna('').astype('str')
+        txns = txns.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustNo', how = 'left').copy()
         invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
 
-        txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustNo', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+        txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
         txns['Company'] = companyName
         txns = txns[['Company'] + txns.columns[:-1].tolist()]
         txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
@@ -887,8 +887,8 @@ def process_qb_transactions(
         invoices = invoices.merge(SalesOrderLinkedTxn.drop_duplicates(subset=['TransactionNo']), on='TransactionNo', how = 'left')
         # #-----------------------------------------------------------------------------------------------------------
         invoices.CustNo = invoices.CustNo.fillna('').astype('str')
-        customers.CustNo = customers.CustNo.fillna('').astype('str')
-        invoices = invoices.merge(customers[['CustNo', 'CustName', 'CommonName']], on = 'CustNo', how = 'left').copy()
+        customer.CustNo = customer.CustNo.fillna('').astype('str')
+        invoices = invoices.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustNo', how = 'left').copy()
         invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = invoices, df_name = 'invoices', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         #-----------------------------------------------------------------------------------------------------------
         txns = pd.concat([invoices, generalJournal, creditMemo, bills, deposits, payments, checks, creditCard], ignore_index=True)  
@@ -902,12 +902,13 @@ def process_qb_transactions(
         txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
         txns['TransactionId'] = txns['TransactionId']
         txns['TransactionId'] = txns['TransactionId'].str.split(' :: ').str[0]
-        txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustNo', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+        txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
         txns = txns[~txns['TransactionId'].fillna('').astype('str').str.upper().duplicated()]
         txns['Company'] = companyName
         txns = txns[['Company'] + txns.columns[:-1].tolist()]
         txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
+
 
 def process_qb_orders(
     companyName,
@@ -3089,8 +3090,8 @@ def enrich_and_classify_customers(
         dropLookUpIn = True,
         dfLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5'],
         lookUpCols = ['CustName'],
-        key_cols = ['CustName'],
-        df_cols = ['CustId', 'CustName'],
+        key_cols = ['CustId', 'CustName'],
+        df_cols = ['CustNo'],
         extraLevels = ['ParentName'],
         zip_code_columns = ['CustZip'],
         state_columns = ['CustState'],
