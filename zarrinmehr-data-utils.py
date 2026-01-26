@@ -1299,7 +1299,7 @@ def process_qb_orders(
         #-----------------------------------------------------------------------------------------------------------
         ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
         #-----------------------------------------------------------------------------------------------------------
-    return orders, ordersLines
+    return orders, ordersLines, item_df
 
 
 def process_s50_transactions(
