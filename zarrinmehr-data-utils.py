@@ -147,6 +147,8 @@ def kill_qb_processes():
 def process_gp_transactions(
     list_of_accounts,
     companyName,
+    salesOrderInvoiceHeader,
+    salesOrderInvoiceLine,
     item,
     customer,
     start_date,
@@ -238,14 +240,14 @@ def process_gp_transactions(
     txnsLines = pd.concat([txnsLines, generalLedgerLine], ignore_index=True)
     txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR']].rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
     txnsLines['CustId'] = txnsLines['CustId'].astype('str').str.strip()
-    customers['CustId'] = customers['CustId'].astype('str').str.strip()
-    txnsLines = txnsLines.merge(customers[['CustId', 'CustNo', 'CustName', 'CommonName']], on = 'CustId', how = 'left')
+    customer['CustId'] = customer['CustId'].astype('str').str.strip()
+    txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName', 'CommonName']], on = 'CustId', how = 'left')
     txnsLines['ItemId'] = txnsLines['ItemId'].astype('str').str.strip()
     item['ItemId'] = item['ItemId'].astype('str').str.strip()
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how = 'left', suffixes = ('', '_Item'))
-    billToAdds = customers.rename(columns={'CustName':'BillName', 'CustCity':'BillCity', 'CustState':'BillState', 'CustZip':'BillZip'})[['CustId', 'BillName', 'BillCity', 'BillState', 'BillZip']]
+    billToAdds = customer.rename(columns={'CustName':'BillName', 'CustCity':'BillCity', 'CustState':'BillState', 'CustZip':'BillZip'})[['CustId', 'BillName', 'BillCity', 'BillState', 'BillZip']]
     billToAdds['CustId'] = billToAdds['CustId'].astype('str').str.strip()
-    customers['CustId'] = customers['CustId'].astype('str').str.strip()
+    customer['CustId'] = customer['CustId'].astype('str').str.strip()
     txnsLines = txnsLines.merge(billToAdds, on = 'CustId', how = 'left')
     txnsLines = txnsLines.merge(CadUsdAvg, left_on=[txnsLines['TransactionDate'].dt.year, txnsLines['TransactionDate'].dt.month], right_on=['Year', 'Month'], how = 'left')
     txnsLines['CAD/USD'] = txnsLines['CAD/USD'].interpolate(method='linear', limit_direction='both')
