@@ -144,7 +144,16 @@ def kill_qb_processes():
     print("Cleaned up lingering QB/QODBC processes.")
 
 
-def process_gp_transactions(list_of_accounts):
+def process_gp_transactions(
+    list_of_accounts,
+    companyName,
+    item,
+    customer,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name
+):
     generalLedgerLineOpen = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
     generalLedgerLineHistory = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
     generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index=True)
