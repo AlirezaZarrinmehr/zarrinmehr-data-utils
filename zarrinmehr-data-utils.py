@@ -149,6 +149,7 @@ def process_gp_transactions(
     companyName,
     salesOrderInvoiceHeader,
     salesOrderInvoiceLine,
+    account,
     item,
     customer,
     start_date,
