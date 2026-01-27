@@ -150,6 +150,7 @@ def process_gp_transactions(
     salesOrderInvoiceHeader,
     salesOrderInvoiceLine,
     account,
+    CadUsdAvg,
     item,
     customer,
     start_date,
