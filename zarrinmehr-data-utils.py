@@ -3097,7 +3097,7 @@ def enrich_and_classify_customers(
         zip_code_columns = ['CustZip'],
         state_columns = ['CustState'],
         cat_object_key = 'customersCategories.csv',
-        dst_object_key = 'customers.csv',
+        dst_object_key = 'customer.csv',
         idCol = 'CustId',
         idName = 'CustName',
         match_method = 'startswith',
