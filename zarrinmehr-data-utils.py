@@ -591,10 +591,10 @@ def process_qb_expense_transactions(
     
     txns.VendNo = txns.VendNo.fillna('').astype('str')
     vendors.VendNo = vendors.VendNo.fillna('').astype('str')
-    txns = txns.merge(vendors[['VendNo', 'VendName', 'CommonName']], on = 'VendNo', how = 'left').copy()
+    txns = txns.merge(vendors[['VendId', 'VendNo', 'VendName']], on = 'VendNo', how = 'left').copy()
     invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     
-    txns = txns[['PurchaseOrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'VendNo', 'VendName', 'CommonName', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns = txns[['PurchaseOrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'VendId', 'VendNo', 'VendName', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
