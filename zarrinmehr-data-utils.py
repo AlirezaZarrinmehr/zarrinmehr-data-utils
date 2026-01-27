@@ -3112,7 +3112,7 @@ def enrich_and_classify_customers(
         dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
         dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
         if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories), 10000)
+            sample_size = min(len(dfCategories.dropna()), 10000)
             labeled_df = dfCategories.dropna().sample(sample_size)
             delimiter = " :|: "
             level_cols = dfLevels + ['CommonName']
