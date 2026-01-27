@@ -1820,7 +1820,7 @@ def get_exchange_rates(
     table = driver.find_element(By.CLASS_NAME, "ofx-historical-rates__table")
     rows = table.find_elements(By.XPATH, ".//tbody/tr")
     data = []
-    for row in rows:
+    for row in tqdm(rows, desc="Fetching rows", unit="row"):
         cols = row.find_elements(By.TAG_NAME, "td")
         if len(cols) == 2:
             date = cols[0].text.strip()
