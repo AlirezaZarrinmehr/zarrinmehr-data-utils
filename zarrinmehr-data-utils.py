@@ -1853,7 +1853,10 @@ def process_exchange_rates(
             frequency='daily',
             reporting_period=reporting_period
         )
-        df = pd.concat([df[df['Date'] < dfNew['Date'].min()], dfNew], ignore_index=True)
+        dfNew['Date'] = pd.to_datetime(dfNew['Date'], errors='coerce')
+        dfNew = dfNew.loc[dfNew.Date.notna()]
+        if not dfNew.empty:
+            df = pd.concat([df[df['Date'] < dfNew['Date'].min()], dfNew], ignore_index=True)
     except:
         df = get_exchange_rates(
             from_currency=from_currency,
@@ -1866,8 +1869,8 @@ def process_exchange_rates(
     df[f'{from_currency}/{to_currency}'] = pd.to_numeric(df[f'{from_currency}/{to_currency}'], errors='coerce')
     dfAvg = df[df['Date'].dt.day != 1].groupby([df['Date'].dt.year, df['Date'].dt.month]).agg({f'{from_currency}/{to_currency}': 'mean'})
     dfAvg.index.set_names(['Year', 'Month'], inplace=True)
-
     return dfAvg
+
 
 def load_data_via_query(
         sql_query,
