@@ -1310,7 +1310,7 @@ def process_s50_transactions(
     employees,
     billToAdds,
     item,
-    customers,
+    customer,
     start_date,
     end_date,
     s3_client,
@@ -1439,9 +1439,9 @@ def process_s50_transactions(
     txnsLines = pd.concat([invoicesLines, generalJournalLines, billsLines, depositsLines, paymentsLines], ignore_index=True)
     #-----------------------------------------------------------------------------------------------------------
     txns.CustId = txns.CustId.astype('str')
-    customers.CustId = customers.CustId.astype('str')
-    txns = txns.merge(customers[['CustId', 'CustName', 'CommonName']], on = 'CustId', how = 'left').copy()
-    txns = txns[['OrderNo', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustName', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    customer.CustId = customer.CustId.astype('str')
+    txns = txns.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left').copy()
+    txns = txns[['OrderNo', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns = txns[~txns['TransactionId'].astype('str').str.upper().duplicated()]
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
@@ -1454,7 +1454,7 @@ def process_s50_transactions(
     txns = txns[txns['TransactionId'].isin(txnsLines['TransactionId'])]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
-    
+
 
 def process_s50_orders(
     companyName,
@@ -1602,8 +1602,8 @@ def process_s50_orders(
     orders = orders.merge(orderTypes, on = f'{txnsType2}No', how = 'left')
     orders[f'{txnsType3}Id'] = orders[f'{txnsType3}Id'].astype('str')
     customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].astype('str')
-    orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}Name', 'CommonName']], on = f'{txnsType3}Id', how = 'left')
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}Name', 'CommonName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}Id', how = 'left')
+    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders['Company'] = companyName
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1618,7 +1618,7 @@ def process_s50_orders(
     #-------------------------------------
     orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
     orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
-    return orders, ordersLines
+    return orders, ordersLines, item_df
 
     
 def get_reporting_period_label(latest_date):
