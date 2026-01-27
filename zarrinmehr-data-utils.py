@@ -242,7 +242,7 @@ def process_gp_transactions(
     txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR']].rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
     txnsLines['CustId'] = txnsLines['CustId'].astype('str').str.strip()
     customer['CustId'] = customer['CustId'].astype('str').str.strip()
-    txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName', 'CommonName']], on = 'CustId', how = 'left')
+    txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left')
     txnsLines['ItemId'] = txnsLines['ItemId'].astype('str').str.strip()
     item['ItemId'] = item['ItemId'].astype('str').str.strip()
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how = 'left', suffixes = ('', '_Item'))
@@ -255,8 +255,8 @@ def process_gp_transactions(
     txnsLines['Rate'] = pd.to_numeric(txnsLines['Rate'], errors='coerce')
     txnsLines['Rate']=txnsLines['Rate']*txnsLines['CAD/USD']
     txnsLines['Total']=txnsLines['Total']*txnsLines['CAD/USD']
-    txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'CommonName': 'max', 'ShipName': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
-    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'CommonName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
     txns['Company'] = companyName
     txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
