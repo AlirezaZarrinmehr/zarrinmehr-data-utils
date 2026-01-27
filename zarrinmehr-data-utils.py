@@ -302,6 +302,7 @@ def process_gp_orders(
     txnsType16,
     txnsType17,
     CadUsdAvg,
+    txns,
     DBIA,
     itemsCategoriesV3
 ):
