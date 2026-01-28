@@ -2454,8 +2454,7 @@ def train_and_predict(
     ], axis=1)
     return final_predictions
 
-def predict_missing_metadata(level_cols, unlabeled_df, labeled_df):
-    input_cols = ['CustId', 'CustName']
+def predict_missing_metadata(input_cols, level_cols, unlabeled_df, labeled_df):
     sample_size = min(len(labeled_df.dropna(subset=input_cols)), 10000)
     labeled_df = labeled_df.dropna(subset=input_cols).sample(sample_size)
     delimiter = " :|: "
