@@ -2454,6 +2454,25 @@ def train_and_predict(
     ], axis=1)
     return final_predictions
 
+def predict_missing_metadata(level_cols, unlabeled_df, labeled_df):
+    input_cols = ['CustId', 'CustName']
+    sample_size = min(len(labeled_df.dropna(subset=input_cols)), 10000)
+    labeled_df = labeled_df.dropna(subset=input_cols).sample(sample_size)
+    delimiter = " :|: "
+    labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
+    pred = train_and_predict(
+        labeled_df = labeled_df,
+        unlabeled_df = unlabeled_df,
+        input_cols = input_cols,
+        target_cols = ['target_col']
+    )
+    split_cols = pred['target_col'].str.split(delimiter, expand=True, regex=False)
+    split_cols.columns = level_cols
+    pred = pd.concat([pred, split_cols], axis=1)
+    pred.drop(columns = 'target_col', inplace=True)
+    unlabeled_df = unlabeled_df.drop(columns=level_cols +['combined_text']).merge(pred, on =input_cols)
+    return unlabeled_df
+
 
 def impute_by_group(df, group_col, target_col, method='median', mask=None):
 
