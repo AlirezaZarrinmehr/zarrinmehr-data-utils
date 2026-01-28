@@ -3284,10 +3284,12 @@ def enrich_and_classify_customers(
             dfCategories_pred.reset_index(inplace=True)
             dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
             dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-            df_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-            df_pred['Company'] = companyName
-            df_pred = df_pred[['Company'] + df_pred.columns[:-1].tolist()]
-            df = pd.concat([df, df_pred], ignore_index=True)
+            if erpId in dfCategories_pred.columns.to_list():
+                dfCategories_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').copy()
+            dfCategories_pred = dfCategories_pred.rename(columns = {'index': idCol})
+            dfCategories_pred['Company'] = companyName
+            dfCategories_pred = dfCategories_pred[['Company'] + dfCategories_pred.columns[:-1].tolist()]
+            df = pd.concat([df, dfCategories_pred], ignore_index=True)
         for col in df_cols:
             mask = df[col].isna()
             df.loc[mask, col] = df.loc[mask, erpId]
@@ -3411,10 +3413,12 @@ def enrich_and_classify_items(
             dfCategories_pred.reset_index(inplace=True)
             dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
             dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-            df_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-            df_pred['Company'] = companyName
-            df_pred = df_pred[['Company'] + df_pred.columns[:-1].tolist()]
-            df = pd.concat([df, df_pred], ignore_index=True)
+            if erpId in dfCategories_pred.columns.to_list():
+                dfCategories_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').copy()
+            dfCategories_pred = dfCategories_pred.rename(columns = {'index': idCol})
+            dfCategories_pred['Company'] = companyName
+            dfCategories_pred = dfCategories_pred[['Company'] + dfCategories_pred.columns[:-1].tolist()]
+            df = pd.concat([df, dfCategories_pred], ignore_index=True)
         for col in df_cols:
             mask = df[col].isna()
             df.loc[mask, col] = df.loc[mask, erpId]
