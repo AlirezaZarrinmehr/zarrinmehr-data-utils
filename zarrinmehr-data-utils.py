@@ -3214,6 +3214,42 @@ def timer_and_alert(seconds, sound_file):
         print(f"[ERROR] Failed to play sound: {e}")
 
 
+def classify_items_rrs(
+    transactions,
+    transactionsLines,
+    items,
+    runner_threshold = 0.4,
+    repeater_threshold = 0.1
+):
+
+    df = transactions[['TransactionId', 'TransactionDate']].drop_duplicates(subset='TransactionId').merge(
+        transactionsLines[['TransactionId', 'ItemId']], 
+        on='TransactionId'
+    ).merge(
+        items[['ItemId', 'CommonName']].drop_duplicates(subset='ItemId'), 
+        on='ItemId'
+    )
+    df = df[df['TransactionDate'] >= datetime.now() - timedelta(days=365)]
+    df = df.groupby('CommonName').agg({'TransactionDate': 'nunique'}).reset_index()
+    df.rename(columns={'TransactionDate': 'DaysSold'}, inplace=True)
+    max_days = df['DaysSold'].max()
+    runner_threshold = runner_threshold * max_days
+    repeater_threshold = repeater_threshold * max_days
+    
+    def classify_item(days_sold):
+        if days_sold >= runner_threshold:
+            return 'Runner'
+        elif days_sold >= repeater_threshold:
+            return 'Repeater'
+        else:
+            return 'Stranger'
+    
+    df['RRS'] = df['DaysSold'].apply(classify_item)
+    df.sort_values('DaysSold', ascending=False)
+    items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName', how = 'left')
+    return items
+
+
 def enrich_and_classify_items(
         df,
         companyName,
@@ -3246,7 +3282,7 @@ def enrich_and_classify_items(
         dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
         dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
         if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories), 10000)
+            sample_size = min(len(dfCategories.dropna()), 10000)
             labeled_df = dfCategories.dropna().sample(sample_size)
             delimiter = " :|: "
             level_cols = dfLevels + ['CommonName']
@@ -3340,44 +3376,7 @@ def enrich_and_classify_items(
         print(prompt)
         write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
         return df
-
-
-def classify_items_rrs(
-    transactions,
-    transactionsLines,
-    items,
-    runner_threshold = 0.4,
-    repeater_threshold = 0.1
-):
-
-    df = transactions[['TransactionId', 'TransactionDate']].drop_duplicates(subset='TransactionId').merge(
-        transactionsLines[['TransactionId', 'ItemId']], 
-        on='TransactionId'
-    ).merge(
-        items[['ItemId', 'CommonName']].drop_duplicates(subset='ItemId'), 
-        on='ItemId'
-    )
-    df = df[df['TransactionDate'] >= datetime.now() - timedelta(days=365)]
-    df = df.groupby('CommonName').agg({'TransactionDate': 'nunique'}).reset_index()
-    df.rename(columns={'TransactionDate': 'DaysSold'}, inplace=True)
-    max_days = df['DaysSold'].max()
-    runner_threshold = runner_threshold * max_days
-    repeater_threshold = repeater_threshold * max_days
     
-    def classify_item(days_sold):
-        if days_sold >= runner_threshold:
-            return 'Runner'
-        elif days_sold >= repeater_threshold:
-            return 'Repeater'
-        else:
-            return 'Stranger'
-    
-    df['RRS'] = df['DaysSold'].apply(classify_item)
-    df.sort_values('DaysSold', ascending=False)
-    items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName', how = 'left')
-    return items
-
-
 def enrich_and_classify_customers(
         df,
         companyName,
