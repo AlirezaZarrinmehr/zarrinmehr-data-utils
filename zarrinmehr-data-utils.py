@@ -3413,7 +3413,7 @@ def enrich_and_classify_customers(
             sample_size = min(len(dfCategories.dropna()), 10000)
             labeled_df = dfCategories.dropna().sample(sample_size)
             delimiter = " :|: "
-            level_cols = dfLevels + ['CommonName']
+            level_cols = dfLevels + ['CommonName'] + extraLevels
             labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
             dfCategories_pred = train_and_predict(
                 labeled_df = labeled_df,
