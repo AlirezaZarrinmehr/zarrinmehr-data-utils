@@ -3266,8 +3266,8 @@ def enrich_and_classify_customers(
         dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
         dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
         if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories[key_cols+level_cols].dropna()), 10000)
-            labeled_df = dfCategories[key_cols+level_cols].dropna().sample(sample_size)
+            sample_size = min(len(dfCategories.dropna(subset=key_cols)), 10000)
+            labeled_df = dfCategories.dropna(subset=key_cols).sample(sample_size)
             delimiter = " :|: "
             labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
             dfCategories_pred = train_and_predict(
@@ -3394,8 +3394,8 @@ def enrich_and_classify_items(
         dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
         dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
         if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories[key_cols+level_cols].dropna()), 10000)
-            labeled_df = dfCategories[key_cols+level_cols].dropna().sample(sample_size)
+            sample_size = min(len(dfCategories.dropna(subset=key_cols)), 10000)
+            labeled_df = dfCategories.dropna(subset=key_cols).sample(sample_size)
             delimiter = " :|: "
             labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
             dfCategories_pred = train_and_predict(
