@@ -3284,18 +3284,17 @@ def enrich_and_classify_customers(
             dfCategories_pred.reset_index(inplace=True)
             dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
             dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-        dfNew = df.copy()
-        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-        dfNew_pred['Company'] = companyName
-        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
-        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
+            df_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
+            df_pred['Company'] = companyName
+            df_pred = df_pred[['Company'] + df_pred.columns[:-1].tolist()]
+            df = pd.concat([df, df_pred], ignore_index=True)
         for col in df_cols:
-            mask = dfNew[col].isna()
-            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+            mask = df[col].isna()
+            df.loc[mask, col] = df.loc[mask, erpId]
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
         txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
         txnsLines.drop(columns = [erpId], inplace = True)
-        return txnsLines, dfCategories, dfNew
+        return txnsLines, dfCategories, df
     else:
         df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
@@ -3412,18 +3411,17 @@ def enrich_and_classify_items(
             dfCategories_pred.reset_index(inplace=True)
             dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
             dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-        dfNew = df.copy()
-        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-        dfNew_pred['Company'] = companyName
-        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
-        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
+            df_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(df[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
+            df_pred['Company'] = companyName
+            df_pred = df_pred[['Company'] + df_pred.columns[:-1].tolist()]
+            df = pd.concat([df, df_pred], ignore_index=True)
         for col in df_cols:
-            mask = dfNew[col].isna()
-            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+            mask = df[col].isna()
+            df.loc[mask, col] = df.loc[mask, erpId]
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
         txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
         txnsLines.drop(columns = [erpId], inplace = True)
-        return txnsLines, dfCategories, dfNew
+        return txnsLines, dfCategories, df
     else:
         df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
