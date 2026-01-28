@@ -3214,6 +3214,262 @@ def timer_and_alert(seconds, sound_file):
         print(f"[ERROR] Failed to play sound: {e}")
 
 
+def enrich_and_classify_customers(
+        df,
+        companyName,
+        s3_client,
+        s3_bucket_name,
+        DBIA=False,
+        dfCategories=None,
+        txnsLines=None,
+        dropLookUpIn = True,
+        dfLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5'],
+        lookUpCols = ['CustName'],
+        key_cols = ['CustId', 'CustName'],
+        df_cols = ['CustNo'],
+        extraLevels = ['ParentName'],
+        zip_code_columns = ['CustZip'],
+        state_columns = ['CustState'],
+        cat_object_key = 'customersCategories.csv',
+        dst_object_key = 'customer.csv',
+        idCol = 'CustId',
+        idName = 'CustName',
+        match_method = 'startswith',
+        fillValues = 'CUSTOMER',
+        ):
+
+    erpId = 'ERP' + idCol
+    searchCol = idCol + '_SearchKey'
+    if DBIA:
+        level_cols = dfLevels + ['CommonName'] + extraLevels
+        for col in key_cols:
+            txnsLines[col] = txnsLines[col].fillna(fillValues).astype('str').str.upper().str.strip()
+        dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
+        dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
+        if not dfCategories_pred.empty and not dfCategories.empty:
+            sample_size = min(len(dfCategories[key_cols+level_cols].dropna()), 10000)
+            labeled_df = dfCategories[key_cols+level_cols].dropna().sample(sample_size)
+            delimiter = " :|: "
+            labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
+            dfCategories_pred = train_and_predict(
+                labeled_df = labeled_df,
+                unlabeled_df = dfCategories_pred,
+                input_cols = key_cols,
+                target_cols = ['target_col']
+            )
+            split_cols = dfCategories_pred['target_col'].str.split(delimiter, expand=True, regex=False)
+            split_cols.columns = level_cols
+            dfCategories_pred = pd.concat([dfCategories_pred, split_cols], axis=1)
+            dfCategories_pred.drop(columns = 'target_col', inplace=True)
+            dfCategories_pred.reset_index(drop=True, inplace=True)
+            dfCategories_pred.index = dfCategories_pred.index + 1 + dfCategories['index'].astype('int').max()
+            dfCategories_pred.reset_index(inplace=True)
+            dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
+            dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
+        dfNew = df.copy()
+        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
+        dfNew_pred['Company'] = companyName
+        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
+        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
+        for col in df_cols:
+            mask = dfNew[col].isna()
+            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
+        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
+        txnsLines.drop(columns = [erpId], inplace = True)
+        return txnsLines, dfCategories, dfNew
+    else:
+        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        for col in lookUpCols:
+            df[col] = df[col].astype('str').fillna('')
+        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
+        dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
+        dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
+        dfCategories['Found'] = False
+        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+        dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
+        dfCategories = dfCategories[dfCategories[searchCol].notna()]
+        df[idCol] = df[idCol].astype('str').str.upper()
+        dfCategories[searchCol] = dfCategories[searchCol].astype('str').str.upper()
+        df = df.merge(dfCategories[[searchCol, 'CommonName'] + extraLevels + dfLevels], left_on = idCol, right_on = searchCol, how = 'left')
+        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Found'] = True
+        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Company'] = companyName
+        df.drop(columns = searchCol, inplace=True)
+        df['LookUpIn'] = df[lookUpCols].fillna('').agg(' '.join, axis=1)
+        df['LookUpIn'] = df['LookUpIn'].str.upper()
+        keyword_dict = dfCategories.loc[~dfCategories['Found']==True].set_index(searchCol)['CommonName'].to_dict()
+        for keyword, CommonName in keyword_dict.items():
+            if match_method == 'startswith':
+                match_condition = df['LookUpIn'].str.startswith(keyword)
+            else:
+                match_condition = df['LookUpIn'].str.contains(keyword, regex=False)
+            found_mask = (
+                (df.CommonName.isna()) & 
+                (match_condition)
+            )
+            df.loc[found_mask, 'CommonName'] = CommonName
+            if found_mask.any():
+                dfCategories.loc[dfCategories[searchCol] == keyword, 'Found'] = True
+                dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
+        dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
+        upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
+        print(dfCategories.Found.sum())
+        dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
+        df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
+        df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
+        df.drop(columns = extraLevels + dfLevels, inplace=True)
+        df = df.merge(dfCategories[['CommonName'] + extraLevels + dfLevels], on='CommonName', how = 'left')
+        df = pd.concat([df, df_2], ignore_index=True)
+        for col in ['CommonName'] + extraLevels:
+            df.loc[df[col].isna(), col] = df[idName].str[0:15]
+        for dfLevel in dfLevels:
+            df.loc[df[dfLevel].isna(), dfLevel] = 'OTHER'
+        missingRow = {}
+        for col in [idCol] + lookUpCols:
+            missingRow[col]=['Missing']
+        for col in dfLevels + ['CommonName']:
+            missingRow[col]=['OTHER']
+        missingRow = pd.DataFrame(missingRow)
+        df = pd.concat([df, missingRow], ignore_index=True)
+        df['Company'] = companyName
+        df = df[['Company'] + df.columns[:-1].tolist()].copy()
+        if dropLookUpIn:
+            df.drop(columns = 'LookUpIn', inplace=True)
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        prompt = f'Found: {dfCategories.Found.sum()}...'
+        print(prompt)
+        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        return df
+    
+
+def enrich_and_classify_items(
+        df,
+        companyName,
+        s3_client,
+        s3_bucket_name,
+        DBIA=False,
+        dfCategories=None,
+        txnsLines=None,
+        dropLookUpIn = False,
+        dfLevels =['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5'],
+        lookUpCols = ['ItemNo', 'ItemName', 'ItemDescription'],
+        key_cols = ['ItemId', 'ItemDescription'],
+        df_cols = ['ItemNo', 'ItemName'],
+        extraLevels = [],
+        zip_code_columns = [],
+        state_columns = [],
+        cat_object_key = 'itemsCategories.csv',
+        dst_object_key = 'item.csv',
+        idCol = 'ItemId',
+        idName = 'ItemName',
+        match_method = 'contains',
+        fillValues = 'ITEM'
+        ):
+
+    erpId = 'ERP' + idCol
+    searchCol = idCol + '_SearchKey'
+    if DBIA:
+        level_cols = dfLevels + ['CommonName'] + extraLevels
+        for col in key_cols:
+            txnsLines[col] = txnsLines[col].fillna(fillValues).astype('str').str.upper().str.strip()
+        dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
+        dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
+        if not dfCategories_pred.empty and not dfCategories.empty:
+            sample_size = min(len(dfCategories[key_cols+level_cols].dropna()), 10000)
+            labeled_df = dfCategories[key_cols+level_cols].dropna().sample(sample_size)
+            delimiter = " :|: "
+            labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
+            dfCategories_pred = train_and_predict(
+                labeled_df = labeled_df,
+                unlabeled_df = dfCategories_pred,
+                input_cols = key_cols,
+                target_cols = ['target_col']
+            )
+            split_cols = dfCategories_pred['target_col'].str.split(delimiter, expand=True, regex=False)
+            split_cols.columns = level_cols
+            dfCategories_pred = pd.concat([dfCategories_pred, split_cols], axis=1)
+            dfCategories_pred.drop(columns = 'target_col', inplace=True)
+            dfCategories_pred.reset_index(drop=True, inplace=True)
+            dfCategories_pred.index = dfCategories_pred.index + 1 + dfCategories['index'].astype('int').max()
+            dfCategories_pred.reset_index(inplace=True)
+            dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
+            dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
+        dfNew = df.copy()
+        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
+        dfNew_pred['Company'] = companyName
+        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
+        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
+        for col in df_cols:
+            mask = dfNew[col].isna()
+            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
+        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
+        txnsLines.drop(columns = [erpId], inplace = True)
+        return txnsLines, dfCategories, dfNew
+    else:
+        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        for col in lookUpCols:
+            df[col] = df[col].astype('str').fillna('')
+        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
+        dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
+        dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
+        dfCategories['Found'] = False
+        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+        dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
+        dfCategories = dfCategories[dfCategories[searchCol].notna()]
+        df[idCol] = df[idCol].astype('str').str.upper()
+        dfCategories[searchCol] = dfCategories[searchCol].astype('str').str.upper()
+        df = df.merge(dfCategories[[searchCol, 'CommonName'] + extraLevels + dfLevels], left_on = idCol, right_on = searchCol, how = 'left')
+        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Found'] = True
+        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Company'] = companyName
+        df.drop(columns = searchCol, inplace=True)
+        df['LookUpIn'] = df[lookUpCols].fillna('').agg(' '.join, axis=1)
+        df['LookUpIn'] = df['LookUpIn'].str.upper()
+        keyword_dict = dfCategories.loc[~dfCategories['Found']==True].set_index(searchCol)['CommonName'].to_dict()
+        for keyword, CommonName in keyword_dict.items():
+            if match_method == 'startswith':
+                match_condition = df['LookUpIn'].str.startswith(keyword)
+            else:
+                match_condition = df['LookUpIn'].str.contains(keyword, regex=False)
+            found_mask = (
+                (df.CommonName.isna()) & 
+                (match_condition)
+            )
+            df.loc[found_mask, 'CommonName'] = CommonName
+            if found_mask.any():
+                dfCategories.loc[dfCategories[searchCol] == keyword, 'Found'] = True
+                dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
+        dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
+        upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
+        print(dfCategories.Found.sum())
+        dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
+        df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
+        df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
+        df.drop(columns = extraLevels + dfLevels, inplace=True)
+        df = df.merge(dfCategories[['CommonName'] + extraLevels + dfLevels], on='CommonName', how = 'left')
+        df = pd.concat([df, df_2], ignore_index=True)
+        for col in ['CommonName'] + extraLevels:
+            df.loc[df[col].isna(), col] = df[idName].str[0:15]
+        for dfLevel in dfLevels:
+            df.loc[df[dfLevel].isna(), dfLevel] = 'OTHER'
+        missingRow = {}
+        for col in [idCol] + lookUpCols:
+            missingRow[col]=['Missing']
+        for col in dfLevels + ['CommonName']:
+            missingRow[col]=['OTHER']
+        missingRow = pd.DataFrame(missingRow)
+        df = pd.concat([df, missingRow], ignore_index=True)
+        df['Company'] = companyName
+        df = df[['Company'] + df.columns[:-1].tolist()].copy()
+        if dropLookUpIn:
+            df.drop(columns = 'LookUpIn', inplace=True)
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        prompt = f'Found: {dfCategories.Found.sum()}...'
+        print(prompt)
+        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        return df
+    
+    
 def classify_items_rrs(
     transactions,
     transactionsLines,
@@ -3248,261 +3504,6 @@ def classify_items_rrs(
     df.sort_values('DaysSold', ascending=False)
     items = items.merge(df[['CommonName', 'RRS']].drop_duplicates(subset = 'CommonName'), on='CommonName', how = 'left')
     return items
-
-
-def enrich_and_classify_items(
-        df,
-        companyName,
-        s3_client,
-        s3_bucket_name,
-        DBIA=False,
-        dfCategories=None,
-        txnsLines=None,
-        dropLookUpIn = False,
-        dfLevels =['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5'],
-        lookUpCols = ['ItemNo', 'ItemName', 'ItemDescription'],
-        key_cols = ['ItemId', 'ItemDescription'],
-        df_cols = ['ItemNo', 'ItemName'],
-        extraLevels = [],
-        zip_code_columns = [],
-        state_columns = [],
-        cat_object_key = 'itemsCategories.csv',
-        dst_object_key = 'item.csv',
-        idCol = 'ItemId',
-        idName = 'ItemName',
-        match_method = 'contains',
-        fillValues = 'ITEM'
-        ):
-
-    erpId = 'ERP' + idCol
-    searchCol = idCol + '_SearchKey'
-    if DBIA:
-        for col in key_cols:
-            txnsLines[col] = txnsLines[col].fillna(fillValues).astype('str').str.upper().str.strip()
-        dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
-        dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
-        if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories.dropna()), 10000)
-            labeled_df = dfCategories.dropna().sample(sample_size)
-            delimiter = " :|: "
-            level_cols = dfLevels + ['CommonName']
-            labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
-            dfCategories_pred = train_and_predict(
-                labeled_df = labeled_df,
-                unlabeled_df = dfCategories_pred,
-                input_cols = key_cols,
-                target_cols = ['target_col']
-            )
-            split_cols = dfCategories_pred['target_col'].str.split(delimiter, expand=True, regex=False)
-            split_cols.columns = level_cols
-            dfCategories_pred = pd.concat([dfCategories_pred, split_cols], axis=1)
-            dfCategories_pred.drop(columns = 'target_col', inplace=True)
-            dfCategories_pred.reset_index(drop=True, inplace=True)
-            dfCategories_pred.index = dfCategories_pred.index + 1 + dfCategories['index'].astype('int').max()
-            dfCategories_pred.reset_index(inplace=True)
-            dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
-            dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-        dfNew = df.copy()
-        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-        dfNew_pred['Company'] = companyName
-        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
-        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
-        for col in df_cols:
-            mask = dfNew[col].isna()
-            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
-        txnsLines.drop(columns = [erpId], inplace = True)
-        return txnsLines, dfCategories, dfNew
-    else:
-        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        for col in lookUpCols:
-            df[col] = df[col].astype('str').fillna('')
-        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
-        dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
-        dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
-        dfCategories['Found'] = False
-        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-        dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
-        dfCategories = dfCategories[dfCategories[searchCol].notna()]
-        df[idCol] = df[idCol].astype('str').str.upper()
-        dfCategories[searchCol] = dfCategories[searchCol].astype('str').str.upper()
-        df = df.merge(dfCategories[[searchCol, 'CommonName'] + extraLevels + dfLevels], left_on = idCol, right_on = searchCol, how = 'left')
-        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Found'] = True
-        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Company'] = companyName
-        df.drop(columns = searchCol, inplace=True)
-        df['LookUpIn'] = df[lookUpCols].fillna('').agg(' '.join, axis=1)
-        df['LookUpIn'] = df['LookUpIn'].str.upper()
-        keyword_dict = dfCategories.loc[~dfCategories['Found']==True].set_index(searchCol)['CommonName'].to_dict()
-        for keyword, CommonName in keyword_dict.items():
-            if match_method == 'startswith':
-                match_condition = df['LookUpIn'].str.startswith(keyword)
-            else:
-                match_condition = df['LookUpIn'].str.contains(keyword, regex=False)
-            found_mask = (
-                (df.CommonName.isna()) & 
-                (match_condition)
-            )
-            df.loc[found_mask, 'CommonName'] = CommonName
-            if found_mask.any():
-                dfCategories.loc[dfCategories[searchCol] == keyword, 'Found'] = True
-                dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
-        dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
-        upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
-        print(dfCategories.Found.sum())
-        dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
-        df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
-        df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
-        df.drop(columns = extraLevels + dfLevels, inplace=True)
-        df = df.merge(dfCategories[['CommonName'] + extraLevels + dfLevels], on='CommonName', how = 'left')
-        df = pd.concat([df, df_2], ignore_index=True)
-        for col in ['CommonName'] + extraLevels:
-            df.loc[df[col].isna(), col] = df[idName].str[0:15]
-        for dfLevel in dfLevels:
-            df.loc[df[dfLevel].isna(), dfLevel] = 'OTHER'
-        missingRow = {}
-        for col in [idCol] + lookUpCols:
-            missingRow[col]=['Missing']
-        for col in dfLevels + ['CommonName']:
-            missingRow[col]=['OTHER']
-        missingRow = pd.DataFrame(missingRow)
-        df = pd.concat([df, missingRow], ignore_index=True)
-        df['Company'] = companyName
-        df = df[['Company'] + df.columns[:-1].tolist()].copy()
-        if dropLookUpIn:
-            df.drop(columns = 'LookUpIn', inplace=True)
-        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        prompt = f'Found: {dfCategories.Found.sum()}...'
-        print(prompt)
-        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
-        return df
-    
-def enrich_and_classify_customers(
-        df,
-        companyName,
-        s3_client,
-        s3_bucket_name,
-        DBIA=False,
-        dfCategories=None,
-        txnsLines=None,
-        dropLookUpIn = True,
-        dfLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5'],
-        lookUpCols = ['CustName'],
-        key_cols = ['CustId', 'CustName'],
-        df_cols = ['CustNo'],
-        extraLevels = ['ParentName'],
-        zip_code_columns = ['CustZip'],
-        state_columns = ['CustState'],
-        cat_object_key = 'customersCategories.csv',
-        dst_object_key = 'customer.csv',
-        idCol = 'CustId',
-        idName = 'CustName',
-        match_method = 'startswith',
-        fillValues = 'CUSTOMER',
-        ):
-
-    erpId = 'ERP' + idCol
-    searchCol = idCol + '_SearchKey'
-    if DBIA:
-        for col in key_cols:
-            txnsLines[col] = txnsLines[col].fillna(fillValues).astype('str').str.upper().str.strip()
-        dfCategories_pred = txnsLines[key_cols].merge(dfCategories[key_cols], on = key_cols, how='left', indicator = True).drop_duplicates(subset = key_cols)
-        dfCategories_pred = dfCategories_pred.query("_merge == 'left_only'").copy()
-        if not dfCategories_pred.empty and not dfCategories.empty:
-            sample_size = min(len(dfCategories.dropna()), 10000)
-            labeled_df = dfCategories.dropna().sample(sample_size)
-            delimiter = " :|: "
-            level_cols = dfLevels + ['CommonName'] + extraLevels
-            labeled_df['target_col'] = labeled_df[level_cols].fillna('').agg(delimiter.join, axis=1)
-            dfCategories_pred = train_and_predict(
-                labeled_df = labeled_df,
-                unlabeled_df = dfCategories_pred,
-                input_cols = key_cols,
-                target_cols = ['target_col']
-            )
-            split_cols = dfCategories_pred['target_col'].str.split(delimiter, expand=True, regex=False)
-            split_cols.columns = level_cols
-            dfCategories_pred = pd.concat([dfCategories_pred, split_cols], axis=1)
-            dfCategories_pred.drop(columns = 'target_col', inplace=True)
-            dfCategories_pred.reset_index(drop=True, inplace=True)
-            dfCategories_pred.index = dfCategories_pred.index + 1 + dfCategories['index'].astype('int').max()
-            dfCategories_pred.reset_index(inplace=True)
-            dfCategories_pred['index'] = dfCategories_pred['index'].astype('int').astype('str')
-            dfCategories = pd.concat([dfCategories, dfCategories_pred], ignore_index=True)
-        dfNew = df.copy()
-        dfNew_pred = dfCategories_pred.rename(columns = {idCol: erpId}).astype({erpId:'str'}).merge(dfNew[[erpId]+ df_cols].drop_duplicates(subset = [erpId]).astype({erpId:'str'}), on =erpId, how ='left').rename(columns = {'index': idCol}).copy()
-        dfNew_pred['Company'] = companyName
-        dfNew_pred = dfNew_pred[['Company'] + dfNew_pred.columns[:-1].tolist()]
-        dfNew = pd.concat([dfNew, dfNew_pred], ignore_index=True)
-        for col in df_cols:
-            mask = dfNew[col].isna()
-            dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
-        txnsLines.drop(columns = [erpId], inplace = True)
-        return txnsLines, dfCategories, dfNew
-    else:
-        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        for col in lookUpCols:
-            df[col] = df[col].astype('str').fillna('')
-        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
-        dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
-        dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
-        dfCategories['Found'] = False
-        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-        dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
-        dfCategories = dfCategories[dfCategories[searchCol].notna()]
-        df[idCol] = df[idCol].astype('str').str.upper()
-        dfCategories[searchCol] = dfCategories[searchCol].astype('str').str.upper()
-        df = df.merge(dfCategories[[searchCol, 'CommonName'] + extraLevels + dfLevels], left_on = idCol, right_on = searchCol, how = 'left')
-        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Found'] = True
-        dfCategories.loc[dfCategories[searchCol].isin(df[searchCol]), 'Company'] = companyName
-        df.drop(columns = searchCol, inplace=True)
-        df['LookUpIn'] = df[lookUpCols].fillna('').agg(' '.join, axis=1)
-        df['LookUpIn'] = df['LookUpIn'].str.upper()
-        keyword_dict = dfCategories.loc[~dfCategories['Found']==True].set_index(searchCol)['CommonName'].to_dict()
-        for keyword, CommonName in keyword_dict.items():
-            if match_method == 'startswith':
-                match_condition = df['LookUpIn'].str.startswith(keyword)
-            else:
-                match_condition = df['LookUpIn'].str.contains(keyword, regex=False)
-            found_mask = (
-                (df.CommonName.isna()) & 
-                (match_condition)
-            )
-            df.loc[found_mask, 'CommonName'] = CommonName
-            if found_mask.any():
-                dfCategories.loc[dfCategories[searchCol] == keyword, 'Found'] = True
-                dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
-        dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
-        upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
-        print(dfCategories.Found.sum())
-        dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
-        df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
-        df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
-        df.drop(columns = extraLevels + dfLevels, inplace=True)
-        df = df.merge(dfCategories[['CommonName'] + extraLevels + dfLevels], on='CommonName', how = 'left')
-        df = pd.concat([df, df_2], ignore_index=True)
-        for col in ['CommonName'] + extraLevels:
-            df.loc[df[col].isna(), col] = df[idName].str[0:15]
-        for dfLevel in dfLevels:
-            df.loc[df[dfLevel].isna(), dfLevel] = 'OTHER'
-        missingRow = {}
-        for col in [idCol] + lookUpCols:
-            missingRow[col]=['Missing']
-        for col in dfLevels + ['CommonName']:
-            missingRow[col]=['OTHER']
-        missingRow = pd.DataFrame(missingRow)
-        df = pd.concat([df, missingRow], ignore_index=True)
-        df['Company'] = companyName
-        df = df[['Company'] + df.columns[:-1].tolist()].copy()
-        if dropLookUpIn:
-            df.drop(columns = 'LookUpIn', inplace=True)
-        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        prompt = f'Found: {dfCategories.Found.sum()}...'
-        print(prompt)
-        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
-        return df
 
 
 def read_excel_from_sharepoint(url):
