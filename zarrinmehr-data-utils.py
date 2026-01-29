@@ -123,9 +123,57 @@ for name in list(globals()):
     if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
         caller_globals[name] = globals()[name]
 
+def copy_bucket_contents(
+    s3_resource,
+    s3_client,
+    source_bucket_name, 
+    dest_bucket_name,
+    aws_region,
+    CreateS3Bucket=True
+):
+    source_bucket = s3_resource.Bucket(source_bucket_name)
+    dest_bucket = s3_resource.Bucket(dest_bucket_name)
+    
+    if CreateS3Bucket:
+        try:
+            buckets = s3_client.list_buckets()["Buckets"]
+            buckets = [bucket['Name'] for bucket in buckets]
+            if dest_bucket_name not in buckets:
+                s3_client.create_bucket(Bucket=dest_bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
+                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{dest_bucket_name}" created!'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            else:
+                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{dest_bucket_name}" already exists.'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+        except Exception as e:
+            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{dest_bucket_name}". Error: {str(e)}.'
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
 
+    prompt = f"{print_date_time()}\t\t[INFO] Starting copy from {source_bucket_name} to {dest_bucket_name}..."
+    print(prompt)
+    write_file('log.txt' , f"{prompt}")
+    for obj in source_bucket.objects.all():
+        copy_source = {
+            'Bucket': source_bucket_name,
+            'Key': obj.key
+        }
+        try:
+            s3_resource.meta.client.copy(copy_source, dest_bucket_name, obj.key)
+            prompt = f"{print_date_time()}\t\t[SUCCESS] Successfully copied: {obj.key}"
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+        except ClientError as e:
+            prompt = f"{print_date_time()}\t\t[ERROR] Error copying {obj.key}: {e}"
+            print(prompt)
+            write_file('log.txt' , f"{prompt}")
+
+            
 def truncate_with_etc_1(s, truncate_len):
     return s[:truncate_len - 5] + ' etc.' if len(s) > truncate_len else s
+
 
 def truncate_with_etc_2(s, truncate_len):
 
@@ -136,6 +184,7 @@ def truncate_with_etc_2(s, truncate_len):
         return truncated_str + ' etc.'
     else:
         return s
+
 
 def kill_qb_processes():
     processes = ["QBW.EXE", "axlbridge.exe"]
@@ -272,6 +321,7 @@ def process_gp_transactions(
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
+
 
 def process_gp_orders(
     companyName,
@@ -2152,6 +2202,7 @@ def load_data_via_query(
     else:
         raise ValueError("source_type must be 'mssql', 'bigquery', or 'qodbc'")
 
+
 def upload_to_s3(
     data,
     bucket_name,
@@ -2454,6 +2505,7 @@ def train_and_predict(
     ], axis=1)
     return final_predictions
 
+
 def predict_missing_metadata(input_cols, level_cols, unlabeled_df, labeled_df):
     sample_size = min(len(labeled_df.dropna(subset=input_cols)), 10000)
     labeled_df = labeled_df.dropna(subset=input_cols).sample(sample_size)
@@ -2578,6 +2630,7 @@ def refresh_access_token(client_id, client_secret, refresh_token, token_url):
         print(response.text)
         return None
 
+
 def get_resource(api_url, params=None):
 
     global client_id, client_secret, access_token, refresh_token, token_url
@@ -2597,6 +2650,7 @@ def get_resource(api_url, params=None):
         print(f"[ERROR] Failed to retrieve the resource!")
         print(json.loads(response.text))
         return response
+
 
 def get_full_resource(api_url):
 
@@ -2637,6 +2691,7 @@ def get_full_resource(api_url):
     df = pd.DataFrame(resources)
     return df, table_name
 
+
 def list_timestream_tables(timestream_write_client, database_name):
     try:
         response = timestream_write_client.list_tables(DatabaseName=database_name)
@@ -2645,6 +2700,7 @@ def list_timestream_tables(timestream_write_client, database_name):
     except Exception as e:
         print(f"Error listing tables in {database_name}: {e}")
         return []
+
 
 def fetch_data_from_timestream(timestream_query_client, query): 
     paginator = timestream_query_client.get_paginator('query')
@@ -3578,6 +3634,7 @@ def generate_table_select_queries(
                 del table_queries[table]
     return table_queries
 
+
 def load_suiteql_data_via_query(
     consumer_key, 
     consumer_secret, 
@@ -3742,11 +3799,13 @@ def clean_df(
         df = df[useful_columns]
     return df
 
+
 def find_useful_columns(
     df
 ):
     useful_cols = [col for col in df.columns if not (df[col].isna().sum() == df.shape[0] or df[col].value_counts().iloc[0] == df.shape[0])]
     return useful_cols
+
 
 def group(
     x, 
@@ -3765,6 +3824,7 @@ def group(
     else:
         return f"{quantile_values[4]+1:03}+"
 
+
 def find_unique_value_columns(
     dataframe
 ):
@@ -3773,6 +3833,7 @@ def find_unique_value_columns(
         if dataframe[column].nunique() == len(dataframe):
             unique_value_columns.append(column)
     return unique_value_columns
+
 
 def write_file(
     filename, 
@@ -3785,11 +3846,13 @@ def write_file(
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(data)
 
+
 def print_date_time():
     now = datetime.now()
     current_time = now.strftime("%D-%H:%M:%S")
     data = "Current Time = " + current_time
     return data
+
 
 def correctCompleteDates(
     df, 
@@ -3833,6 +3896,7 @@ def correctCompleteDates(
     df['CorrectedCompletedDate'] = df.apply(correctCompleteDate, axis=1)
     return df
 
+
 def convert_to_int_or_keep(
     x
 ):
@@ -3840,6 +3904,7 @@ def convert_to_int_or_keep(
         return int(pd.to_numeric(x))
     except (ValueError, TypeError):
         return x
+
 
 state_map = {
     'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
@@ -3857,6 +3922,7 @@ state_map = {
 abbrev_map = {v: v for v in state_map.values()}
 state_map.update(abbrev_map)
 
+
 def extract_state(
     text
 ):
@@ -3867,6 +3933,7 @@ def extract_state(
         if match:
             return value
     return None
+
 
 def read_iif_from_s3(
     bucket_name, 
@@ -3896,6 +3963,7 @@ def read_iif_from_s3(
     df = pd.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
 
     return df
+
 
 def clean_address(
     df
@@ -3939,6 +4007,7 @@ def clean_address(
                 df[[f'{value}Name', f'{value}City', f'{value}State', f'{value}Zip']] = None
     return df
 
+
 def extract_lists(
     transactions, 
     table
@@ -3950,6 +4019,7 @@ def extract_lists(
     df = df[[i for i in df.columns if 'Column' not in i]].copy()
     df = clean_address(df)
     return df
+
 
 def extract_transaction_header_line(
     transactions, 
@@ -3976,6 +4046,7 @@ def extract_transaction_header_line(
     df = clean_address(df)
     return df, df_line
 
+
 def replace_date(
     row, 
     date_col, 
@@ -3997,6 +4068,7 @@ def replace_date(
     except ValueError:
         last_valid_day = (pd.Timestamp(f"{year}-{month}-01") + pd.offsets.MonthEnd(0)).day
         return row[date_col].replace(year=year, month=month, day=min(day, last_valid_day))
+
 
 def wait_for_cluster_available(
     redshift_client,
@@ -4024,6 +4096,7 @@ def wait_for_cluster_available(
         print(prompt)
         write_file('log.txt', f"{prompt}")
 
+
 def create_iam_role(
     iam_client,
     role_name,
@@ -4044,6 +4117,7 @@ def create_iam_role(
         write_file('log.txt', f"{prompt}")
         return iam_client.get_role(RoleName=role_name)['Role']['Arn']
 
+
 def attach_policies_to_role(
     iam_client,
     role_name, 
@@ -4062,6 +4136,7 @@ def attach_policies_to_role(
             prompt = f'{print_date_time()}\t\t[ERROR] Error attaching policy "{policy}": {str(e)}'
             print(prompt)
             write_file('log.txt', f"{prompt}")
+
 
 def associate_role_with_redshift(
     redshift_client,
@@ -4116,6 +4191,7 @@ def associate_role_with_redshift(
         print(prompt)
         write_file('log.txt', f"{prompt}")
 
+
 def add_inbound_rule(
     redshift_client, 
     ec2_client, 
@@ -4147,6 +4223,7 @@ def add_inbound_rule(
         prompt = f'{print_date_time()}\t\t[INFO] Security group rule already exists.'
         print(prompt)
         write_file('log.txt', f"{prompt}")
+
 
 def turn_on_case_sensitivity(
     redshift_client,
@@ -4191,6 +4268,7 @@ def turn_on_case_sensitivity(
     else:
         print(f"[INFO] Cluster '{redshift_cluster_identifier}' already has the parameter group '{parameter_group_name}' associated.")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
+
 
 def upload_to_redshift(
     s3_client,
