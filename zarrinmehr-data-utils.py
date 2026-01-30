@@ -170,7 +170,7 @@ def copy_bucket_contents(
             print(prompt)
             write_file('log.txt' , f"{prompt}")
 
-            
+
 def truncate_with_etc_1(s, truncate_len):
     return s[:truncate_len - 5] + ' etc.' if len(s) > truncate_len else s
 
@@ -3732,7 +3732,8 @@ def clean_df(
     state_columns=None,
     keep_invalid_as_null=True,
     numeric_id=False, 
-    just_useful_columns=False
+    just_useful_columns=False,
+    upload_enabled=False
 ):
     col_to_date = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
     col_to_date = list(set(col_to_date))
@@ -3747,48 +3748,48 @@ def clean_df(
             invalid_id = df[invalid_mask]
             df = df[~invalid_mask].copy()
             print(f"invalid {id_column} found and removed: {len(invalid_id)}")
-            if len(invalid_id)>0:
+            if len(invalid_id)>0 and upload_enabled:
                 # upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{id_column}.csv", CreateS3Bucket=True)
                 upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
         duplicated_mask = df[id_column].duplicated()
         duplicated_id = df[duplicated_mask]
         df = df[~duplicated_mask].copy()
         print(f"duplicated {id_column} found and removed: {len(duplicated_id)}")
-        if len(duplicated_id)>0:
+        if len(duplicated_id)>0 and upload_enabled:
             # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
             upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
     if zip_code_columns:
         invalid_zip_codes = pd.DataFrame()
         valid_us_zip_regex = r"^\d{5}(\d{4})?$"
-        valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"        
+        valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"
         for col in zip_code_columns:
-            df[col] = df[col].astype('str').str.replace(' ','')
-            df[col] = df[col].astype('str').str.replace('-','')            
+            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
             invalid_mask = ~(df[col].str.match(valid_us_zip_regex) | df[col].str.match(valid_ca_zip_regex))
             invalid_zip_codes = pd.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
             df[col] = df[col].apply(lambda x: \
                                     x[0:5]+'-'+x[0:4] if isinstance(x, str) and re.match(valid_us_zip_regex, x) else \
-                                    x[0:3]+' '+x[3:6] if isinstance(x, str) and re.match(valid_ca_zip_regex, x) else  \
+                                    x[0:3]+' '+x[3:6] if isinstance(x, str) and re.match(valid_ca_zip_regex, x) else \
                                     x)
         print(f"invalid_zip_codes found: {len(invalid_zip_codes)}")
-        upload_to_s3(s3_client = s3_client,  data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
+        if len(invalid_zip_codes)>0 and upload_enabled:
+            upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in zip_code_columns:
                 invalid_zip_codes[col] = np.nan
-            df = pd.concat([df, invalid_zip_codes], ignore_index=True)        
+            df = pd.concat([df, invalid_zip_codes], ignore_index=True)
     if state_columns:
         invalid_states = pd.DataFrame()
         valid_us_states = { "DC": "District of Columbia", "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming" }
         valid_ca_states = { "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba", "NB": "New Brunswick", "NL": "Newfoundland and Labrador", "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island", "QC": "Quebec", "SK": "Saskatchewan", "NT": "Northwest Territories", "NU": "Nunavut", "YT": "Yukon" }
         for col in state_columns:
-            df[col] = df[col].astype('str').str.replace(' ','')
-            df[col] = df[col].astype('str').str.replace('-','')
+            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
             invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
             invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
         print(f"invalid_states found: {len(invalid_states)}")
-        upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
+        if len(invalid_states)>0 and upload_enabled:
+            upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in state_columns:
                 invalid_states[col] = np.nan
