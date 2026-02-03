@@ -960,6 +960,8 @@ def process_qb_transactions(
 ):
     if qodbc:
         transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
+        SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+
         invoices = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
         invoicesLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
         invoicesLines=invoicesLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
@@ -1058,7 +1060,6 @@ def process_qb_transactions(
             'TRNSTYPE':'TransactionType',
             'Txndate':'TransactionDate',
             'PAID':'TransactionStatus',
-            'Salesrepreffullname':'SalesRepID',
             'Customerreffullname':'CustNo',
             'Ponumber':'CustPo',
             'SHIPDATE':'ShipDate',
@@ -1078,7 +1079,10 @@ def process_qb_transactions(
         txns.CustNo = txns.CustNo.fillna('').astype('str')
         customer.CustNo = customer.CustNo.fillna('').astype('str')
         txns = txns.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustNo', how = 'left').copy()
-        invoices = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+
+        txns.Salesrepreflistid = txns.Salesrepreflistid.fillna('').astype('str')
+        SalesRep.Listid = SalesRep.Listid.fillna('').astype('str')
+        txns=txns.merge(SalesRep[['Listid','Salesrepentityreffullname']].drop_duplicates(subset=['Listid']).rename(columns ={'Listid':'Salesrepreflistid', 'Salesrepentityreffullname':'SalesRepID'}), on='Salesrepreflistid', how='left', suffixes=('', '_'))
 
         txns = txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
         txns['Company'] = companyName
@@ -1285,7 +1289,7 @@ def process_qb_orders(
             object_key_1 = 'PurchaseOrder.csv'
             object_key_2 = 'PurchaseOrderLine.csv'
             object_key_3 = 'Isfullyreceived'
-            object_key_4 = 'Inventorysitereffullname'
+            object_key_4 = 'Inventorysitereflistid'
             object_key_5 = 'Vendorreffullname'
             object_key_6 = 'Txnnumber'
             object_key_7 = 'Expecteddate'
@@ -1295,20 +1299,22 @@ def process_qb_orders(
             object_key_1 = 'SalesOrder.csv'
             object_key_2 = 'SalesOrderLine.csv'
             object_key_3 = 'Isfullyinvoiced'
-            object_key_4 = 'Salesrepreffullname'
+            object_key_4 = 'Salesrepreflistid'
             object_key_5 = 'Customerreffullname'
             object_key_6 = 'Ponumber'
             object_key_7 = 'Shipdate'
             object_key_8 = 'Subtotal'
             object_key_9 = 'Sales'
+
         orders = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_1, is_csv_file=True )
         ordersLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_2, is_csv_file=True )
+        SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders.rename(columns = {
             'Txnid':f'{txnsType2}Id',
             'Refnumber':f'{txnsType2}No',
             'Txndate':f'{txnsType2}Date',
-            object_key_4:txnsType4,
             object_key_5:f'{txnsType3}No',
             object_key_6:txnsType5,
             object_key_7:'ShipDate',
@@ -1321,8 +1327,6 @@ def process_qb_orders(
         orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
         orders[f'{txnsType2}Status'] = 'Open'
         orders.loc[(orders['Ismanuallyclosed']==1)|(orders[object_key_3]==1), f'{txnsType2}Status'] = 'Closed'
-        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5, f'{txnsType3}No', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
-        orders = orders.copy()
         orders = orders[
             (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')>=start_date)&\
             (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')<=end_date)
@@ -1372,6 +1376,11 @@ def process_qb_orders(
         orders[f'{txnsType3}No'] = orders[f'{txnsType3}No'].fillna('').astype('str')
         customersORvendors[f'{txnsType3}No'] = customersORvendors[f'{txnsType3}No'].fillna('').astype('str')
         orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}No', how = 'left')
+
+        orders[object_key_4] = orders[object_key_4].fillna('').astype('str')
+        SalesRep.Listid = SalesRep.Listid.fillna('').astype('str')
+        orders=orders.merge(SalesRep[['Listid','Salesrepentityreffullname']].drop_duplicates(subset=['Listid']).rename(columns ={'Listid':object_key_4, 'Salesrepentityreffullname':txnsType4}), on=object_key_4, how='left', suffixes=('', '_'))
+
         orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
