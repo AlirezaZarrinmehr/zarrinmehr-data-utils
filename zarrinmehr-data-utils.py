@@ -961,6 +961,7 @@ def process_qb_transactions(
     if qodbc:
         transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
         SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+        SalesRep['Salesrepentityreffullname']=SalesRep['Salesrepentityreffullname'].fillna('').astype('str').str.title()
 
         invoices = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
         invoicesLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
@@ -1309,6 +1310,7 @@ def process_qb_orders(
         orders = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_1, is_csv_file=True )
         ordersLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_2, is_csv_file=True )
         SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+        SalesRep['Salesrepentityreffullname']=SalesRep['Salesrepentityreffullname'].fillna('').astype('str').str.title()
 
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders.rename(columns = {
