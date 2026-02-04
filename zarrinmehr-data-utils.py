@@ -2330,6 +2330,7 @@ def process_data_to_s3(
     max_retries=3,
     CreateS3Bucket=False,
     aws_region=None,
+    chunksize=1000,
     file_path=None,
     encoding='utf-8'
 ):
@@ -2342,7 +2343,10 @@ def process_data_to_s3(
                         source_type=source_type,
                         connection_string=connection_string,
                         project_id=project_id,
-                        credentials=credentials
+                        credentials=credentials,
+                        chunksize=chunksize,
+                        file_path=file_path,
+                        encoding=encoding
                     )
                 else:
                     load_data_via_query(
@@ -2351,6 +2355,7 @@ def process_data_to_s3(
                         connection_string=connection_string,
                         project_id=project_id,
                         credentials=credentials,
+                        chunksize=chunksize,
                         file_path=file_path,
                         encoding=encoding
                     )
@@ -2370,12 +2375,8 @@ def process_data_to_s3(
             continue
         object_key = table + '.csv'
         try:
-            # prompt = f'{print_date_time()}\t\t[INFO] "{object_key}" table is empty and was not loaded to S3 "{bucket_name}" bucket !'
+
             if not file_path:
-                # if df.empty:
-                #     print(prompt)
-                #     write_file('log.txt' , f"{prompt}")
-                #     continue
                 upload_to_s3(
                     data=df,
                     bucket_name=bucket_name,
