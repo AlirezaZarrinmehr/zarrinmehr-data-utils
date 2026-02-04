@@ -2201,7 +2201,7 @@ def load_data_via_query(
                         chunks.append(dict(zip(columns, r)))
                     first_chunk = False
                 pbar.update(1)
-                time.sleep(0.1)
+                time.sleep(0.01)
         cursor.close()
         conn.close()
         if not file_path:
