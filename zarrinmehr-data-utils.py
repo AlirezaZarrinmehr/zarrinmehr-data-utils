@@ -2370,6 +2370,8 @@ def process_data_to_s3(
                 prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
+                if source_type == "qodbc":
+                    kill_qb_processes()
                 time.sleep(60)
         else:
             prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
