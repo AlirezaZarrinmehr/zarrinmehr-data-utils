@@ -187,10 +187,25 @@ def truncate_with_etc_2(s, truncate_len):
 
 
 def kill_qb_processes():
-    processes = ["QBW.EXE", "axlbridge.exe"]
+    services = [
+        "QuickBooksDB34",
+        "QBWCMonitor",
+        "QBUpdateMonitorService",
+        "QBIDPService",
+        "Intuit QuickBooks FCS"
+    ]
+    processes = [
+        "Intuit.QBDT.*",
+        "Intuit.QuickBooks.*",
+        "QB*",
+        "QBW.EXE",
+        "axlbridge.exe"
+    ]
+    for service in services:
+        os.system(f'net stop "{service}" /y 2>nul')
     for proc in processes:
-        os.system(f"taskkill /f /im {proc} /t 2>nul")
-    print("Cleaned up lingering QB/QODBC processes.")
+        os.system(f"taskkill /f /t /im {proc} 2>nul")
+    print("[SUCCESS] Cleaned up lingering QB/QODBC processes.")
 
 
 def process_gp_transactions(
