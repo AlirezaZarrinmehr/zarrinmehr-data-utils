@@ -3348,14 +3348,20 @@ def find_four_digit_number(string):
         return "No four-digit number found"
 
 
-def timer_and_alert(seconds, sound_file):
+def timer_and_alert(seconds, sound_file=None):
     try:
         if seconds <= 0:
-            winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+            if sound_file:
+                winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+            else:
+                winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
         else:
             for _ in tqdm(range(seconds), desc="[PENDING] Timer", unit="s"):
                 time.sleep(1)
+        if sound_file:
             winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+        else:
+            winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
     except Exception as e:
         print(f"[ERROR] Failed to play sound: {e}")
 
