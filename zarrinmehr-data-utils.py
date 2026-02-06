@@ -2121,7 +2121,12 @@ def load_data_via_query(
         credentials=None,
         chunksize=1000,
         file_path=None,
-        encoding='utf-8'
+        encoding='utf-8',
+        consumer_key=None,
+        consumer_secret=None,
+        token_key=None,
+        token_secret=None,
+        realm=None
 ):
     print(f"\tRunning {sql_query}")
     if source_type == "mssql":
@@ -2226,8 +2231,45 @@ def load_data_via_query(
             df.columns = df.columns.str.title()
             return df
 
+    elif source_type == "suiteql":
+        auth = OAuth1(
+            consumer_key,
+            consumer_secret,
+            token_key,
+            token_secret,
+            realm=realm,
+            signature_method='HMAC-SHA256'
+        )
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Prefer': 'transient'
+        }
+        offset = 0
+        hasMore = True
+        all_items = []
+        total_results =0
+        with tqdm(total=total_results, desc="Fetching data from NetSuite", unit="records") as pbar:
+            while hasMore:
+                suiteql_url = f'https://{realm}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit={chunksize}&offset={offset}'
+                response = requests.post(suiteql_url, auth=auth, headers=headers, json={"q": sql_query})
+                if response.status_code == 200:
+                    result = response.json()
+                    hasMore = result.get('hasMore', False)
+                    count = result.get('count', 0)
+                    items = result.get('items', [])
+                    all_items.extend(items)
+                    offset += chunksize
+                    total_results = result.get('totalResults', 0)
+                    pbar.total = total_results
+                    pbar.update(count)
+                    pbar.refresh()
+                else:
+                    raise Exception(f'Error executing SuiteQL query: {response.status_code}, {response.text}')
+        df = pd.DataFrame(all_items)
+        return df
     else:
-        raise ValueError("source_type must be 'mssql', 'bigquery', or 'qodbc'")
+        raise ValueError("source_type must be 'mssql', 'bigquery', 'suiteql', or 'qodbc'")
 
 
 def upload_to_s3(
@@ -3663,55 +3705,6 @@ def generate_table_select_queries(
             if table in table_queries:
                 del table_queries[table]
     return table_queries
-
-
-def load_suiteql_data_via_query(
-    consumer_key, 
-    consumer_secret, 
-    token_key, 
-    token_secret, 
-    realm, 
-    query, 
-    limit=1000
-):
-    auth = OAuth1(
-        consumer_key,
-        consumer_secret,
-        token_key,
-        token_secret,
-        realm=realm,
-        signature_method='HMAC-SHA256'
-    )
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Prefer': 'transient'
-    }
-    offset = 0
-    hasMore = True
-    all_items = []
-    total_results =0
-    with tqdm(total=total_results, desc="Fetching data from NetSuite", unit="records") as pbar:
-        while hasMore:
-            suiteql_url = f'https://{realm}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit={limit}&offset={offset}'
-            response = requests.post(suiteql_url, auth=auth, headers=headers, json={"q": query})
-            if response.status_code == 200:
-                result = response.json()
-                hasMore = result.get('hasMore', False)
-                count = result.get('count', 0)
-                items = result.get('items', [])
-                all_items.extend(items)
-                offset += limit
-                total_results = result.get('totalResults', 0)
-                pbar.total = total_results
-                pbar.update(count)
-                pbar.refresh()
-            else:
-                raise Exception(f'Error executing SuiteQL query: {response.status_code}, {response.text}')
-                # hasMore = False
-    # Convert results to DataFrame and return
-    df = pd.DataFrame(all_items)
-    return df
 
 
 def read_csv_from_s3(
