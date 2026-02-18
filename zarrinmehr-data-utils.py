@@ -223,6 +223,9 @@ def process_ns_orders(
     txnsType3,
     txnsType4,
     txnsType5,
+    txnsType6 = 'billingstatus',
+    txnsType7 = 'foreigntotal',
+    txnsType8 = 'custbody_stc_total_after_discount',
     DBIA,
     itemsCategoriesV3,
     QuantityCoefficient,
@@ -239,7 +242,8 @@ def process_ns_orders(
     orders = orders.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
     orders['entity'] = orders['entity'].fillna('').apply(convert_to_int_or_keep).astype('str')
     customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].fillna('').apply(convert_to_int_or_keep).astype('str')
-    orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', txnsType4]], left_on = 'entity', right_on = f'{txnsType3}Id', how = 'left')
+    orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], left_on = 'entity', right_on = f'{txnsType3}Id', how = 'left')
+    orders = orders.merge(employee[['id', 'Name']].rename(columns = {'id':'employeeId', 'Name':txnsType4}).drop_duplicates(subset = ['employeeId']), left_on = 'employee', right_on = 'employeeId', how = 'left')
     orders = orders.merge(employee[['id', 'Name']].rename(columns = {'id':'employeeId', 'Name':txnsType4+'2'}).drop_duplicates(subset = ['employeeId']), left_on = 'custbodycustbodycsr_assigned', right_on = 'employeeId', how = 'left')
     orders.rename(columns = {
         'id':f'{txnsType2}Id',
@@ -247,7 +251,7 @@ def process_ns_orders(
         'typebaseddocumentnumber':f'{txnsType2}No',                  
         'trandate':f'{txnsType2}Date',
         'closedate':'CloseDate',
-        'billingstatus':f'{txnsType2}Status',
+        txnsType6:f'{txnsType2}Status',
         'custbodycust_duedate':'ReqInstallDate',
         'custbodyschedinstall_date':'PlannedInstallDate',
         'custbody_khor_installdate':'InstallDate',
@@ -257,18 +261,26 @@ def process_ns_orders(
         'city':'ShipCity',
         'state':'ShipState',
         'zip':'ShipZip',
-        'foreigntotal':'subTotal',
-        'custbody_stc_total_after_discount':'Total'
+        txnsType7:'subTotal',
+        txnsType8:'Total',
+        'forecasttype': f'{txnsType2}Type',
+        'probability':'Probability',
     }, inplace = True)
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
     transactionLine['transaction'] = transactionLine['transaction'].apply(convert_to_int_or_keep).astype('str')
-    ordersLines = transactionLine[
-        (transactionLine['transaction'].isin(orders[f'{txnsType2}Id']))&\
-        (transactionLine['foreignamount'].notna())&\
-        (transactionLine['item'].notna())&\
-        (transactionLine['taxline']!='T')&\
-        (transactionLine['subsidiary'].fillna('').astype('str').str.strip()==subsidiaryId)
-    ].copy()
+    if txnsType != 'Opprtnty':
+        ordersLines = transactionLine[
+            (transactionLine['transaction'].isin(orders[f'{txnsType2}Id']))&\
+            (transactionLine['foreignamount'].notna())&\
+            (transactionLine['item'].notna())&\
+            (transactionLine['taxline']!='T')&\
+            (transactionLine['subsidiary'].fillna('').astype('str').str.strip()==subsidiaryId)
+        ].copy()
+    else:
+        ordersLines = transactionLine[
+            (transactionLine['transaction'].isin(orders[f'{txnsType2}Id']))&\
+            (transactionLine['subsidiary'].fillna('').astype('str').str.strip()==subsidiaryId)
+        ].copy()
     ordersLines.rename(columns = {
         'transaction':f'{txnsType2}Id',
         'item':'ItemId',
@@ -279,90 +291,93 @@ def process_ns_orders(
         'expectedshipdate':'ReqShipDate',
         'actualshipdate':'ShipDate'
     }, inplace = True)
-    ordersLines['linelastmodifieddate'] = pd.to_datetime(ordersLines['linelastmodifieddate'])
-    ordersLines = ordersLines.loc[ordersLines.groupby([f'{txnsType2}Id', 'linesequencenumber'])['linelastmodifieddate'].idxmax()]
-    ordersLines.loc[ordersLines['itemtype']=='TaxGroup', 'ItemId']=-8
-    ordersLines.ItemId = ordersLines.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
-    item.ItemId = item.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
-    ordersLines = ordersLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-    ordersLines.ItemId = ordersLines.ItemId.apply(convert_to_int_or_keep).astype('str')
-    item.ItemId = item.ItemId.apply(convert_to_int_or_keep).astype('str')
-    ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}No'] + header_to_line_columns], on=f'{txnsType2}Id', how='left')
-    ordersLines['Rate'] = ordersLines['Rate'].fillna(0.0)
-    ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0.0) * QuantityCoefficient
-    ordersLines['Total'] = ordersLines['Total'].fillna(0.0) * TotalCoefficient
-    ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'ShipDate', 'ReqShipDate']+ header_to_line_columns]
-    orders[f'{txnsType2}Status'] = orders[f'{txnsType2}Status'].astype('str').replace({'F': 'Closed', 'T': 'Open'})
-    orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
+    if txnsType != 'Opprtnty':
+        ordersLines['linelastmodifieddate'] = pd.to_datetime(ordersLines['linelastmodifieddate'])
+        ordersLines = ordersLines.loc[ordersLines.groupby([f'{txnsType2}Id', 'linesequencenumber'])['linelastmodifieddate'].idxmax()]
+        ordersLines.loc[ordersLines['itemtype']=='TaxGroup', 'ItemId']=-8
+        ordersLines.ItemId = ordersLines.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
+        item.ItemId = item.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
+        ordersLines = ordersLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+        ordersLines.ItemId = ordersLines.ItemId.apply(convert_to_int_or_keep).astype('str')
+        item.ItemId = item.ItemId.apply(convert_to_int_or_keep).astype('str')
+        ordersLines = ordersLines.merge(orders[[f'{txnsType2}Id', f'{txnsType2}No'] + header_to_line_columns], on=f'{txnsType2}Id', how='left')
+        ordersLines['Rate'] = ordersLines['Rate'].fillna(0.0)
+        ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0.0) * QuantityCoefficient
+        ordersLines['Total'] = ordersLines['Total'].fillna(0.0) * TotalCoefficient
+        ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'ShipDate', 'ReqShipDate']+ header_to_line_columns]
+        orders[f'{txnsType2}Status'] = orders[f'{txnsType2}Status'].astype('str').replace({'F': 'Closed', 'T': 'Open'})
+        orders.loc[orders[f'{txnsType2}Status']=='Open', 'CloseDate'] = pd.NaT
 
-    ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemNo']='SHIPPING'
-    ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemName']='SHIPPING'
-    ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemDescription']='SHIPPING'
+        ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemNo']='SHIPPING'
+        ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemName']='SHIPPING'
+        ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemDescription']='SHIPPING'
 
-    ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        s3_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
-    )
+        ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
+            item_df, 
+            companyName, 
+            s3_client, 
+            s3_bucket_name, 
+            DBIA, 
+            itemsCategoriesV3,
+            ordersLines
+        )
 
-    orderTypes = ordersLines.merge(
-                        itemsCategoriesV3[['index', 'ItemLevel2']] \
-                        .rename(columns = {'index':'ItemId'}) \
-                        .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
-                    ) \
-                    .rename(columns={'ItemLevel2': f'{txnsType2}Type'}) \
-                    .sort_values([f'{txnsType2}Id', 'Total'], ascending=[True, False]) \
-                    .groupby(f'{txnsType2}Id').agg({f'{txnsType2}Type': 'first'}).reset_index()
+        orderTypes = ordersLines.merge(
+                            itemsCategoriesV3[['index', 'ItemLevel2']] \
+                            .rename(columns = {'index':'ItemId'}) \
+                            .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
+                        ) \
+                        .rename(columns={'ItemLevel2': f'{txnsType2}Type'}) \
+                        .sort_values([f'{txnsType2}Id', 'Total'], ascending=[True, False]) \
+                        .groupby(f'{txnsType2}Id').agg({f'{txnsType2}Type': 'first'}).reset_index()
 
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
-    orderTypes[f'{txnsType2}Id'] = orderTypes[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
-    orders = orders.merge(orderTypes, on = f'{txnsType2}Id', how = 'left')
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
-    orders['Company'] = companyName
-    orders = orders[['Company'] + orders.columns[:-1].tolist()]
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    orders.drop(columns = ['Total'], inplace = True)
-    orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
-    ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
-    orders = orders.merge(
-        ordersLines.groupby(f'{txnsType2}Id').agg(Total = ('Total', 'sum')).reset_index(),
-        on=f'{txnsType2}Id',
-    )
-    mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
-    mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
-    print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
-    orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
+        orderTypes[f'{txnsType2}Id'] = orderTypes[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
+        orders = orders.merge(orderTypes, on = f'{txnsType2}Id', how = 'left')
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        orders['Company'] = companyName
+        orders = orders[['Company'] + orders.columns[:-1].tolist()]
+        orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        orders.drop(columns = ['Total'], inplace = True)
+        orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
+        ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
+        orders = orders.merge(
+            ordersLines.groupby(f'{txnsType2}Id').agg(Total = ('Total', 'sum')).reset_index(),
+            on=f'{txnsType2}Id',
+        )
+        mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
+        mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
+        print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+        orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
 
-    orders.drop(columns = 'Total', inplace=True)
-    orders.rename(columns = {'subTotal':'Total'}, inplace = True)
+        orders.drop(columns = 'Total', inplace=True)
+        orders.rename(columns = {'subTotal':'Total'}, inplace = True)
 
-    orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
-    orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
-    ordersLines['Company'] = companyName
-    ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
-    ordersLines = ordersLines[ordersLines[f'{txnsType2}Id'].isin(orders[f'{txnsType2}Id'])]
+        orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
+        orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
+        ordersLines['Company'] = companyName
+        ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
+        ordersLines = ordersLines[ordersLines[f'{txnsType2}Id'].isin(orders[f'{txnsType2}Id'])]
 
-    ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
+        ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
 
-    try:
-        _ = ordersLines['InstallDate']
-    except KeyError:
-        ordersLines['InstallDate'] = np.nan
+        try:
+            _ = ordersLines['InstallDate']
+        except KeyError:
+            ordersLines['InstallDate'] = np.nan
 
-    ordersLines.loc[
-        (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
-        (pd.to_datetime(ordersLines['ShipDate']) > end_date),
-        'ShipDate'
-    ] = np.nan
-    ordersLines.loc[
-        (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
-        (pd.to_datetime(ordersLines['InstallDate']) > end_date),
-        'InstallDate'
-    ] = np.nan
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
+            (pd.to_datetime(ordersLines['ShipDate']) > end_date),
+            'ShipDate'
+        ] = np.nan
+        ordersLines.loc[
+            (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
+            (pd.to_datetime(ordersLines['InstallDate']) > end_date),
+            'InstallDate'
+        ] = np.nan
+    else:
+        orders = orders.merge(ordersLines[[f'{txnsType2}Id', 'Company']].drop_duplicates(subset = [f'{txnsType2}Id']), on =  f'{txnsType2}Id')
     return orders, ordersLines, item_df
 
 def process_gp_transactions(
