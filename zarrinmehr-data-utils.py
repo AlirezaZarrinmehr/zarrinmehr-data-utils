@@ -207,6 +207,7 @@ def kill_qb_processes():
         os.system(f"taskkill /f /t /im {proc} 2>nul")
     print("[SUCCESS] Cleaned up lingering QB/QODBC processes.")
 
+
 def process_ns_orders(
     companyName,
     transaction,
@@ -223,9 +224,9 @@ def process_ns_orders(
     txnsType3,
     txnsType4,
     txnsType5,
-    txnsType6 = 'billingstatus',
-    txnsType7 = 'foreigntotal',
-    txnsType8 = 'custbody_stc_total_after_discount',
+    txnsType6,
+    txnsType7,
+    txnsType8,
     DBIA,
     itemsCategoriesV3,
     QuantityCoefficient,
@@ -379,6 +380,7 @@ def process_ns_orders(
     else:
         orders = orders.merge(ordersLines[[f'{txnsType2}Id', 'Company']].drop_duplicates(subset = [f'{txnsType2}Id']), on =  f'{txnsType2}Id')
     return orders, ordersLines, item_df
+
 
 def process_gp_transactions(
     list_of_accounts,
