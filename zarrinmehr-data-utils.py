@@ -264,7 +264,7 @@ def process_ns_orders(
         'zip':'ShipZip',
         txnsType7:'subTotal',
         txnsType8:'Total',
-        'forecasttype': f'{txnsType2}Type',
+        # 'forecasttype': f'{txnsType2}Type',
         'probability':'Probability',
     }, inplace = True)
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
