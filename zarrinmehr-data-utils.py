@@ -378,6 +378,7 @@ def process_ns_orders(
             'InstallDate'
         ] = np.nan
     else:
+        orders = orders[orders[f'{txnsType2}Id'].isin(ordersLines[f'{txnsType2}Id'])]
         orders['Company'] = companyName
         orders = orders[['Company'] + orders.columns[:-1].tolist()]
         ordersLines['Company'] = companyName
