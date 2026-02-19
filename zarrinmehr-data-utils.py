@@ -378,7 +378,10 @@ def process_ns_orders(
             'InstallDate'
         ] = np.nan
     else:
-        orders = orders.merge(ordersLines[[f'{txnsType2}Id', 'Company']].drop_duplicates(subset = [f'{txnsType2}Id']), on =  f'{txnsType2}Id')
+        orders['Company'] = companyName
+        orders = orders[['Company'] + orders.columns[:-1].tolist()]
+        ordersLines['Company'] = companyName
+        ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
     return orders, ordersLines, item_df
 
 
