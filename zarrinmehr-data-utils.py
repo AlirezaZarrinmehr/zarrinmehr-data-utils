@@ -59,7 +59,7 @@ for mod in modules:
     try:
         globals()[mod] = importlib.import_module(mod)
     except ImportError as e:
-        print(f"[INFO] Failed to import {mod}: {str(e)}")
+        log_message(f"[INFO] Failed to import {mod}: {str(e)}")
 
 modules = [
     ("datetime" , "date"),
@@ -87,13 +87,14 @@ modules = [
     ("psycopg2.errors", "UndefinedTable"),
     ("itertools", "islice")
 ]
+    
 for fr_mod, im_mod in modules:
     try:
         mod = importlib.import_module(fr_mod)
         obj = getattr(mod, im_mod)
         globals()[im_mod] = obj
     except ImportError as e:
-        print(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
+        log_message(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
 
 modules = {
     "pandas":  "pd",
@@ -105,7 +106,7 @@ for mod, alias in modules.items():
     try:
         globals()[alias] = importlib.import_module(mod)
     except ImportError as e:
-        print(f"[INFO] Failed to import {mod} as {alias}: {str(e)}")
+        log_message(f"[INFO] Failed to import {mod} as {alias}: {str(e)}")
 
 modules = [
     ("selenium.webdriver.chrome.service" , "Service", "ChromeService"),
@@ -116,12 +117,14 @@ for fr_mod, im_mod, name in modules:
         obj = getattr(fr_mod, im_mod)
         globals()[name] = obj
     except ImportError as e:
-        print(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
+        log_message(f"[INFO] Failed to import {im_mod} from {fr_mod}: {str(e)}")
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
     if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
         caller_globals[name] = globals()[name]
+
+
 
 def copy_bucket_contents(
     s3_resource,
@@ -140,21 +143,13 @@ def copy_bucket_contents(
             buckets = [bucket['Name'] for bucket in buckets]
             if dest_bucket_name not in buckets:
                 s3_client.create_bucket(Bucket=dest_bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{dest_bucket_name}" created!'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[SUCCESS] Bucket "{dest_bucket_name}" created!')
             else:
-                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{dest_bucket_name}" already exists.'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[INFO] Bucket "{dest_bucket_name}" already exists.')
         except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{dest_bucket_name}". Error: {str(e)}.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'[ERROR] Failed to create bucket "{dest_bucket_name}". Error: {str(e)}.')
 
-    prompt = f"{print_date_time()}\t\t[INFO] Starting copy from {source_bucket_name} to {dest_bucket_name}..."
-    print(prompt)
-    write_file('log.txt' , f"{prompt}")
+    log_message(f'[INFO] Starting copy from {source_bucket_name} to {dest_bucket_name}...')
     for obj in source_bucket.objects.all():
         copy_source = {
             'Bucket': source_bucket_name,
@@ -162,13 +157,9 @@ def copy_bucket_contents(
         }
         try:
             s3_resource.meta.client.copy(copy_source, dest_bucket_name, obj.key)
-            prompt = f"{print_date_time()}\t\t[SUCCESS] Successfully copied: {obj.key}"
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'[SUCCESS] Successfully copied: {obj.key}")
         except ClientError as e:
-            prompt = f"{print_date_time()}\t\t[ERROR] Error copying {obj.key}: {e}"
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'[ERROR] Error copying {obj.key}: {e}")
 
 
 def truncate_with_etc_1(s, truncate_len):
@@ -205,7 +196,7 @@ def kill_qb_processes():
         os.system(f'net stop "{service}" /y 2>nul')
     for proc in processes:
         os.system(f"taskkill /f /t /im {proc} 2>nul")
-    print("[SUCCESS] Cleaned up lingering QB/QODBC processes.")
+    log_message("[SUCCESS] Cleaned up lingering QB/QODBC processes.")
 
 
 def process_ns_orders(
@@ -348,7 +339,7 @@ def process_ns_orders(
         )
         mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
         mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
-        print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+        log_message(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
         orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
 
         orders.drop(columns = 'Total', inplace=True)
@@ -507,7 +498,7 @@ def process_gp_transactions(
     txnsLines.TransactionId = txnsLines.TransactionId.astype('str').str.strip()
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['Total_ord'], mismatched_txns['Total_lin'], atol=0.1)]
-    print(f"{mismatched_txns.shape[0]} txns total do not match txnsline total")
+    log_message(f"{mismatched_txns.shape[0]} txns total do not match txnsline total")
     txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
     txnsLines['Company'] = companyName
     txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -621,7 +612,7 @@ def process_gp_orders(
 
     mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
-    print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+    log_message(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
     orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
     #-------------------------------------
     orders = orders.drop_duplicates(subset=[f'{txnsType2}Id'])
@@ -1475,9 +1466,7 @@ def process_qb_orders(
     itemsCategoriesV3,
     SalesOrderLinkedTxn
 ):
-    prompt = f'{txnsType2}...'
-    print(prompt)
-    write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+    log_message(f{txnsType2}...')
     #### orders
     if txnsType == 'PURCHORD':
         object_key_1 = 'PurchaseOrder.csv'
@@ -1583,7 +1572,7 @@ def process_qb_orders(
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
     mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
-    print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+    log_message(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
     orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
     #-----------------------------------------------------------------------------------------------------------
     orders[f'{txnsType3}Id'] = orders[f'{txnsType3}No'].copy()
@@ -1689,7 +1678,7 @@ def process_s50_transactions(
     #     ('Inventory Adjustment'),
     #     ('Assembly Adjustments'),
     ]:
-        print(txnsType)
+        log_message(txnsType)
         txnsLines = JrnlRow[JrnlRow['Journal']==txnsType].copy()
         txnsLines = txnsLines[
             (txnsLines['GLAcntNumber'].astype('str').isin(list_of_accounts['GLAcntNumber'].astype('str')))&\
@@ -1808,7 +1797,7 @@ def process_s50_transactions(
     txnsLines.TransactionId = txnsLines.TransactionId.astype('str')
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'subTotal':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['subTotal'], mismatched_txns['Total_lin'], atol=0.1)]
-    print(f"{mismatched_txns.shape[0]} txns Total do not match orderline Total")
+    log_message(f"{mismatched_txns.shape[0]} txns Total do not match orderline Total")
     txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
     txns = txns[txns['TransactionId'].isin(txnsLines['TransactionId'])]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
@@ -1839,9 +1828,7 @@ def process_s50_orders(
     itemsCategoriesV3
 ):
     #------------------------------------------------------------
-    prompt = f'Step5: {txnsType}...'
-    print(prompt)
-    write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+    log_message(f'Step5: {txnsType}...')
     #------------------------------------------------------------
 
     txns_df = JrnlHdr[JrnlHdr['JrnlKey_Journal']==txnsType].copy()    
@@ -1971,7 +1958,7 @@ def process_s50_orders(
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype('str')
     mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
-    print(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
+    log_message(f"{mismatched_orders.shape[0]} orders total do not match orderline total")
     orders = orders[~orders[f'{txnsType2}Id'].isin(mismatched_orders[f'{txnsType2}Id'])]
     orders['CustNo'] = orders[f'{txnsType3}Id'].copy()
     #-------------------------------------
@@ -2025,10 +2012,10 @@ def get_exchange_rates(
                 return True
 
             except Exception as e:
-                print(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
+                log_message(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
                 attempts += 1
                 time.sleep(1)
-        print(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
+        log_message(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
         return False
 
     find_and_act("react-select-ofx-historical-rates-select-from-field-input", action='send_keys', text=from_currency)
@@ -2116,7 +2103,7 @@ def load_data_via_query(
         token_secret=None,
         realm=None
 ):
-    print(f"\tRunning {sql_query}")
+    log_message(f"\tRunning {sql_query}")
     if source_type == "mssql":
         if not connection_string:
             raise ValueError("connection_string is required for MSSQL source.")
@@ -2278,17 +2265,11 @@ def upload_to_s3(
             buckets = [bucket['Name'] for bucket in buckets]
             if bucket_name not in buckets:
                 s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Bucket "{bucket_name}" created!'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[SUCCESS] Bucket "{bucket_name}" created!')
             else:
-                prompt = f'{print_date_time()}\t\t[INFO] Bucket "{bucket_name}" already exists.'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[INFO] Bucket "{bucket_name}" already exists.')
         except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.')
     if not file_path:
         clean_data = data.copy()
         for idx, dtype in enumerate(clean_data.dtypes):
@@ -2426,51 +2407,39 @@ def process_data_to_s3(
                 for attempt in range(max_retries):
                     try:
                         duplicated_ids = load_data_via_query(sql_query=query, **params)
-                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                         break
                     except Exception as e:
-                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
                         else:
                             timer_and_alert(60)
                 else:
-                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
             
                 if not duplicated_ids.empty:
                     raise ValueError(f"Duplicate IDs ({id_column}) found in {table}")
                 
             if defined_query:
-                print(f"Running: '{defined_query}'")
+                log_message(f"Running: '{defined_query}'")
                 
                 for attempt in range(max_retries):
                     try:
                         df = load_data_via_query(sql_query=defined_query, **params)
-                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                         break
                     except Exception as e:
-                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
                         else:
                             timer_and_alert(60)
                 else:
-                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
 
             elif not last_modified_column:
@@ -2481,23 +2450,17 @@ def process_data_to_s3(
                 for attempt in range(max_retries):
                     try:
                         df = load_data_via_query(sql_query=query, **params)
-                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                         break
                     except Exception as e:
-                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
                         else:
                             timer_and_alert(60)
                 else:
-                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
 
             else:
@@ -2515,14 +2478,10 @@ def process_data_to_s3(
                 table_exists = s3_object_exists(s3_client, bucket_name, object_key)
 
                 if table_exists:
-                    prompt = f'{print_date_time()}\t\tTable "{table}" found in S3. Proceeding to update the "{table}" table with new records...'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'Table "{table}" found in S3. Proceeding to update the "{table}" table with new records...')
                     df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
                 else:
-                    prompt = f'{print_date_time()}\t\tTable "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'Table "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...')
                     
                     id_order_by = f", {id_column}" if id_column else ""
                     if source_type == 'suiteql':
@@ -2541,23 +2500,17 @@ def process_data_to_s3(
                     for attempt in range(max_retries):
                         try:
                             df = load_data_via_query(sql_query=query, **params)
-                            prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                            print(prompt)
-                            write_file('log.txt' , f"{prompt}")
+                            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                             break
                         except Exception as e:
-                            prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                            print(prompt)
-                            write_file('log.txt' , f"{prompt}")
+                            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                             if source_type == "qodbc":
                                 kill_qb_processes()
                                 timer_and_alert(20)
                             else:
                                 timer_and_alert(60)
                     else:
-                        prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                         continue
                                     
                 has_more_records=True
@@ -2568,7 +2521,7 @@ def process_data_to_s3(
                         lastupdate_str = '1970-01-01 00:00:00'
                     else:
                         lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
-                    # print(lastupdate_str)
+                    # log_message(lastupdate_str)
                     id_order_by = f", {id_column}" if id_column else ""
                     if source_type == 'suiteql':
                         query = f"""
@@ -2588,25 +2541,19 @@ def process_data_to_s3(
                     for attempt in range(max_retries):
                         try:
                             new_records = load_data_via_query(sql_query=query, **params)
-                            prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                            print(prompt)
-                            write_file('log.txt' , f"{prompt}")
+                            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                             break
                         except Exception as e:
-                            prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                            print(prompt)
-                            write_file('log.txt' , f"{prompt}")
+                            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                             if source_type == "qodbc":
                                 kill_qb_processes()
                                 timer_and_alert(20)
                             else:
                                 timer_and_alert(60)
                     else:
-                        prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                         continue
-                    print(f"New records fetched: {new_records.shape[0]}")
+                    log_message(f"New records fetched: {new_records.shape[0]}")
 
                     df = pd.concat([df, new_records], ignore_index=True)
                     
@@ -2633,13 +2580,9 @@ def process_data_to_s3(
 
             try:
                 upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = aws_region)
-                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
             except Exception as e:
-                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
             if 'df' in locals():
                 del df
             if 'new_records' in locals():
@@ -2671,23 +2614,17 @@ def process_data_to_s3(
                             file_path=file_path,
                             encoding=encoding
                         )
-                    prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                     break
                 except Exception as e:
-                    prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
                     if source_type == "qodbc":
                         kill_qb_processes()
                         timer_and_alert(20)
                     else:
                         timer_and_alert(60)
             else:
-                prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                 continue
             object_key = table + '.csv'
             try:
@@ -2704,8 +2641,7 @@ def process_data_to_s3(
                     )
                 else:
                     if not os.path.getsize(file_path):
-                        print(prompt)
-                        write_file('log.txt' , f"{prompt}")
+                        log_message(f"[ERROR] File '{file_path}' is missing!")
                         continue
                     upload_to_s3(
                         data=None,
@@ -2717,13 +2653,9 @@ def process_data_to_s3(
                         file_path = file_path,
                         encoding=encoding
                     )
-                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
             except Exception as e:
-                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
             if 'df' in locals():
                 del df
             gc.collect()
@@ -2762,9 +2694,9 @@ def generate_open_cases_df(
         current_date += pd.Timedelta(days=1)
     if not quantile_values:
         quantile_values = [int(open_df['Age'].quantile(i/n)) for i in range(n+1)]
-    print(quantile_values)
+    log_message(quantile_values)
     open_df['Age Group'] = open_df['Age'].apply(lambda x: group(x, quantile_values))
-    write_file('log.txt' , f"{print_date_time()}\t\tGenerated open cases dataframe successfully!")
+    log_message(f'Generated open cases dataframe successfully!')
     return open_df
 
 
@@ -2808,13 +2740,13 @@ def train_and_predict(
         y_pred[col] = output_encoders[col].inverse_transform(y_pred[col])
         Y_test_decoded[col] = output_encoders[col].inverse_transform(Y_test[col])
 
-    print("Per-column accuracy:")
+    log_message("Per-column accuracy:")
     for col in target_cols:
         acc = accuracy_score(Y_test_decoded[col], y_pred[col])
-        print(f"{col}: {acc:.4f}")
+        log_message(f"{col}: {acc:.4f}")
 
     exact_match_acc = np.mean(np.all(y_pred.values == Y_test_decoded.values, axis=1))
-    print(f"Exact match accuracy: {exact_match_acc:.4f}")
+    log_message(f"Exact match accuracy: {exact_match_acc:.4f}")
 
     # 7. Predict on new dataset
     unlabeled_df ['combined_text'] = unlabeled_df [input_cols].astype('str').agg(' '.join, axis=1)
@@ -2927,11 +2859,11 @@ def get_access_token(client_id, client_secret, username, password, token_url):
     if response.ok:
         access_token = response.json().get("access_token")
         refresh_token = response.json().get("refresh_token")
-        print("Access Token Retrieved!")
+        log_message("Access Token Retrieved!")
         return access_token, refresh_token
     else:
-        print(f"[ERROR] Authorization Failed. Status Code: {response.status_code}")
-        print(response.text)
+        log_message(f"[ERROR] Authorization Failed. Status Code: {response.status_code}")
+        log_message(response.text)
         return None
 
 
@@ -2952,8 +2884,8 @@ def refresh_access_token(client_id, client_secret, refresh_token, token_url):
         refresh_token = response.json().get("refresh_token")
         return access_token, refresh_token
     else:
-        print(f"[ERROR] Failed to Retrieve Refreshed Access Token! Authorization Failed. Status Code: {response.status_code}")
-        print(response.text)
+        log_message(f"[ERROR] Failed to Retrieve Refreshed Access Token! Authorization Failed. Status Code: {response.status_code}")
+        log_message(response.text)
         return None
 
 
@@ -2973,8 +2905,8 @@ def get_resource(api_url, params=None):
     if response.status_code == 200:
         return response.json()
     else:
-        print(f"[ERROR] Failed to retrieve the resource!")
-        print(json.loads(response.text))
+        log_message(f"[ERROR] Failed to retrieve the resource!")
+        log_message(json.loads(response.text))
         return response
 
 
@@ -3005,13 +2937,13 @@ def get_full_resource(api_url):
         while True:
             response = get_resource(api_url, params)
             resources.extend(response['value'])
-            print(f"Page {page_index} added!")
+            log_message(f"Page {page_index} added!")
             try:
                 api_url = response['@odata.nextLink']
                 page_index += 1
                 time.sleep(1)
             except:
-                print(f"All pages retrieved!")
+                log_message(f"All pages retrieved!")
                 break
 
     df = pd.DataFrame(resources)
@@ -3024,7 +2956,7 @@ def list_timestream_tables(timestream_write_client, database_name):
         tables = [i.get('TableName', []) for i in response.get('Tables', [])]
         return tables
     except Exception as e:
-        print(f"Error listing tables in {database_name}: {e}")
+        log_message(f"Error listing tables in {database_name}: {e}")
         return []
 
 
@@ -3059,14 +2991,10 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
     try:
         timestream_write_client.delete_table(DatabaseName=database_name, TableName=table_name)
         timestream_write_client.create_table(DatabaseName=database_name, TableName=table_name)
-        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" deleted & created!'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[SUCCESS] Table "{table_name}" deleted & created!')
 
     except Exception as e:
-        prompt = f'{print_date_time()}\t\t[ERROR] Error deleting or creating table: {e}'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[ERROR] Error deleting or creating table: {e}')
         raise
     try:
         for index, row in tqdm(df.iterrows(), total=df.shape[0], desc=f'Uploading "{table_name}" to TimeStream', unit="Record"):
@@ -3080,13 +3008,9 @@ def upload_to_timestream(timestream_write_client, df, database_name, table_name)
             }
 
             timestream_write_client.write_records(DatabaseName=database_name, TableName=table_name, Records=[record])
-        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" Loaded to Timestream "{database_name}" database!'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[SUCCESS] Table "{table_name}" Loaded to Timestream "{database_name}" database!')
     except Exception as e:
-        prompt = f'{print_date_time()}\t\t[ERROR] Failed to load "{table_name}" to Timestream. Error: {str(e)}'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[ERROR] Failed to load "{table_name}" to Timestream. Error: {str(e)}')
         raise
 
 
@@ -3116,15 +3040,13 @@ def load_permissions_data(
 
     unprocessed_users_list = "\n".join(f"\t- {user}" for user in unProcessedAccess)
     processed_users_list = "\n".join(f"\t- {user}" for user in processedAccess)
-    prompt = f"""
+    log_message(f"""
     User Access Details:
     All devices will be available to:
     {unprocessed_users_list}
     {authorized_devices_count} out of {all_devices_count} devices are qualified and will be available to:
     {processed_users_list}
-    """
-    print(prompt)
-    write_file('log.txt' , f"{prompt}")
+    """)
 
     default_permissions = []
     for user in unProcessedAccess:
@@ -3146,12 +3068,12 @@ def t2m_login(base_url, developer_id, account, username, password):
         response = requests.get(f"{base_url}login?t2maccount={account}&t2musername={username}&t2mpassword={password}&t2mdeveloperid={developer_id}")
         response_data = response.json()
         if response_data.get('success') == True:
-            pass # print(f"[SUCCESS] Logged into Talk2M!")
+            pass # log_message(f"[SUCCESS] Logged into Talk2M!")
             return response_data['t2msession']
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] t2m_login Failed: {response.text}")
+        log_message(f"[ERROR] t2m_login Failed: {response.text}")
 
 
 def t2m_logout(base_url, session_id, developer_id):
@@ -3159,11 +3081,11 @@ def t2m_logout(base_url, session_id, developer_id):
         response = requests.get(f"{base_url}logout?t2msession={session_id}&t2mdeveloperid={developer_id}")        
         response_data = response.json()
         if response_data.get('success') == True:
-            pass # print(f"[SUCCESS] Logged out of Talk2M!")
+            pass # log_message(f"[SUCCESS] Logged out of Talk2M!")
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] t2m_logout Failed: {response.text}")
+        log_message(f"[ERROR] t2m_logout Failed: {response.text}")
 
 
 def get_account_info(base_url, developer_id, session_id=None):
@@ -3177,12 +3099,12 @@ def get_account_info(base_url, developer_id, session_id=None):
             t2m_logout(base_url, session_id, developer_id)
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] Retrieved account information!")
+            log_message(f"[SUCCESS] Retrieved account information!")
             return response_data
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] Failed to Retrieve account information: {response.text}")
+        log_message(f"[ERROR] Failed to Retrieve account information: {response.text}")
 
 
 def get_ewons(base_url, developer_id, session_id=None):
@@ -3196,13 +3118,13 @@ def get_ewons(base_url, developer_id, session_id=None):
             t2m_logout(base_url, session_id, developer_id)
         response_data = response.json()
         if response_data.get('success') == True:
-            print(f"[SUCCESS] Retrieved Ewons!")
+            log_message(f"[SUCCESS] Retrieved Ewons!")
             df = pd.DataFrame(response_data.get('ewons'))
             return df
         else:
             raise Exception()
     except:    
-        print(f"[ERROR] Failed to Retrieve Ewons: {response.text}")
+        log_message(f"[ERROR] Failed to Retrieve Ewons: {response.text}")
 
 
 def get_ewon(base_url, developer_id, ewon_id, session_id=None):
@@ -3239,14 +3161,14 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
                             key, value = cell.text.strip().split(':', 1)
                             parsed_data[key.strip()] = value.strip()
                         else:
-                            print(f"[WARNING] Skipping row with unexpected format: {row}")
+                            log_message(f"[WARNING] Skipping row with unexpected format: {row}")
                     except Exception as e:
-                        print(f"[ERROR] Failed to process row '{row}': {e}")
-                # print(f"[SUCCESS] Retrieved Ewon Details!")
+                        log_message(f"[ERROR] Failed to process row '{row}': {e}")
+                # log_message(f"[SUCCESS] Retrieved Ewon Details!")
                 return parsed_data
 
             except Exception as e:
-                print(f"[ERROR] Failed to parse HTML: {e}")
+                log_message(f"[ERROR] Failed to parse HTML: {e}")
                 return {}
             # soup = BeautifulSoup(response_text, 'html.parser')
             # table = soup.find('table', {'class': 'edbt'})
@@ -3257,12 +3179,12 @@ def get_ewon_details(base_url, developer_id, encodedName, device_username, devic
             #         key_value = cells[0].text.split(':')
             #         if len(key_value) == 2:
             #             parsed_data[key_value[0]] = key_value[1]
-            # print(f"Get Ewon Details Successful!")
+            # log_message(f"Get Ewon Details Successful!")
             # return parsed_data
         else:
             raise Exception()
     except:    
-        # print(f"Get Ewon Details Failed: {response.text}")
+        # log_message(f"Get Ewon Details Failed: {response.text}")
         return {}
 
 
@@ -3283,47 +3205,47 @@ def delete_thing_and_certificates(iot_client, thing_name):
     try:
         iot_client.describe_thing(thingName=thing_name)
     except iot_client.exceptions.ResourceNotFoundException:
-        print(f"[WARNING] Thing '{thing_name}' does not exist.")
+        log_message(f"[WARNING] Thing '{thing_name}' does not exist.")
         return
     try:
         principals = iot_client.list_thing_principals(thingName=thing_name)['principals']
         for principal in principals:
-            print(f"[INFO] Detaching certificate: {principal}")
+            log_message(f"[INFO] Detaching certificate: {principal}")
             iot_client.detach_thing_principal(
                 thingName=thing_name,
                 principal=principal
             )
             policies = iot_client.list_attached_policies(target=principal)['policies']
             for policy in policies:
-                print(f"[INFO] Detaching policy '{policy['policyName']}' from certificate...")
+                log_message(f"[INFO] Detaching policy '{policy['policyName']}' from certificate...")
                 iot_client.detach_policy(
                     policyName=policy['policyName'],
                     target=principal
                 )
             cert_id = principal.split('/')[-1]
-            print(f"[INFO] Deactivating certificate: {cert_id}")
+            log_message(f"[INFO] Deactivating certificate: {cert_id}")
             iot_client.update_certificate(
                 certificateId=cert_id,
                 newStatus='INACTIVE'
             )
-            print(f"[INFO] Deleting certificate: {cert_id}")
+            log_message(f"[INFO] Deleting certificate: {cert_id}")
             iot_client.delete_certificate(
                 certificateId=cert_id,
                 forceDelete=True
             )
     except botocore.exceptions.ClientError as e:
-        print(f"[ERROR] Failed to clean up certificates or policies for '{thing_name}': {e}")
+        log_message(f"[ERROR] Failed to clean up certificates or policies for '{thing_name}': {e}")
         return
 
     try:
         iot_client.delete_thing(thingName=thing_name)
-        print(f"[SUCCESS] Deleted Thing '{thing_name}' and all associated certificates!\n")
+        log_message(f"[SUCCESS] Deleted Thing '{thing_name}' and all associated certificates!\n")
     except botocore.exceptions.ClientError as e:
-        print(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
+        log_message(f"[ERROR] Failed to delete Thing '{thing_name}': {e}")
 
 
 def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
-    print("[INFO] Restarting...")
+    log_message("[INFO] Restarting...")
     try:
         options = webdriver.ChromeOptions()
         # options.add_argument("--headless")
@@ -3350,11 +3272,11 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
                     return True
 
                 except Exception as e:
-                    print(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
+                    log_message(f"[INFO] Attempt {attempts+1}/{max_attempts}: Element '{element_id}' not interactable... Retrying...")
                     attempts += 1
                     time.sleep(1)
-            print(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
-            print("[ERROR] Failed to reboot the device.")
+            log_message(f"[ERROR] Failed to interact with element '{element_id}' after {max_attempts} attempts.")
+            log_message("[ERROR] Failed to reboot the device.")
             return False
 
         if not find_and_act('textfield-1056-inputEl', action='send_keys', text=username): return False
@@ -3367,16 +3289,16 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
         try:
             reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
             if reboot_message:
-                print("[INFO] Reboot message received.")
-                print("[SUCCESS] Device will reboot shortly!")
+                log_message("[INFO] Reboot message received.")
+                log_message("[SUCCESS] Device will reboot shortly!")
                 return True
         except Exception as ValueError:
-            print(f"[ERROR] Reboot message not found: {ValueError}.")
-            print("[ERROR] Failed to reboot the device.")
+            log_message(f"[ERROR] Reboot message not found: {ValueError}.")
+            log_message("[ERROR] Failed to reboot the device.")
             return False
     except Exception as e:
-        print(f"[ERROR] An error occurred during device restart: {e}")
-        print("[ERROR] Failed to reboot the device.")
+        log_message(f"[ERROR] An error occurred during device restart: {e}")
+        log_message("[ERROR] Failed to reboot the device.")
         return False
     finally:
         if driver:
@@ -3385,13 +3307,13 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
 
 def cleanup_device_driver_files(ip_address, username, password):
     try:
-        print(f"[INFO] Cleaning up the driver...")
+        log_message(f"[INFO] Cleaning up the driver...")
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            # print("[SUCCESS] Logged into device!")
+            # log_message("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
-                print("[ERROR] The 'usr' directory is missing on the device!")
+                log_message("[ERROR] The 'usr' directory is missing on the device!")
                 return False
             ftp.cwd('/usr')
             usr_files = ftp.nlst()
@@ -3409,14 +3331,14 @@ def cleanup_device_driver_files(ip_address, username, password):
                 )
             ]
             if not files_to_delete and not folders_to_delete:
-                print("[INFO] No cleanup needed — already clean.")
+                log_message("[INFO] No cleanup needed — already clean.")
                 return True
             for file in files_to_delete:
                 try:
                     ftp.delete(file)
-                    print(f"[INFO] Deleted file: {file}")
+                    log_message(f"[INFO] Deleted file: {file}")
                 except ftplib.all_errors as e:
-                    print(f"[ERROR] Failed to delete file {file}: {e}")
+                    log_message(f"[ERROR] Failed to delete file {file}: {e}")
             def delete_directory_and_contents(ftp, dir_name):
                 try:
                     ftp.cwd(dir_name)
@@ -3424,20 +3346,20 @@ def cleanup_device_driver_files(ip_address, username, password):
                     for f in files:
                         try:
                             ftp.delete(f)
-                            print(f"[INFO] Deleted file '{f}' inside '{dir_name}'")
+                            log_message(f"[INFO] Deleted file '{f}' inside '{dir_name}'")
                         except Exception as e:
-                            print(f"[ERROR] Could not delete '{f}' in '{dir_name}': {e}")
+                            log_message(f"[ERROR] Could not delete '{f}' in '{dir_name}': {e}")
                     ftp.cwd("..")
                     ftp.rmd(dir_name)
-                    print(f"[INFO] Deleted directory: {dir_name}")
+                    log_message(f"[INFO] Deleted directory: {dir_name}")
                 except Exception as e:
-                    print(f"[ERROR] Failed to delete directory '{dir_name}': {e}")
+                    log_message(f"[ERROR] Failed to delete directory '{dir_name}': {e}")
             for folder in folders_to_delete:
                 delete_directory_and_contents(ftp, folder)
-            print("[SUCCESS] Cleanup complete!")
+            log_message("[SUCCESS] Cleanup complete!")
             return True
     except ftplib.all_errors as e:
-        print(f"[ERROR] FTP connection or operation failed: {e}")
+        log_message(f"[ERROR] FTP connection or operation failed: {e}")
         return False
 
 
@@ -3445,10 +3367,10 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
     try:
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            # print("[SUCCESS] Logged into device!")
+            # log_message("[SUCCESS] Logged into device!")
             directories = ftp.nlst()
             if 'usr' not in directories:
-                print("[ERROR] The 'usr' directory is missing on the device!")
+                log_message("[ERROR] The 'usr' directory is missing on the device!")
                 return False
             ftp.cwd('/usr')
             usr_files = ftp.nlst()
@@ -3466,20 +3388,20 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 )
             ]
             if latest_driver_jar in usr_files:
-                print("[INFO] Driver is already installed!")
+                log_message("[INFO] Driver is already installed!")
                 return "Already Installed"
             elif not files_to_delete and not folders_to_delete:
-                print("[INFO] Installing the driver...")
+                log_message("[INFO] Installing the driver...")
                 for file_name, file_path in files_to_upload_to_usr.items():
                     if source_type == 'local':
                         try:
                             with open(file_path, 'rb') as fp:
                                 ftp.storbinary(f'STOR {file_name}', fp)
                         except FileNotFoundError:
-                            print(f"[ERROR]  File not found: {file_path}")
+                            log_message(f"[ERROR]  File not found: {file_path}")
                             return False
                         except Exception as e:
-                            print(f"[ERROR]  Failed to upload {file_name}: {e}")
+                            log_message(f"[ERROR]  Failed to upload {file_name}: {e}")
                             return False
                     elif source_type == 's3':
                         s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=file_path)
@@ -3487,10 +3409,10 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                             with s3_object['Body'] as fp:
                                 ftp.storbinary(f'STOR {file_name}', fp)
                         except Exception as e:
-                            print(f"[ERROR] Failed to upload {file_name} from S3: {e}")
+                            log_message(f"[ERROR] Failed to upload {file_name} from S3: {e}")
                             return False
                     else:
-                        print(f"[ERROR] Unknown source type: {source_type}")
+                        log_message(f"[ERROR] Unknown source type: {source_type}")
                         return False
 
                 ftp.mkd('AwsCertificates')
@@ -3501,10 +3423,10 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                             with open(file_path, 'rb') as fp:
                                 ftp.storbinary(f'STOR {file_name}', fp)
                         except FileNotFoundError:
-                            print(f"[ERROR]  File not found: {file_path}")
+                            log_message(f"[ERROR]  File not found: {file_path}")
                             return False
                         except Exception as e:
-                            print(f"[ERROR] Failed to upload {file_name}: {e}")
+                            log_message(f"[ERROR] Failed to upload {file_name}: {e}")
                             return False
                     elif source_type == 's3':
                         s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=file_path)
@@ -3512,18 +3434,18 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                             with s3_object['Body'] as fp:
                                 ftp.storbinary(f'STOR {file_name}', fp)
                         except Exception as e:
-                            print(f"[ERROR] Failed to upload {file_name} from S3: {e}")
+                            log_message(f"[ERROR] Failed to upload {file_name} from S3: {e}")
                             return False
                     else:
-                        print(f"[ERROR] Unknown source type: {source_type}")
+                        log_message(f"[ERROR] Unknown source type: {source_type}")
                         return False
-                print("[SUCCESS] Install complete!")
+                log_message("[SUCCESS] Install complete!")
                 return True
             else:
                 return "Cleanup Needed"
 
     except ftplib.all_errors as e:
-        print(f"[ERROR] FTP connection or operation failed: {e}")
+        log_message(f"[ERROR] FTP connection or operation failed: {e}")
         return False
 
 
@@ -3533,20 +3455,20 @@ def stop_driver(ip_address, username, password):
 
     try:
         response = requests.get(url, auth=HTTPBasicAuth(username, password))
-        print()
-        print()
+        log_message()
+        log_message()
 
         if response.status_code == 200 and response.text.strip() == "JVM Stopped":
-            print("[SUCCESS] JVM stop command completed!")
+            log_message("[SUCCESS] JVM stop command completed!")
             return True
         else:
-            print("[WARNING] Unexpected response received:")
-            print(f"  - Status Code: {response.status_code}")
-            print(f"  - Response: {response.text}")
+            log_message("[WARNING] Unexpected response received:")
+            log_message(f"  - Status Code: {response.status_code}")
+            log_message(f"  - Response: {response.text}")
             return False
 
     except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Request failed: {e}")
+        log_message(f"[ERROR] Request failed: {e}")
         return False
 
 
@@ -3560,7 +3482,7 @@ def install_device_firmware(
         s3_client,
         max_retries=3,
 ):
-    print(f"[INFO] Installing the firmware...")
+    log_message(f"[INFO] Installing the firmware...")
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -3570,12 +3492,12 @@ def install_device_firmware(
                 try:
                     ftp.set_pasv(True)
                 except Exception as e:
-                    print(f"[INFO] Passive mode failed: {e}. Switching to active mode...")
+                    log_message(f"[INFO] Passive mode failed: {e}. Switching to active mode...")
                     ftp.set_pasv(False)
                 ftp.sock.settimeout(120)
                 ftp.sendcmd('TYPE I')
                 ftp.cwd('/')
-                # print("[SUCCESS] Logged into device!")
+                # log_message("[SUCCESS] Logged into device!")
                 s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
                 firmware_data = s3_object['Body'].read()
                 firmware_size = len(firmware_data)
@@ -3583,14 +3505,14 @@ def install_device_firmware(
                 fp.seek(0)
                 with tqdm.wrapattr(fp, "read", total=firmware_size, desc="Installing firmware", unit="B", unit_scale=True) as wrapped_fp:
                     ftp.storbinary(f'STOR {firmware_file_name}', wrapped_fp, blocksize=32768)
-                print("[SUCCESS] Firmware install complete!")
+                log_message("[SUCCESS] Firmware install complete!")
                 return True
 
         except Exception as e:
-            print(f'[ERROR] Failed to upload {firmware_file_name} from S3: {str(e)}. Retry {attempt + 1}/{max_retries} in 5 seconds...')
+            log_message(f'[ERROR] Failed to upload {firmware_file_name} from S3: {str(e)}. Retry {attempt + 1}/{max_retries} in 5 seconds...')
             time.sleep(5)
 
-    print("[ERROR] Failed to install the firmware!")
+    log_message("[ERROR] Failed to install the firmware!")
     return False
 
 
@@ -3617,7 +3539,7 @@ def timer_and_alert(seconds, sound_file=None):
         else:
             winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
     except Exception as e:
-        print(f"[ERROR] Failed to play sound: {e}")
+        log_message(f"[ERROR] Failed to play sound: {e}")
 
 
 def enrich_and_classify_customers(
@@ -3722,7 +3644,7 @@ def enrich_and_classify_customers(
                 dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
         dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
         upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
-        print(dfCategories.Found.sum())
+        log_message(dfCategories.Found.sum())
         dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
         df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
         df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
@@ -3745,9 +3667,7 @@ def enrich_and_classify_customers(
         if dropLookUpIn:
             df.drop(columns = 'LookUpIn', inplace=True)
         upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        prompt = f'Found: {dfCategories.Found.sum()}...'
-        print(prompt)
-        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        log_message(f'Found: {dfCategories.Found.sum()}...')
         return df
 
 
@@ -3853,7 +3773,7 @@ def enrich_and_classify_items(
                 dfCategories.loc[(dfCategories['Company'].isna())&(dfCategories[searchCol] == keyword), 'Company'] = companyName
         dfCategories_combined = pd.concat([dfCategories, dfCategories_2], ignore_index=True)
         upload_to_s3(s3_client = s3_client, data = dfCategories_combined, bucket_name = 'manual-db', object_key = cat_object_key)
-        print(dfCategories.Found.sum())
+        log_message(dfCategories.Found.sum())
         dfCategories = dfCategories[~dfCategories['CommonName'].duplicated()]
         df_2 = df.loc[~df[extraLevels + dfLevels].isna().all(axis=1)].copy()
         df = df.loc[df[extraLevels + dfLevels].isna().all(axis=1)].copy()
@@ -3876,9 +3796,7 @@ def enrich_and_classify_items(
         if dropLookUpIn:
             df.drop(columns = 'LookUpIn', inplace=True)
         upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
-        prompt = f'Found: {dfCategories.Found.sum()}...'
-        print(prompt)
-        write_file('log.txt' , f"{print_date_time()}\t\t{prompt}")
+        log_message(f'Found: {dfCategories.Found.sum()}...')
         return df
 
 
@@ -3959,7 +3877,7 @@ def generate_table_select_queries(
             for table in table_list:
                 table_queries[table.table_id] = f"SELECT * FROM `{table.project}.{table.dataset_id}.{table.table_id}`"
     else:
-        print(f"{project} project does not contain any datasets.")
+        log_message(f"{project} project does not contain any datasets.")
     if tables_to_remove:
         for table in tables_to_remove:
             if table in table_queries:
@@ -4030,14 +3948,14 @@ def clean_df(
             # invalid_mask = ~df[id_column].astype('str').str.isdigit()
             invalid_id = df[invalid_mask]
             df = df[~invalid_mask].copy()
-            print(f"invalid {id_column} found and removed: {len(invalid_id)}")
+            log_message(f"invalid {id_column} found and removed: {len(invalid_id)}")
             if len(invalid_id)>0 and upload_enabled:
                 # upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{id_column}.csv", CreateS3Bucket=True)
                 upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
         duplicated_mask = df[id_column].duplicated()
         duplicated_id = df[duplicated_mask]
         df = df[~duplicated_mask].copy()
-        print(f"duplicated {id_column} found and removed: {len(duplicated_id)}")
+        log_message(f"duplicated {id_column} found and removed: {len(duplicated_id)}")
         if len(duplicated_id)>0 and upload_enabled:
             # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
             upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
@@ -4054,7 +3972,7 @@ def clean_df(
                                     x[0:5]+'-'+x[0:4] if isinstance(x, str) and re.match(valid_us_zip_regex, x) else \
                                     x[0:3]+' '+x[3:6] if isinstance(x, str) and re.match(valid_ca_zip_regex, x) else \
                                     x)
-        print(f"invalid_zip_codes found: {len(invalid_zip_codes)}")
+        log_message(f"invalid_zip_codes found: {len(invalid_zip_codes)}")
         if len(invalid_zip_codes)>0 and upload_enabled:
             upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
@@ -4070,7 +3988,7 @@ def clean_df(
             invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
             invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
-        print(f"invalid_states found: {len(invalid_states)}")
+        log_message(f"invalid_states found: {len(invalid_states)}")
         if len(invalid_states)>0 and upload_enabled:
             upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
@@ -4079,7 +3997,7 @@ def clean_df(
             df = pd.concat([df, invalid_states], ignore_index=True)
     if just_useful_columns:
         useful_columns = find_useful_columns(df)
-        print(f"{len(useful_columns)} useful variables found!")
+        log_message(f"{len(useful_columns)} useful variables found!")
         df = df[useful_columns]
     return df
 
@@ -4137,6 +4055,12 @@ def print_date_time():
     data = "Current Time = " + current_time
     return data
 
+
+def log_message(message, file_path='log.txt'):
+    log_entry = f"{print_date_time()}\t\t{message}"
+    print(log_entry)
+    write_file(file_path, log_entry)
+    
 
 def correctCompleteDates(
     df, 
@@ -4360,25 +4284,17 @@ def wait_for_cluster_available(
 ):
     waiter = redshift_client.get_waiter('cluster_available')
     try:
-        prompt = f'{print_date_time()}\t\tWaiting for the Redshift cluster "{redshift_cluster_identifier}" to become available...'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'Waiting for the Redshift cluster "{redshift_cluster_identifier}" to become available...')
         waiter.wait(ClusterIdentifier=redshift_cluster_identifier)
         response = redshift_client.describe_clusters(ClusterIdentifier=redshift_cluster_identifier)
         cluster_status = response['Clusters'][0]['ClusterStatus']
         if cluster_status == 'available':
-            prompt = f'{print_date_time()}\t\tCluster "{redshift_cluster_identifier}" is now available.'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'Cluster "{redshift_cluster_identifier}" is now available.')
         else:
-            prompt = f'{print_date_time()}\t\tCluster "{redshift_cluster_identifier}" is not available. Current status: {cluster_status}'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'Cluster "{redshift_cluster_identifier}" is not available. Current status: {cluster_status}')
             raise ValueError(f'Cluster "{redshift_cluster_identifier}" is not available. Current status: "{cluster_status}"')
     except Exception as e:
-        prompt = f'{print_date_time()}\t\t[ERROR] Error waiting for cluster to become available: {e}'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[ERROR] Error waiting for cluster to become available: {e}')
 
 
 def create_iam_role(
@@ -4391,14 +4307,10 @@ def create_iam_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy)
         )
-        prompt = f'{print_date_time()}\t\t[SUCCESS] Role "{role_name}" created!'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[SUCCESS] Role "{role_name}" created!')
         return response['Role']['Arn']
     except iam_client.exceptions.EntityAlreadyExistsException:
-        prompt = f'{print_date_time()}\t\t[INFO] Role "{role_name}" already exists.'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[INFO] Role "{role_name}" already exists.')
         return iam_client.get_role(RoleName=role_name)['Role']['Arn']
 
 
@@ -4413,13 +4325,9 @@ def attach_policies_to_role(
                 RoleName=role_name,
                 PolicyArn=f'arn:aws:iam::aws:policy/{policy}'
             )
-            prompt = f'{print_date_time()}\t\tPolicy "{policy}" attached to role "{role_name}".'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'Policy "{policy}" attached to role "{role_name}".')
         except iam_client.exceptions.NoSuchEntityException as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Error attaching policy "{policy}": {str(e)}'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'[ERROR] Error attaching policy "{policy}": {str(e)}')
 
 
 def associate_role_with_redshift(
@@ -4434,17 +4342,13 @@ def associate_role_with_redshift(
         current_roles = response["Clusters"][0].get("IamRoles", [])
         role_associated = any(role['IamRoleArn'] == redshift_iam_role_arn for role in current_roles) 
         if role_associated:
-            prompt = f'{print_date_time()}\t\t[INFO] Role "{redshift_iam_role_arn}" is already associated with the Redshift cluster "{redshift_cluster_identifier}".'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'[INFO] Role "{redshift_iam_role_arn}" is already associated with the Redshift cluster "{redshift_cluster_identifier}".')
         else:
             redshift_client.modify_cluster_iam_roles(
                 ClusterIdentifier=redshift_cluster_identifier,
                 AddIamRoles=[redshift_iam_role_arn]
             )
-            prompt = f'{print_date_time()}\t\tAttempting to associate the role "{redshift_iam_role_arn}" with the Redshift cluster "{redshift_cluster_identifier}".'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'Attempting to associate the role "{redshift_iam_role_arn}" with the Redshift cluster "{redshift_cluster_identifier}".')
             wait_for_cluster_available(redshift_client, redshift_cluster_identifier) 
             elapsed_time = 0
             role_associated = False
@@ -4455,25 +4359,15 @@ def associate_role_with_redshift(
                 updated_roles = response["Clusters"][0].get("IamRoles", [])
                 role_associated = any(role['IamRoleArn'] == redshift_iam_role_arn for role in updated_roles)
                 if role_associated:
-                    prompt = f'{print_date_time()}\t\t[SUCCESS] Role "{redshift_iam_role_arn}" has been associated with the Redshift cluster "{redshift_cluster_identifier}"!'
-                    print(prompt)
-                    write_file('log.txt', f"{prompt}")
+                    log_message(f'[SUCCESS] Role "{redshift_iam_role_arn}" has been associated with the Redshift cluster "{redshift_cluster_identifier}"!')
                 else:
-                    prompt = f'{print_date_time()}\t\t⏳ Waiting for IAM role "{redshift_iam_role_arn}" to be associated with the Redshift cluster "{redshift_cluster_identifier}". Retrying...'
-                    print(prompt)
-                    write_file('log.txt', f"{prompt}")
+                    log_message(f'⏳ Waiting for IAM role "{redshift_iam_role_arn}" to be associated with the Redshift cluster "{redshift_cluster_identifier}". Retrying...')
             if not role_associated:
-                prompt = f'{print_date_time()}\t\t[ERROR] Timeout reached. Role "{redshift_iam_role_arn}" was not associated with the Redshift cluster "{redshift_cluster_identifier}" within {timeout} seconds.'
-                print(prompt)
-                write_file('log.txt', f"{prompt}")
+                log_message(f'[ERROR] Timeout reached. Role "{redshift_iam_role_arn}" was not associated with the Redshift cluster "{redshift_cluster_identifier}" within {timeout} seconds.')
     except redshift_client.exceptions.ClusterNotFoundFault:
-        prompt = f'{print_date_time()}\t\t[ERROR] Redshift cluster "{redshift_cluster_identifier}" not found.'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[ERROR] Redshift cluster "{redshift_cluster_identifier}" not found.')
     except Exception as e:
-        prompt = f'{print_date_time()}\t\t[ERROR] Error associating role: {str(e)}'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[ERROR] Error associating role: {str(e)}')
 
 
 def add_inbound_rule(
@@ -4490,9 +4384,7 @@ def add_inbound_rule(
         for rule in existing_rules
     )
     if not rule_exists:
-        prompt = f'{print_date_time()}\t\tAdding inbound rule for security group to allow access from 0.0.0.0/0...'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")   
+        log_message(f'Adding inbound rule for security group to allow access from 0.0.0.0/0...')   
         ec2_client.authorize_security_group_ingress(
             GroupId=security_group_id,
             IpProtocol="tcp",
@@ -4500,13 +4392,9 @@ def add_inbound_rule(
             ToPort=5439,
             CidrIp="0.0.0.0/0"
         )
-        prompt = f'{print_date_time()}\t\t[SUCCESS] Inbound rule for 0.0.0.0/0 added to security group "{security_group_id}"!'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[SUCCESS] Inbound rule for 0.0.0.0/0 added to security group "{security_group_id}"!')
     else:
-        prompt = f'{print_date_time()}\t\t[INFO] Security group rule already exists.'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+        log_message(f'[INFO] Security group rule already exists.')
 
 
 def turn_on_case_sensitivity(
@@ -4523,10 +4411,10 @@ def turn_on_case_sensitivity(
             ParameterGroupFamily=parameter_group_family,
             Description=f'Param group for {redshift_cluster_identifier}'
         )
-        print(f"[SUCCESS] Created parameter group '{parameter_group_name}'!")
+        log_message(f"[SUCCESS] Created parameter group '{parameter_group_name}'!")
 
     else:
-        print(f"[INFO] Parameter group '{parameter_group_name}' already exists.")
+        log_message(f"[INFO] Parameter group '{parameter_group_name}' already exists.")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     response = redshift_client.modify_cluster_parameter_group(
         ParameterGroupName=parameter_group_name,
@@ -4538,7 +4426,7 @@ def turn_on_case_sensitivity(
             }
         ]
     )
-    print(f"Modified parameter group '{parameter_group_name}'")
+    log_message(f"Modified parameter group '{parameter_group_name}'")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     cluster = redshift_client.describe_clusters(ClusterIdentifier=redshift_cluster_identifier)['Clusters'][0]
     current_parameter_group = cluster['ClusterParameterGroups'][0]['ParameterGroupName']
@@ -4547,10 +4435,10 @@ def turn_on_case_sensitivity(
             ClusterIdentifier=redshift_cluster_identifier,
             ClusterParameterGroupName=parameter_group_name
         )
-        print(f"Modified cluster '{redshift_cluster_identifier}' with parameter group '{parameter_group_name}'")
+        log_message(f"Modified cluster '{redshift_cluster_identifier}' with parameter group '{parameter_group_name}'")
         response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     else:
-        print(f"[INFO] Cluster '{redshift_cluster_identifier}' already has the parameter group '{parameter_group_name}' associated.")
+        log_message(f"[INFO] Cluster '{redshift_cluster_identifier}' already has the parameter group '{parameter_group_name}' associated.")
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
 
 
@@ -4579,14 +4467,10 @@ def upload_to_redshift(
         attach_policies_to_role(iam_client, role_name, role_policies)
         response = redshift_client.describe_clusters(ClusterIdentifier=redshift_cluster_identifier)
         cluster_status = response["Clusters"][0]["ClusterStatus"]
-        prompt = f'{print_date_time()}\t\t[INFO] Cluster "{redshift_cluster_identifier}" exists. Status: {cluster_status}'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[INFO] Cluster "{redshift_cluster_identifier}" exists. Status: {cluster_status}')
     except redshift_client.exceptions.ClusterNotFoundFault:
         if createRedshiftCluster:
-            prompt = f'{print_date_time()}\t\tCluster "{redshift_cluster_identifier}" not found. Creating a new one...'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'Cluster "{redshift_cluster_identifier}" not found. Creating a new one...')
             redshift_client.create_cluster(
                 ClusterIdentifier=redshift_cluster_identifier,
                 NodeType=redshift_node_type,
@@ -4598,9 +4482,7 @@ def upload_to_redshift(
                 PubliclyAccessible=True
             )
             wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
-            prompt = f'{print_date_time()}\t\tCluster "{redshift_cluster_identifier}" is now available.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'Cluster "{redshift_cluster_identifier}" is now available.')
         else:
             raise Exception(f'Cluster "{redshift_cluster_identifier}" does not exist and createRedshiftCluster=False. Aborting.')
     add_inbound_rule(redshift_client, ec2_client, redshift_cluster_identifier)
@@ -4617,40 +4499,28 @@ def upload_to_redshift(
             port=5439
         )
         cur = conn.cursor()
-        prompt = f'{print_date_time()}\t\t[SUCCESS] Connected to Redshift!'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'[SUCCESS] Connected to Redshift!')
         enable_case_sensitive_query = 'SET enable_case_sensitive_identifier TO true;'
         cur.execute(enable_case_sensitive_query)
         conn.commit()
         enable_case_sensitive_query = 'SET enable_case_sensitive_identifier TO on;'
         cur.execute(enable_case_sensitive_query)
         conn.commit()
-        prompt = f'{print_date_time()}\t\tCase sensitivity enabled for this session.'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'Case sensitivity enabled for this session.')
     except Exception as e:
         raise Exception(f'[ERROR] Failed to connect to Redshift: {e}')
     for bucket in s3_bucket_names:
-        prompt = f'{print_date_time()}\t\tScanning S3 bucket: "{bucket}"'
-        print(prompt)
-        write_file('log.txt' , f"{prompt}")
+        log_message(f'Scanning S3 bucket: "{bucket}"')
         try:
             response = s3_client.list_objects_v2(Bucket=bucket, Prefix="")
             if "Contents" not in response:
-                prompt = f'{print_date_time()}\t\tNo files found in bucket "{bucket}". Skipping...'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'No files found in bucket "{bucket}". Skipping...')
                 continue
             csv_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.csv')]
             if not csv_files:
-                prompt = f'{print_date_time()}\t\tNo CSV files found in bucket "{bucket}". Skipping...'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'No CSV files found in bucket "{bucket}". Skipping...')
                 continue
-            prompt = f'{print_date_time()}\t\tFound {len(csv_files)} CSV file(s) in bucket "{bucket}". Uploading to Redshift...'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'Found {len(csv_files)} CSV file(s) in bucket "{bucket}". Uploading to Redshift...')
             for csv_file in csv_files:
                 s3_path = f's3://{bucket}/{csv_file}'
                 table_name = (bucket + '-' + csv_file.split('.csv')[0])
@@ -4661,20 +4531,14 @@ def upload_to_redshift(
                 cur.execute(check_table_query)
                 result = cur.fetchall()
                 if table_name in [row[2] for row in result]:
-                    prompt = f'{print_date_time()}\t\t[INFO] Table "{table_name}" exists. Dropping it...'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[INFO] Table "{table_name}" exists. Dropping it...')
                     drop_table_query = f'DROP TABLE "{table_name}";'
                     cur.execute(drop_table_query)
                     conn.commit()
-                    prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" dropped!'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = csv_file, dtype_str=True)
                 if df.empty:
-                    prompt = f'{print_date_time()}\t\tWarning: DataFrame is empty. Creating a table with default column structure.'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'Warning: DataFrame is empty. Creating a table with default column structure.')
                     create_table_query = f'CREATE TABLE "{table_name}" ('
                     create_table_query += ", ".join([f'"{col}" TEXT' for col in df.columns])
                     create_table_query += ");"
@@ -4689,14 +4553,10 @@ def upload_to_redshift(
                     create_table_query = f'CREATE TABLE "{table_name}" ('
                     create_table_query += ", ".join([f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()])
                     create_table_query += ");"
-                prompt = f'{print_date_time()}\t\tCreating table "{table_name}"...'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'Creating table "{table_name}"...')
                 cur.execute(create_table_query)
                 conn.commit()
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table_name}" created!'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
+                log_message(f'[SUCCESS] Table "{table_name}" created!')
                 copy_query = f"""
                 COPY "{table_name}"
                 FROM '{s3_path}'
@@ -4708,23 +4568,15 @@ def upload_to_redshift(
                 ;
                 """
                 try:
-                    prompt = f'{print_date_time()}\t\tUploading {csv_file} to Redshift table "{table_name}"...'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'Uploading {csv_file} to Redshift table "{table_name}"...')
                     cur.execute(copy_query)
                     conn.commit()
-                    prompt = f'{print_date_time()}\t\t[SUCCESS] Uploaded {csv_file} to Redshift table "{table_name}"!'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[SUCCESS] Uploaded {csv_file} to Redshift table "{table_name}"!')
                 except Exception as e:
-                    prompt = f'{print_date_time()}\t\t[ERROR] Error uploading {csv_file}: {e}'
-                    print(prompt)
-                    write_file('log.txt' , f"{prompt}")
+                    log_message(f'[ERROR] Error uploading {csv_file}: {e}')
                     raise
         except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Error uploading files in bucket "{bucket}": {e}'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
+            log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
             
     for redshift_user in redshift_users:
@@ -4732,14 +4584,10 @@ def upload_to_redshift(
             create_user_query = f"""CREATE USER "{redshift_user['username']}" WITH PASSWORD '{redshift_user['password']}';"""
             cur.execute(create_user_query)
             conn.commit()
-            prompt = f'{print_date_time()}\t\t[SUCCESS] User {redshift_user["username"]} created successfully.'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'[SUCCESS] User {redshift_user["username"]} created successfully.')
         except DuplicateObject:
             conn.rollback()
-            prompt = f'{print_date_time()}\t\t[INFO] User {redshift_user["username"]} already exists. Skipping creation.'
-            print(prompt)
-            write_file('log.txt', f"{prompt}")
+            log_message(f'[INFO] User {redshift_user["username"]} already exists. Skipping creation.')
         grant_usage_query = f"""GRANT USAGE ON SCHEMA public TO "{redshift_user['username']}";"""
         cur.execute(grant_usage_query)
         conn.commit()
@@ -4748,22 +4596,14 @@ def upload_to_redshift(
                 grant_select_query = f"""GRANT SELECT ON TABLE public."{table}" TO "{redshift_user['username']}";"""
                 cur.execute(grant_select_query)
                 conn.commit()
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.'
-                print(prompt)
-                write_file('log.txt', f"{prompt}")
+                log_message(f'[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.')
             except UndefinedTable:
                 conn.rollback()
-                prompt = f'{print_date_time()}\t\t[ERROR] Table "{table}" does not exist. Skipping grant.'
-                print(prompt)
-                write_file('log.txt', f"{prompt}")
-        prompt = f'{print_date_time()}\t\tPermissions granted successfully for {redshift_user["username"]}.'
-        print(prompt)
-        write_file('log.txt', f"{prompt}")
+                log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
+        log_message(f'Permissions granted successfully for {redshift_user["username"]}.')
 
     cur.close()
     conn.close()
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
-    prompt = f'{print_date_time()}\t\t🚀 Upload process completed.'
-    print(prompt)
-    write_file('log.txt' , f"{prompt}")
+    log_message(f'🚀 Upload process completed.')
