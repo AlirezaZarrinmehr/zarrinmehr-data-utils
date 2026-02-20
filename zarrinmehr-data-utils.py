@@ -2378,87 +2378,355 @@ def process_data_to_s3(
     aws_region=None,
     chunksize=1000,
     file_path=None,
-    encoding='utf-8'
+    encoding='utf-8',
+    incremental_update=False,
+    consumer_key=None,
+    consumer_secret=None,
+    token_key=None,
+    token_secret=None,
+    realm=None
 ):
-    for table, sql_query in tables.items():
-        for attempt in range(max_retries):
-            try:
-                if not file_path:
-                    df = load_data_via_query(
-                        sql_query=sql_query,
-                        source_type=source_type,
-                        connection_string=connection_string,
-                        project_id=project_id,
-                        credentials=credentials,
-                        chunksize=chunksize,
-                        file_path=file_path,
-                        encoding=encoding
-                    )
-                else:
-                    load_data_via_query(
-                        sql_query=sql_query,
-                        source_type=source_type,
-                        connection_string=connection_string,
-                        project_id=project_id,
-                        credentials=credentials,
-                        chunksize=chunksize,
-                        file_path=file_path,
-                        encoding=encoding
-                    )
-                prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-                break
-            except Exception as e:
-                prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
-                print(prompt)
-                write_file('log.txt' , f"{prompt}")
-                if source_type == "qodbc":
-                    kill_qb_processes()
-                time.sleep(60)
+    if incremental_update:
+        if source_type == "qodbc":
+            params = {
+                "source_type":source_type,
+                "connection_string": connection_string,
+                "chunksize": chunksize
+            }
+        elif source_type == "suiteql":
+            params = {
+                "source_type":source_type,
+                "consumer_key": consumer_key,
+                "consumer_secret": consumer_secret,
+                "token_key": token_key,
+                "token_secret": token_secret,
+                "realm": realm
+            }
         else:
-            prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-            continue
-        object_key = table + '.csv'
-        try:
+            raise ValueError("source_type must be 'suiteql', or 'qodbc'")
+            
+        def build_duplicate_check_query(table, id_column):
+            return f"""
+                SELECT {id_column}, COUNT(*) AS duplicateCount
+                FROM {table}
+                GROUP BY {id_column}
+                HAVING COUNT(*) > 1
+            """
+        
+        for table, table_info in tables.items():
+            object_key = table + '.csv'
+            id_column = table_info.get("id_column")
+            id_column = ", ".join(id_column) if isinstance(id_column, list) else id_column
+            last_modified_column = table_info.get("last_modified_column")
+            defined_query = table_info.get("query")
 
-            if not file_path:
-                upload_to_s3(
-                    data=df,
-                    bucket_name=bucket_name,
-                    object_key=object_key,
-                    s3_client=s3_client,
-                    CreateS3Bucket=CreateS3Bucket,
-                    aws_region=aws_region,
-                    encoding=encoding
-                )
-            else:
-                if not os.path.getsize(file_path):
+            if id_column:
+                query = build_duplicate_check_query(table, id_column)
+                
+                for attempt in range(max_retries):
+                    try:
+                        duplicated_ids = load_data_via_query(sql_query=query, **params)
+                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        break
+                    except Exception as e:
+                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        if source_type == "qodbc":
+                            kill_qb_processes()
+                            timer_and_alert(20)
+                        else:
+                            timer_and_alert(60)
+                else:
+                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
                     continue
-                upload_to_s3(
-                    data=None,
-                    bucket_name=bucket_name,
-                    object_key=object_key,
-                    s3_client=s3_client,
-                    CreateS3Bucket=CreateS3Bucket,
-                    aws_region=aws_region,
-                    file_path = file_path,
-                    encoding=encoding
-                )
-            prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-        except Exception as e:
-            prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
-            print(prompt)
-            write_file('log.txt' , f"{prompt}")
-        if 'df' in locals():
-            del df
-        gc.collect()
+            
+                if not duplicated_ids.empty:
+                    raise ValueError(f"Duplicate IDs ({id_column}) found in {table}")
+                
+            if defined_query:
+                print(f"Running: '{defined_query}'")
+                
+                for attempt in range(max_retries):
+                    try:
+                        df = load_data_via_query(sql_query=defined_query, **params)
+                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        break
+                    except Exception as e:
+                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        if source_type == "qodbc":
+                            kill_qb_processes()
+                            timer_and_alert(20)
+                        else:
+                            timer_and_alert(60)
+                else:
+                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    continue
+
+            elif not last_modified_column:
+                query = f"""
+                        SELECT * 
+                        FROM {table} 
+                        """
+                for attempt in range(max_retries):
+                    try:
+                        df = load_data_via_query(sql_query=query, **params)
+                        prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        break
+                    except Exception as e:
+                        prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        if source_type == "qodbc":
+                            kill_qb_processes()
+                            timer_and_alert(20)
+                        else:
+                            timer_and_alert(60)
+                else:
+                    prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    continue
+
+            else:
+                
+                def s3_object_exists(s3_client, bucket, key):
+                    try:
+                        s3_client.head_object(Bucket=bucket, Key=key)
+                        return True
+                    except s3_client.exceptions.ClientError as e:
+                        if e.response['Error']['Code'] == "404":
+                            return False
+                        else:
+                            raise e
+                        
+                table_exists = s3_object_exists(s3_client, s3_bucket_name, object_key)
+
+                if table_exists:
+                    prompt = f'{print_date_time()}\t\tTable "{table}" found in S3. Proceeding to update the "{table}" table with new records...'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    df = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key, low_memory = False)
+                else:
+                    prompt = f'{print_date_time()}\t\tTable "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    
+                    id_order_by = f", {id_column}" if id_column else ""
+                    if source_type == 'suiteql':
+                        query = f"""
+                                SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
+                                FROM {table}
+                                ORDER BY {last_modified_column}{id_order_by}
+                                FETCH NEXT 30000 ROWS ONLY
+                                """
+                    else:
+                        query = f"""
+                            SELECT TOP 30000 *
+                            FROM {table}
+                            ORDER BY {last_modified_column}{id_order_by}
+                            """
+                    for attempt in range(max_retries):
+                        try:
+                            df = load_data_via_query(sql_query=query, **params)
+                            prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                            print(prompt)
+                            write_file('log.txt' , f"{prompt}")
+                            break
+                        except Exception as e:
+                            prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                            print(prompt)
+                            write_file('log.txt' , f"{prompt}")
+                            if source_type == "qodbc":
+                                kill_qb_processes()
+                                timer_and_alert(20)
+                            else:
+                                timer_and_alert(60)
+                    else:
+                        prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        continue
+                                    
+                has_more_records=True
+                while has_more_records:
+                    
+                    lastupdate = pd.to_datetime(df[last_modified_column]).max()
+                    if pd.isna(lastupdate):
+                        lastupdate_str = '1970-01-01 00:00:00'
+                    else:
+                        lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
+                    # print(lastupdate_str)
+                    id_order_by = f", {id_column}" if id_column else ""
+                    if source_type == 'suiteql':
+                        query = f"""
+                                SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
+                                FROM {table}
+                                WHERE {last_modified_column} >= TO_DATE( '{lastupdate_str}', 'YYYY-MM-DD HH24:MI:SS' )
+                                ORDER BY {last_modified_column}{id_order_by}
+                                FETCH NEXT 30000 ROWS ONLY
+                                """
+                    else:
+                        query = f"""
+                                SELECT TOP 30000 *
+                                FROM {table}
+                                WHERE {last_modified_column} >= {{ts '{lastupdate_str}'}}
+                                ORDER BY {last_modified_column}{id_order_by}
+                                """
+                    for attempt in range(max_retries):
+                        try:
+                            new_records = load_data_via_query(sql_query=query, **params)
+                            prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                            print(prompt)
+                            write_file('log.txt' , f"{prompt}")
+                            break
+                        except Exception as e:
+                            prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                            print(prompt)
+                            write_file('log.txt' , f"{prompt}")
+                            if source_type == "qodbc":
+                                kill_qb_processes()
+                                timer_and_alert(20)
+                            else:
+                                timer_and_alert(60)
+                    else:
+                        prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        continue
+                    print(f"New records fetched: {new_records.shape[0]}")
+
+                    df = pd.concat([df, new_records], ignore_index=True)
+                    
+                    for col in df.columns:
+                        if col == last_modified_column:
+                            df[col] = pd.to_datetime(df[col])
+                            continue
+                        try:
+                            df[col] = pd.to_numeric(df[col])
+                        except:
+                            df[col] = df[col].fillna('').astype(str)
+                            
+                    if id_column:
+                        df = df.sort_values(by=[last_modified_column, id_column], ascending=[False, True])
+                        df = df.drop_duplicates(subset=[id_column], keep='first')
+                    else:
+                        df = df.sort_values(by=last_modified_column, ascending=False)
+                        df = df.drop_duplicates(keep='first')
+                        
+                    df.reset_index(drop=True, inplace=True)
+
+                    if new_records.shape[0]<25000:
+                        has_more_records= False
+
+            try:
+                upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = AWS_REGION)
+                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{s3_bucket_name}" bucket !'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            except Exception as e:
+                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{s3_bucket_name}". Error: {str(e)}'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            if 'df' in locals():
+                del df
+            if 'new_records' in locals():
+                del new_records
+            gc.collect()
+    else:
+        for table, sql_query in tables.items():
+            for attempt in range(max_retries):
+                try:
+                    if not file_path:
+                        df = load_data_via_query(
+                            sql_query=sql_query,
+                            source_type=source_type,
+                            connection_string=connection_string,
+                            project_id=project_id,
+                            credentials=credentials,
+                            chunksize=chunksize,
+                            file_path=file_path,
+                            encoding=encoding
+                        )
+                    else:
+                        load_data_via_query(
+                            sql_query=sql_query,
+                            source_type=source_type,
+                            connection_string=connection_string,
+                            project_id=project_id,
+                            credentials=credentials,
+                            chunksize=chunksize,
+                            file_path=file_path,
+                            encoding=encoding
+                        )
+                    prompt = f'{print_date_time()}\t\t[SUCCESS] Table "{table}" retrieved from {source_type} !'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    break
+                except Exception as e:
+                    prompt = f'{print_date_time()}\t\t[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...'
+                    print(prompt)
+                    write_file('log.txt' , f"{prompt}")
+                    if source_type == "qodbc":
+                        kill_qb_processes()
+                        timer_and_alert(20)
+                    else:
+                        timer_and_alert(60)
+            else:
+                prompt = f'{print_date_time()}\t\t[ERROR] All retries failed for table "{table}". Skipping upload.'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+                continue
+            object_key = table + '.csv'
+            try:
+
+                if not file_path:
+                    upload_to_s3(
+                        data=df,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        s3_client=s3_client,
+                        CreateS3Bucket=CreateS3Bucket,
+                        aws_region=aws_region,
+                        encoding=encoding
+                    )
+                else:
+                    if not os.path.getsize(file_path):
+                        print(prompt)
+                        write_file('log.txt' , f"{prompt}")
+                        continue
+                    upload_to_s3(
+                        data=None,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        s3_client=s3_client,
+                        CreateS3Bucket=CreateS3Bucket,
+                        aws_region=aws_region,
+                        file_path = file_path,
+                        encoding=encoding
+                    )
+                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            except Exception as e:
+                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
+                print(prompt)
+                write_file('log.txt' , f"{prompt}")
+            if 'df' in locals():
+                del df
+            gc.collect()
 
 
 def generate_open_cases_df(
