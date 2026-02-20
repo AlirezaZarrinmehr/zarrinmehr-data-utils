@@ -2512,13 +2512,13 @@ def process_data_to_s3(
                         else:
                             raise e
                         
-                table_exists = s3_object_exists(s3_client, s3_bucket_name, object_key)
+                table_exists = s3_object_exists(s3_client, bucket_name, object_key)
 
                 if table_exists:
                     prompt = f'{print_date_time()}\t\tTable "{table}" found in S3. Proceeding to update the "{table}" table with new records...'
                     print(prompt)
                     write_file('log.txt' , f"{prompt}")
-                    df = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key, low_memory = False)
+                    df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
                 else:
                     prompt = f'{print_date_time()}\t\tTable "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...'
                     print(prompt)
@@ -2632,12 +2632,12 @@ def process_data_to_s3(
                         has_more_records= False
 
             try:
-                upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = AWS_REGION)
-                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{s3_bucket_name}" bucket !'
+                upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = aws_region)
+                prompt = f'{print_date_time()}\t\t[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
             except Exception as e:
-                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{s3_bucket_name}". Error: {str(e)}'
+                prompt = f'{print_date_time()}\t\t[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
                 print(prompt)
                 write_file('log.txt' , f"{prompt}")
             if 'df' in locals():
