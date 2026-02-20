@@ -2372,11 +2372,14 @@ def process_data_to_s3(
     token_secret=None,
     realm=None
 ):
+    if source_type == "qodbc":
+        active_conn = pyodbc.connect(connection_string, autocommit=True)
+
     if incremental_update:
         if source_type == "qodbc":
             params = {
                 "source_type":source_type,
-                "active_conn": pyodbc.connect(connection_string, autocommit=True),
+                "active_conn": active_conn,
                 "chunksize": chunksize
             }
         elif source_type == "suiteql":
@@ -2390,7 +2393,6 @@ def process_data_to_s3(
             }
         else:
             raise ValueError("source_type must be 'suiteql', or 'qodbc'")
-            
         def build_duplicate_check_query(table, id_column):
             return f"""
                 SELECT {id_column}, COUNT(*) AS duplicateCount
@@ -2398,17 +2400,14 @@ def process_data_to_s3(
                 GROUP BY {id_column}
                 HAVING COUNT(*) > 1
             """
-        
         for table, table_info in tables.items():
             object_key = table + '.csv'
             id_column = table_info.get("id_column")
             id_column = ", ".join(id_column) if isinstance(id_column, list) else id_column
             last_modified_column = table_info.get("last_modified_column")
             defined_query = table_info.get("query")
-
             if id_column:
                 query = build_duplicate_check_query(table, id_column)
-                
                 for attempt in range(max_retries):
                     try:
                         duplicated_ids = load_data_via_query(sql_query=query, **params)
@@ -2419,18 +2418,16 @@ def process_data_to_s3(
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
+                            active_conn = pyodbc.connect(connection_string, autocommit=True)                            
                         else:
                             timer_and_alert(60)
                 else:
                     log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
-            
                 if not duplicated_ids.empty:
                     raise ValueError(f"Duplicate IDs ({id_column}) found in {table}")
-                
             if defined_query:
                 log_message(f'[INFO] Running: "{defined_query}"')
-                
                 for attempt in range(max_retries):
                     try:
                         df = load_data_via_query(sql_query=defined_query, **params)
@@ -2441,12 +2438,12 @@ def process_data_to_s3(
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
+                            active_conn = pyodbc.connect(connection_string, autocommit=True)   
                         else:
                             timer_and_alert(60)
                 else:
                     log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
-
             elif not last_modified_column:
                 query = f"""
                         SELECT * 
@@ -2462,14 +2459,13 @@ def process_data_to_s3(
                         if source_type == "qodbc":
                             kill_qb_processes()
                             timer_and_alert(20)
+                            active_conn = pyodbc.connect(connection_string, autocommit=True)   
                         else:
                             timer_and_alert(60)
                 else:
                     log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                     continue
-
             else:
-                
                 def s3_object_exists(s3_client, bucket, key):
                     try:
                         s3_client.head_object(Bucket=bucket, Key=key)
@@ -2479,15 +2475,12 @@ def process_data_to_s3(
                             return False
                         else:
                             raise e
-                        
                 table_exists = s3_object_exists(s3_client, bucket_name, object_key)
-
                 if table_exists:
                     log_message(f'[INFO] Table "{table}" found in S3. Proceeding to update the "{table}" table with new records...')
                     df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
                 else:
                     log_message(f'[INFO] Table "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...')
-                    
                     id_order_by = f", {id_column}" if id_column else ""
                     if source_type == 'suiteql':
                         query = f"""
@@ -2512,15 +2505,14 @@ def process_data_to_s3(
                             if source_type == "qodbc":
                                 kill_qb_processes()
                                 timer_and_alert(20)
+                                active_conn = pyodbc.connect(connection_string, autocommit=True)   
                             else:
                                 timer_and_alert(60)
                     else:
                         log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                         continue
-                                    
                 has_more_records=True
                 while has_more_records:
-                    
                     lastupdate = pd.to_datetime(df[last_modified_column]).max()
                     if pd.isna(lastupdate):
                         lastupdate_str = '1970-01-01 00:00:00'
@@ -2553,6 +2545,7 @@ def process_data_to_s3(
                             if source_type == "qodbc":
                                 kill_qb_processes()
                                 timer_and_alert(20)
+                                active_conn = pyodbc.connect(connection_string, autocommit=True)   
                             else:
                                 timer_and_alert(60)
                     else:
@@ -2570,19 +2563,15 @@ def process_data_to_s3(
                             df[col] = pd.to_numeric(df[col])
                         except:
                             df[col] = df[col].fillna('').astype(str)
-                            
                     if id_column:
                         df = df.sort_values(by=[last_modified_column, id_column], ascending=[False, True])
                         df = df.drop_duplicates(subset=[id_column], keep='first')
                     else:
                         df = df.sort_values(by=last_modified_column, ascending=False)
                         df = df.drop_duplicates(keep='first')
-                        
                     df.reset_index(drop=True, inplace=True)
-
                     if new_records.shape[0]<25000:
                         has_more_records= False
-
             try:
                 upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = aws_region)
                 log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
@@ -2594,31 +2583,35 @@ def process_data_to_s3(
                 del new_records
             gc.collect()
     else:
+        if source_type == "qodbc":
+            params = {
+                "sql_query":sql_query,
+                "source_type":source_type,
+                "active_conn":active_conn,
+                "project_id":project_id,
+                "credentials":credentials,
+                "chunksize":chunksize,
+                "file_path":file_path,
+                "encoding":encoding
+            }
+        else:
+            params = {
+                "sql_query":sql_query,
+                "source_type":source_type,
+                "connection_string":connection_string,
+                "project_id":project_id,
+                "credentials":credentials,
+                "chunksize":chunksize,
+                "file_path":file_path,
+                "encoding":encoding
+            }
         for table, sql_query in tables.items():
             for attempt in range(max_retries):
                 try:
                     if not file_path:
-                        df = load_data_via_query(
-                            sql_query=sql_query,
-                            source_type=source_type,
-                            connection_string=connection_string,
-                            project_id=project_id,
-                            credentials=credentials,
-                            chunksize=chunksize,
-                            file_path=file_path,
-                            encoding=encoding
-                        )
+                        df = load_data_via_query(**params)
                     else:
-                        load_data_via_query(
-                            sql_query=sql_query,
-                            source_type=source_type,
-                            connection_string=connection_string,
-                            project_id=project_id,
-                            credentials=credentials,
-                            chunksize=chunksize,
-                            file_path=file_path,
-                            encoding=encoding
-                        )
+                        load_data_via_query(**params)
                     log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                     break
                 except Exception as e:
@@ -2626,6 +2619,7 @@ def process_data_to_s3(
                     if source_type == "qodbc":
                         kill_qb_processes()
                         timer_and_alert(20)
+                        active_conn = pyodbc.connect(connection_string, autocommit=True)   
                     else:
                         timer_and_alert(60)
             else:
@@ -2664,6 +2658,9 @@ def process_data_to_s3(
             if 'df' in locals():
                 del df
             gc.collect()
+            
+    if source_type == "qodbc":
+        active_conn.close()
 
 
 def generate_open_cases_df(
