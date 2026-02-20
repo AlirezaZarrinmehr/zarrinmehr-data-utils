@@ -2373,7 +2373,9 @@ def process_data_to_s3(
     realm=None
 ):
     if source_type == "qodbc":
-        active_conn = pyodbc.connect(connection_string, autocommit=True)
+        kill_qb_processes()
+        timer_and_alert(20)
+        active_conn = pyodbc.connect(connection_string, autocommit=True)      
 
     if incremental_update:
         if source_type == "qodbc":
@@ -2658,7 +2660,7 @@ def process_data_to_s3(
             if 'df' in locals():
                 del df
             gc.collect()
-            
+
     if source_type == "qodbc":
         active_conn.close()
 
