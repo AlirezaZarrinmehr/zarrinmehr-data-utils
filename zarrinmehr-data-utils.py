@@ -2587,7 +2587,6 @@ def process_data_to_s3(
     else:
         if source_type == "qodbc":
             params = {
-                "sql_query":sql_query,
                 "source_type":source_type,
                 "active_conn":active_conn,
                 "project_id":project_id,
@@ -2598,7 +2597,6 @@ def process_data_to_s3(
             }
         else:
             params = {
-                "sql_query":sql_query,
                 "source_type":source_type,
                 "connection_string":connection_string,
                 "project_id":project_id,
@@ -2611,9 +2609,9 @@ def process_data_to_s3(
             for attempt in range(max_retries):
                 try:
                     if not file_path:
-                        df = load_data_via_query(**params)
+                        df = load_data_via_query(sql_query=sql_query, **params)
                     else:
-                        load_data_via_query(**params)
+                        load_data_via_query(sql_query=sql_query, **params)
                     log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
                     break
                 except Exception as e:
