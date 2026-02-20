@@ -2101,7 +2101,8 @@ def load_data_via_query(
         consumer_secret=None,
         token_key=None,
         token_secret=None,
-        realm=None
+        realm=None,
+        active_conn=None
 ):
     log_message(f'[INFO] Running {sql_query}')
     if source_type == "mssql":
@@ -2168,10 +2169,13 @@ def load_data_via_query(
         return df
 
     elif source_type == "qodbc":
-        if not connection_string:
-            raise ValueError("connection_string is required for QODBC source.")
-        conn = pyodbc.connect(connection_string, autocommit=True)
-        cursor = conn.cursor()
+        if not active_conn:
+            if not connection_string:
+                raise ValueError("connection_string is required for QODBC source.")
+            conn = pyodbc.connect(connection_string, autocommit=True)
+            cursor = conn.cursor()
+        else:
+            cursor = active_conn.cursor()
         cursor.execute(sql_query)
         columns = [col[0] for col in cursor.description]
         chunks = []
@@ -2200,7 +2204,8 @@ def load_data_via_query(
                 pbar.update(1)
                 time.sleep(0.01)
         cursor.close()
-        conn.close()
+        if not active_conn:
+            conn.close()
         if not file_path:
             df = pd.DataFrame(chunks, columns=columns)
             df.columns = df.columns.str.title()
@@ -2371,7 +2376,7 @@ def process_data_to_s3(
         if source_type == "qodbc":
             params = {
                 "source_type":source_type,
-                "connection_string": connection_string,
+                "active_conn": pyodbc.connect(connection_string, autocommit=True),
                 "chunksize": chunksize
             }
         elif source_type == "suiteql":
