@@ -196,7 +196,7 @@ def kill_qb_processes():
         os.system(f'net stop "{service}" /y 2>nul')
     for proc in processes:
         os.system(f"taskkill /f /t /im {proc} 2>nul")
-    log_message("[SUCCESS] Cleaned up lingering QB/QODBC processes.")
+    log_message('[SUCCESS] Cleaned up lingering QB/QODBC processes.')
 
 
 def process_ns_orders(
@@ -2740,7 +2740,7 @@ def train_and_predict(
         y_pred[col] = output_encoders[col].inverse_transform(y_pred[col])
         Y_test_decoded[col] = output_encoders[col].inverse_transform(Y_test[col])
 
-    log_message("Per-column accuracy:")
+    log_message('Per-column accuracy:')
     for col in target_cols:
         acc = accuracy_score(Y_test_decoded[col], y_pred[col])
         log_message(f'[INFO] {col}: {acc:.4f}')
@@ -2859,7 +2859,7 @@ def get_access_token(client_id, client_secret, username, password, token_url):
     if response.ok:
         access_token = response.json().get("access_token")
         refresh_token = response.json().get("refresh_token")
-        log_message("Access Token Retrieved!")
+        log_message('Access Token Retrieved!')
         return access_token, refresh_token
     else:
         log_message(f'[ERROR] Authorization Failed. Status Code: {response.status_code}')
@@ -3245,7 +3245,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
 
 
 def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
-    log_message("[INFO] Restarting...")
+    log_message('[INFO] Restarting...')
     try:
         options = webdriver.ChromeOptions()
         # options.add_argument("--headless")
@@ -3289,12 +3289,12 @@ def restart_device_via_web_ui(ip_address, username, password, wait_time=30):
         try:
             reboot_message = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'Reboot will occur...')]")))
             if reboot_message:
-                log_message("[INFO] Reboot message received.")
-                log_message("[SUCCESS] Device will reboot shortly!")
+                log_message('[INFO] Reboot message received.')
+                log_message('[SUCCESS] Device will reboot shortly!')
                 return True
         except Exception as ValueError:
             log_message(f'[ERROR] Reboot message not found: {ValueError}.')
-            log_message("[ERROR] Failed to reboot the device.")
+            log_message('[ERROR] Failed to reboot the device.')
             return False
     except Exception as e:
         log_message(f'[ERROR] An error occurred during device restart: {e}')
@@ -3310,10 +3310,10 @@ def cleanup_device_driver_files(ip_address, username, password):
         log_message(f'[INFO] Cleaning up the driver...')
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            # log_message("[SUCCESS] Logged into device!")
+            # log_message('[SUCCESS] Logged into device!')
             directories = ftp.nlst()
             if 'usr' not in directories:
-                log_message("[ERROR] The 'usr' directory is missing on the device!")
+                log_message('[ERROR] The "usr" directory is missing on the device!')
                 return False
             ftp.cwd('/usr')
             usr_files = ftp.nlst()
@@ -3331,7 +3331,7 @@ def cleanup_device_driver_files(ip_address, username, password):
                 )
             ]
             if not files_to_delete and not folders_to_delete:
-                log_message("[INFO] No cleanup needed — already clean.")
+                log_message('[INFO] No cleanup needed — already clean.')
                 return True
             for file in files_to_delete:
                 try:
@@ -3356,7 +3356,7 @@ def cleanup_device_driver_files(ip_address, username, password):
                     log_message(f'[ERROR] Failed to delete directory "{dir_name}": {e}')
             for folder in folders_to_delete:
                 delete_directory_and_contents(ftp, folder)
-            log_message("[SUCCESS] Cleanup complete!")
+            log_message('[SUCCESS] Cleanup complete!')
             return True
     except ftplib.all_errors as e:
         log_message(f'[ERROR] FTP connection or operation failed: {e}')
@@ -3367,10 +3367,10 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
     try:
         with ftplib.FTP(ip_address) as ftp:
             ftp.login(user=username, passwd=password)
-            # log_message("[SUCCESS] Logged into device!")
+            # log_message('[SUCCESS] Logged into device!')
             directories = ftp.nlst()
             if 'usr' not in directories:
-                log_message("[ERROR] The 'usr' directory is missing on the device!")
+                log_message('[ERROR] The "usr" directory is missing on the device!')
                 return False
             ftp.cwd('/usr')
             usr_files = ftp.nlst()
@@ -3388,10 +3388,10 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                 )
             ]
             if latest_driver_jar in usr_files:
-                log_message("[INFO] Driver is already installed!")
+                log_message('[INFO] Driver is already installed!')
                 return "Already Installed"
             elif not files_to_delete and not folders_to_delete:
-                log_message("[INFO] Installing the driver...")
+                log_message('[INFO] Installing the driver...')
                 for file_name, file_path in files_to_upload_to_usr.items():
                     if source_type == 'local':
                         try:
@@ -3439,7 +3439,7 @@ def install_device_driver_files(ip_address, username, password, latest_driver_ja
                     else:
                         log_message(f'[ERROR] Unknown source type: {source_type}')
                         return False
-                log_message("[SUCCESS] Install complete!")
+                log_message('[SUCCESS] Install complete!')
                 return True
             else:
                 return "Cleanup Needed"
@@ -3459,7 +3459,7 @@ def stop_driver(ip_address, username, password):
         log_message()
 
         if response.status_code == 200 and response.text.strip() == "JVM Stopped":
-            log_message("[SUCCESS] JVM stop command completed!")
+            log_message('[SUCCESS] JVM stop command completed!')
             return True
         else:
             log_message('[WARNING] Unexpected response received:')
@@ -3497,7 +3497,7 @@ def install_device_firmware(
                 ftp.sock.settimeout(120)
                 ftp.sendcmd('TYPE I')
                 ftp.cwd('/')
-                # log_message("[SUCCESS] Logged into device!")
+                # log_message('[SUCCESS] Logged into device!')
                 s3_object = s3_client.get_object(Bucket=s3_bucket_name, Key=firmware_file_path)
                 firmware_data = s3_object['Body'].read()
                 firmware_size = len(firmware_data)
@@ -3505,14 +3505,14 @@ def install_device_firmware(
                 fp.seek(0)
                 with tqdm.wrapattr(fp, "read", total=firmware_size, desc="Installing firmware", unit="B", unit_scale=True) as wrapped_fp:
                     ftp.storbinary(f'STOR {firmware_file_name}', wrapped_fp, blocksize=32768)
-                log_message("[SUCCESS] Firmware install complete!")
+                log_message('[SUCCESS] Firmware install complete!')
                 return True
 
         except Exception as e:
             log_message(f'[ERROR] Failed to upload {firmware_file_name} from S3: {str(e)}. Retry {attempt + 1}/{max_retries} in 5 seconds...')
             time.sleep(5)
 
-    log_message("[ERROR] Failed to install the firmware!")
+    log_message('[ERROR] Failed to install the firmware!')
     return False
 
 
