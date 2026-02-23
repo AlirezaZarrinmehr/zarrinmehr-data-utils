@@ -1,3 +1,7 @@
+import importlib
+import datetime
+
+
 def write_file(
     filename, 
     data
@@ -23,7 +27,6 @@ def log_message(message, file_path='log.txt'):
     write_file(file_path, log_entry)
 
 
-import importlib
 modules = [
     "os",
     "time",
