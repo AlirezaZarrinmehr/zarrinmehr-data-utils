@@ -1,5 +1,5 @@
 import importlib
-import datetime
+from datetime import datetime
 
 
 def write_file(
