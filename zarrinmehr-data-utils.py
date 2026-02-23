@@ -1,33 +1,26 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # Zarrinmehr Data Utilities — Python Toolkit for Data Integration and ETL
-
-# A curated collection of Python utility functions for data engineers and analysts.
-# 
-
-# In[1]:
-
-
-'''
-clean_df(
-clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name,
-
-read_csv_from_s3(
-read_csv_from_s3(s3_client = s3_client, 
-
-upload_to_s3(
-upload_to_s3(s3_client = s3_client, data = 
-
-fetch_data_from_timestream(query
-fetch_data_from_timestream(timestream_query_client, query
-
-'''
+def write_file(
+    filename, 
+    data
+):
+    if os.path.isfile(filename):
+        with open(filename, 'a', encoding='utf-8') as f:
+            f.write('\n' + data)
+    else:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(data)
 
 
-# ## Functions
+def print_date_time():
+    now = datetime.now()
+    current_time = now.strftime("%D-%H:%M:%S")
+    data = "Current Time = " + current_time
+    return data
 
-# In[2]:
+
+def log_message(message, file_path='log.txt'):
+    log_entry = f"{print_date_time()}\t\t{message}"
+    print(log_entry)
+    write_file(file_path, log_entry)
 
 
 import importlib
@@ -4047,31 +4040,6 @@ def find_unique_value_columns(
         if dataframe[column].nunique() == len(dataframe):
             unique_value_columns.append(column)
     return unique_value_columns
-
-
-def write_file(
-    filename, 
-    data
-):
-    if os.path.isfile(filename):
-        with open(filename, 'a', encoding='utf-8') as f:
-            f.write('\n' + data)
-    else:
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(data)
-
-
-def print_date_time():
-    now = datetime.now()
-    current_time = now.strftime("%D-%H:%M:%S")
-    data = "Current Time = " + current_time
-    return data
-
-
-def log_message(message, file_path='log.txt'):
-    log_entry = f"{print_date_time()}\t\t{message}"
-    print(log_entry)
-    write_file(file_path, log_entry)
     
 
 def correctCompleteDates(
