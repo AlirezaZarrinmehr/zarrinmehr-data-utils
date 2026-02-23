@@ -2120,7 +2120,7 @@ def load_data_via_query(
                 df.columns = df.columns.str.title()
                 return df
             except Exception as e:
-                log_message(f"[INFO] Pandas read failed: {e}")
+                log_message(f"[INFO] Pandas read failed, falling back to manual cursor: {e}")
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
                 total_rows = cursor.fetchone()[0]
