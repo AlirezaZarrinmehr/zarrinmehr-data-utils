@@ -59,7 +59,7 @@ modules = [
     ("psycopg2", "psycopg2"),
     ("pandas_gbq", "pandas-gbq"),
     ("importlib.util", "importlib"),
-    ("botocore.exceptions", "boto3"),
+    ("botocore", "boto3"),
     ("serial", "pyserial"),
     ("esptool", "esptool"),
     ("gc", "gc")
