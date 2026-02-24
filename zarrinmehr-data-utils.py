@@ -2666,8 +2666,10 @@ def process_data_to_s3(
 
     finally:
 
-        if 'active_conn' in locals():
-            active_conn.close()   
+        try:
+            active_conn.close()
+        except:
+            pass 
 
 
 def generate_open_cases_df(
