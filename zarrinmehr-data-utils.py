@@ -1,9 +1,18 @@
 import importlib
 from datetime import datetime
 
+def install_package(pip_name):
+    try:
+        log_message(f"[INFO] Missing library. Installing: {pip_name}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+        return True
+    except Exception as e:
+        log_message(f"[ERROR] Failed to install {pip_name}: {e}")
+        return False
+
 
 def write_file(
-    filename, 
+    filename,
     data
 ):
     if os.path.isfile(filename):
@@ -28,98 +37,115 @@ def log_message(message, file_path='log.txt'):
 
 
 modules = [
-    "os",
-    "time",
-    "warnings",
-    "io",
-    "csv",
-    "re",
-    "json",
-    "sys",
-    "ftplib",
-    "ast",
-    "winsound",
-    "base64",
-    "inspect",
-    "requests",
-    "boto3",
-    "pytz",
-    "pyodbc",
-    "psycopg2",
-    "pandas_gbq",
-    "importlib.util",
-    "botocore.exceptions",
-    "gc"
+    # Format: (module, pip_install_name)
+    ("os", "os"),
+    ("time", "time"),
+    ("warnings", "warnings"),
+    ("io", "io"),
+    ("csv", "csv"),
+    ("re", "re"),
+    ("json", "json"),
+    ("sys", "sys"),
+    ("ftplib", "ftplib"),
+    ("ast", "ast"),
+    ("winsound", "winsound"),
+    ("base64", "base64"),
+    ("inspect", "inspect"),
+    ("requests", "requests"),
+    ("boto3", "boto3"),
+    ("pytz", "pytz"),
+    ("pyodbc", "pyodbc"),
+    ("psycopg2", "psycopg2"),
+    ("pandas_gbq", "pandas-gbq"),
+    ("importlib.util", "importlib"),
+    ("botocore.exceptions", "boto3"),
+    ("gc", "gc")
 ]
-for mod in modules:
+for mod, pip_name in modules:
     try:
         globals()[mod] = importlib.import_module(mod)
     except ImportError as e:
         log_message(f'[ERROR] Failed to import {mod}: {str(e)}')
+        if install_package(pip_name):
+            globals()[mod] = importlib.import_module(mod)
 
 modules = [
-    ("datetime" , "date"),
-    ("datetime" , "timedelta"),
-    ("datetime" , "datetime"),
-    ("requests_oauthlib" , "OAuth1"),
-    ("tqdm" , "tqdm"),
-    ("googleapiclient.discovery" , "build"),
-    ("googleapiclient.errors" , "HttpError"),
-    ("google.oauth2" , "service_account"),
-    ("google.cloud" , "bigquery"),
-    ("requests.auth" , "HTTPBasicAuth"),
-    ("webdriver_manager.chrome" , "ChromeDriverManager"),
-    ("selenium.webdriver.common.by" , "By"),
-    ("selenium.webdriver.common.keys" , "Keys"),
-    ("selenium.webdriver.support.ui" , "WebDriverWait"),
-    ("bs4" , "BeautifulSoup"),
-    ("sklearn.feature_extraction.text" , "TfidfVectorizer"),
-    ("sklearn.multioutput" , "MultiOutputClassifier"),
-    ("sklearn.ensemble" , "RandomForestClassifier"),
-    ("sklearn.preprocessing" , "LabelEncoder"),
-    ("sklearn.model_selection" , "train_test_split"),
-    ("sklearn.metrics" , "accuracy_score"),
-    ("psycopg2.errors", "DuplicateObject"),
-    ("psycopg2.errors", "UndefinedTable"),
-    ("itertools", "islice")
+    # Format: (module, object_to_import, pip_install_name)
+    ("datetime", "date", "datetime"),
+    ("datetime", "timedelta", "datetime"),
+    ("datetime", "datetime", "datetime"),
+    ("requests_oauthlib", "OAuth1", "requests-oauthlib"),
+    ("tqdm", "tqdm", "tqdm"),
+    ("googleapiclient.discovery", "build", "google-api-python-client"),
+    ("googleapiclient.errors", "HttpError", "google-api-python-client"),
+    ("google.oauth2", "service_account", "google-cloud-bigquery"),
+    ("google.cloud", "bigquery", "google-cloud-bigquery"),
+    ("requests.auth", "HTTPBasicAuth", "requests"),
+    ("webdriver_manager.chrome", "ChromeDriverManager", "webdriver-manager"),
+    ("selenium.webdriver.common.by", "By", "selenium"),
+    ("selenium.webdriver.common.keys", "Keys", "selenium"),
+    ("selenium.webdriver.support.ui", "WebDriverWait", "selenium"),
+    ("bs4", "BeautifulSoup", "beautifulsoup4"),
+    ("sklearn.feature_extraction.text", "TfidfVectorizer", "scikit-learn"),
+    ("sklearn.multioutput", "MultiOutputClassifier", "scikit-learn"),
+    ("sklearn.ensemble", "RandomForestClassifier", "scikit-learn"),
+    ("sklearn.preprocessing", "LabelEncoder", "scikit-learn"),
+    ("sklearn.model_selection", "train_test_split", "scikit-learn"),
+    ("sklearn.metrics", "accuracy_score", "scikit-learn"),
+    ("psycopg2.errors", "DuplicateObject", "psycopg2"),
+    ("psycopg2.errors", "UndefinedTable", "psycopg2"),
+    ("itertools", "islice", "itertools")
 ]
-    
-for fr_mod, im_mod in modules:
+
+for fr_mod, im_mod, pip_name in modules:
     try:
         mod = importlib.import_module(fr_mod)
         obj = getattr(mod, im_mod)
         globals()[im_mod] = obj
     except ImportError as e:
         log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
+        if install_package(pip_name):
+            mod = importlib.import_module(fr_mod)
+            obj = getattr(mod, im_mod)
+            globals()[im_mod] = obj
 
-modules = {
-    "pandas":  "pd",
-    "numpy":  "np",
-    "selenium.webdriver.support.expected_conditions": "EC",
-    "selenium.webdriver": "webdriver"
-}
-for mod, alias in modules.items():
+modules = [
+    # Format: (module, alias, pip_install_name)
+    ("pandas", "pd", "pandas"),
+    ("numpy", "np", "numpy"),
+    ("selenium.webdriver.support.expected_conditions", "EC", "selenium"),
+    ("selenium.webdriver", "webdriver", "selenium")
+]
+
+for mod, alias, pip_name in modules:
     try:
         globals()[alias] = importlib.import_module(mod)
     except ImportError as e:
         log_message(f'[ERROR] Failed to import {mod} as {alias}: {str(e)}')
+        if install_package(pip_name):
+            globals()[alias] = importlib.import_module(mod)
 
 modules = [
-    ("selenium.webdriver.chrome.service" , "Service", "ChromeService"),
+    # Format: (module, object_to_import, alias, pip_install_name)
+    ("selenium.webdriver.chrome.service", "Service", "ChromeService", "selenium"),
 ]
-for fr_mod, im_mod, name in modules:
+
+for fr_mod, im_mod, alias, pip_name in modules:
     try:
         fr_mod = importlib.import_module(fr_mod)
         obj = getattr(fr_mod, im_mod)
-        globals()[name] = obj
+        globals()[alias] = obj
     except ImportError as e:
         log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
+        if install_package(pip_name):
+            fr_mod = importlib.import_module(fr_mod)
+            obj = getattr(fr_mod, im_mod)
+            globals()[alias] = obj
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
     if not name.startswith("_") and name not in ['caller_globals', 'inspect']:
         caller_globals[name] = globals()[name]
-
 
 
 def copy_bucket_contents(
