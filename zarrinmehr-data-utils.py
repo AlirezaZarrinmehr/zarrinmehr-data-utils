@@ -2386,9 +2386,10 @@ def process_data_to_s3(
             kill_qb_processes()
             timer_and_alert(20)
             active_conn = pyodbc.connect(connection_string, autocommit=True)      
-        
-        if source_type == "mssql":
-            active_conn = pyodbc.connect(connection_string)
+        elif source_type == "mssql":
+            active_conn = pyodbc.connect(connection_string)        
+        else:
+            active_conn = None
 
         if incremental_update:
             if source_type == "qodbc":
