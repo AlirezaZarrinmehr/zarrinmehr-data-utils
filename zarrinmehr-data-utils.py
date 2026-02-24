@@ -60,7 +60,7 @@ modules = [
     ("pandas_gbq", "pandas-gbq"),
     ("importlib.util", "importlib"),
     ("botocore.exceptions", "boto3"),
-    ("serial.tools.list_ports", "pyserial"),
+    ("serial", "pyserial"),
     ("esptool", "esptool"),
     ("gc", "gc")
 ]
