@@ -4538,14 +4538,16 @@ def upload_to_redshift(
             if "Contents" not in response:
                 log_message(f'[INFO] No files found in bucket "{bucket}". Skipping...')
                 continue
-            csv_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.csv')]
-            if not csv_files:
-                log_message(f'[INFO] No CSV files found in bucket "{bucket}". Skipping...')
+            data_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].lower().endswith(('.csv', '.parquet'))]
+            if not data_files:
+                log_message(f'[INFO] No csv or Parquet files found in bucket "{bucket}". Skipping...')
                 continue
-            log_message(f'[INFO] Found {len(csv_files)} CSV file(s) in bucket "{bucket}". Uploading to Redshift...')
-            for csv_file in csv_files:
-                s3_path = f's3://{bucket}/{csv_file}'
-                table_name = (bucket + '-' + csv_file.split('.csv')[0])
+            log_message(f'[INFO] Found {len(data_files)} csv or Parquet file(s) in bucket "{bucket}". Uploading to Redshift...')
+            for file_key in data_files:
+                s3_path = f's3://{bucket}/{file_key}'
+                is_parquet = file_key.lower().endswith('.parquet')
+                ext = '.parquet' if is_parquet else '.csv'
+                table_name = (bucket + '-' + file_key.split(ext)[0])
                 check_table_query = f'''
                 SELECT * FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
@@ -4558,7 +4560,10 @@ def upload_to_redshift(
                     cur.execute(drop_table_query)
                     conn.commit()
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
-                df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = csv_file, dtype_str=True)
+                if is_parquet:
+                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True, file_type='parquet')
+                else:
+                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True)
                 if df.empty:
                     log_message(f'[WARNING] DataFrame is empty. Creating a table with default column structure.')
                     create_table_query = f'CREATE TABLE "{table_name}" ('
@@ -4568,7 +4573,7 @@ def upload_to_redshift(
                     global max_lengths
                     max_lengths = df.astype('str').apply(lambda x: x.str.encode('utf-8').str.len().max()).fillna(0).astype('int')
                     max_lengths = max_lengths.replace(0,1)
-                    cols_to_truncate = max_lengths[max_lengths > max_allowed_length].index.tolist()
+                    # cols_to_truncate = max_lengths[max_lengths > max_allowed_length].index.tolist()
                     # for col in cols_to_truncate:
                     #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc_2(x, max_allowed_length))
                     #     max_lengths[col] = max_allowed_length
@@ -4579,23 +4584,30 @@ def upload_to_redshift(
                 cur.execute(create_table_query)
                 conn.commit()
                 log_message(f'[SUCCESS] Table "{table_name}" created!')
+                if is_parquet:
+                    copy_options = "FORMAT AS PARQUET"
+                else:
+                    copy_options = """
+                    CSV
+                    IGNOREHEADER 1
+                    DELIMITER ','
+                    QUOTE '"'
+                    """
                 copy_query = f"""
                 COPY "{table_name}"
                 FROM '{s3_path}'
                 IAM_ROLE '{redshift_iam_role_arn}'
-                CSV
-                IGNOREHEADER 1
-                DELIMITER ','
-                QUOTE '"'
+                {copy_options}
                 ;
                 """
                 try:
-                    log_message(f'[INFO] Uploading {csv_file} to Redshift table "{table_name}"...')
+                    log_message(f'[INFO] Uploading {file_key} to Redshift table "{table_name}" via {("Parquet" if is_parquet else "csv")} format...')
                     cur.execute(copy_query)
                     conn.commit()
-                    log_message(f'[SUCCESS] Uploaded {csv_file} to Redshift table "{table_name}"!')
+                    log_message(f'[SUCCESS] Uploaded {file_key} to Redshift table "{table_name}"!')
                 except Exception as e:
-                    log_message(f'[ERROR] Error uploading {csv_file}: {e}')
+                    log_message(f'[ERROR] Error uploading {file_key}: {e}')
+                    conn.rollback()
                     raise
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
