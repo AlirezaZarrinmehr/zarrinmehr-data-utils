@@ -4586,7 +4586,7 @@ def upload_to_redshift(
                 conn.commit()
                 log_message(f'[SUCCESS] Table "{table_name}" created!')
                 if is_parquet:
-                    copy_options = "FORMAT AS PARQUET"
+                    copy_options = "FORMAT AS PARQUET SERIALIZETOJSON"
                 else:
                     copy_options = """
                     CSV
