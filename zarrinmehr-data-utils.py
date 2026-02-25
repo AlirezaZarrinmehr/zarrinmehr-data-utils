@@ -4565,7 +4565,11 @@ def upload_to_redshift(
                     df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True, file_type='parquet')
                 else:
                     df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True)
-                if df.empty:
+                if is_parquet:
+                    create_table_query = f'CREATE TABLE "{table_name}" ('
+                    create_table_query += ", ".join([f'"{col}" SUPER' for col in df.columns])
+                    create_table_query += ");"
+                elif df.empty:
                     log_message(f'[WARNING] DataFrame is empty. Creating a table with default column structure.')
                     create_table_query = f'CREATE TABLE "{table_name}" ('
                     create_table_query += ", ".join([f'"{col}" TEXT' for col in df.columns])
