@@ -3946,8 +3946,8 @@ def read_file_from_s3(
             yield chunk
         progress.close()
     body = obj['Body']
+    stream = stream_with_progress(body)
     if file_type == 'csv':
-        stream = stream_with_progress(body)
         csv_string = b''.join(stream).decode(encoding)
         csv_buffer = io.StringIO(csv_string)
         if dtype_str:
@@ -3955,16 +3955,17 @@ def read_file_from_s3(
         else:    
             df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
     elif file_type == 'parquet':
-        parquet_buffer = io.BytesIO(raw_data)
+        parquet_data = b''.join(stream)
+        parquet_buffer = io.BytesIO(parquet_data)
         df = pd.read_parquet(parquet_buffer)
         if dtype_str:
             df = df.astype(str)
     elif file_type == 'xlsx':
-        stream = stream_with_progress(body)
         xlsx_data = b''.join(stream)
         xlsx_buffer = io.BytesIO(xlsx_data)
         df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     else:
+        progress.close()
         raise ValueError(f"Unsupported file_type: {file_type}. Use 'csv', 'parquet', or 'xlsx'.")
     return df
 
