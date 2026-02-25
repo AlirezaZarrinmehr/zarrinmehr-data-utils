@@ -416,10 +416,10 @@ def process_gp_transactions(
     s3_client,
     s3_bucket_name
 ):
-    generalLedgerLineOpen = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
-    generalLedgerLineHistory = read_csv_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
+    generalLedgerLineOpen = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
+    generalLedgerLineHistory = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
     generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index=True)
-    sourceDocumentMaster = read_csv_from_s3(s3_client = s3_client, bucket_name=s3_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
+    sourceDocumentMaster = read_file_from_s3(s3_client = s3_client, bucket_name=s3_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
     generalLedgerLine['SOURCDOC'] = generalLedgerLine['SOURCDOC'].astype('str').str.strip()
     sourceDocumentMaster['SOURCDOC'] = sourceDocumentMaster['SOURCDOC'].astype('str').str.strip()
     generalLedgerLine = generalLedgerLine.merge(sourceDocumentMaster[['SOURCDOC', 'SDOCDSCR']], on = 'SOURCDOC', how = 'left')
@@ -712,10 +712,10 @@ def process_qb_expense_transactions(
     txnsType2 = 'PurchaseOrder'
     txnsType3 = 'Vend'
     customersORvendors = vendors.copy()
-    transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
+    transactions = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv')
 
-    generalJournal = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv', is_csv_file=True )
-    generalJournalLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv', is_csv_file=True )
+    generalJournal = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv')
+    generalJournalLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv')
     generalJournalLines = generalJournal.merge(generalJournalLines, on = 'Txnid', suffixes = ('_h', ''))
     generalJournalLines = generalJournalLines.reset_index(drop=True).reset_index()
     generalJournalLines['index']='GENERAL JOURNAL' + generalJournalLines['index'].astype(str)
@@ -740,7 +740,7 @@ def process_qb_expense_transactions(
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     generalJournalLines = generalJournalLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    bills = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv', is_csv_file=True )
+    bills = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv')
     bills.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -754,7 +754,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     bills['TransactionType'] = 'BILL'
-    billExpenseLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillExpenseLine.csv', is_csv_file=True )
+    billExpenseLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillExpenseLine.csv')
     billExpenseLines.rename(columns = {
         'Expenselineaccountreffullname':'Accountreffullname',
         'Txndate':'TransactionDate',
@@ -769,7 +769,7 @@ def process_qb_expense_transactions(
     }, inplace = True)
     billExpenseLines['Total']=billExpenseLines['Total']
 
-    checks = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv', is_csv_file=True )
+    checks = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv')
     checks.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -784,7 +784,7 @@ def process_qb_expense_transactions(
     }, inplace = True)
     checks = checks [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
     checks['TransactionType'] = 'CHECK'
-    checkExpenseLine = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv', is_csv_file=True )
+    checkExpenseLine = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv')
     checkExpenseLine.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     checkExpenseLine.rename(columns = {
         'Txndate':'TransactionDate',
@@ -800,7 +800,7 @@ def process_qb_expense_transactions(
     checkExpenseLine['Rate']=checkExpenseLine['Total']
     checkExpenseLine = checkExpenseLine [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    receivePayment = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePayment.csv', is_csv_file=True )
+    receivePayment = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePayment.csv')
     receivePayment.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -814,7 +814,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
-    receivePaymentLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePaymentLine.csv', is_csv_file=True )
+    receivePaymentLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePaymentLine.csv')
     receivePaymentLines.rename(columns = {
         'Txndate':'TransactionDate',
         'Appliedtotxndiscountaccountreffullname':'Accountreffullname',
@@ -831,8 +831,8 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
 
-    deposit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Deposit.csv', is_csv_file=True )
-    depositLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'DepositLine.csv', is_csv_file=True )
+    deposit = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Deposit.csv')
+    depositLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'DepositLine.csv')
     depositLines = deposit.merge(depositLines, on = 'Txnid', suffixes = ('_h', ''))
     depositLines = depositLines.reset_index(drop=True).reset_index()
     depositLines['index']='DEPOSIT' + depositLines['index'].astype(str)
@@ -857,7 +857,7 @@ def process_qb_expense_transactions(
     deposit['TransactionType'] = 'DEPOSIT'
     depositLines = depositLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    invoice = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
+    invoice = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv')
     invoice.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -871,7 +871,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     invoice['TransactionType'] = 'INVOICE'
-    invoiceLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
+    invoiceLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv')
     invoiceLines = invoiceLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
     invoiceLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -885,7 +885,7 @@ def process_qb_expense_transactions(
         'Amount':'Total'
     }, inplace = True)
 
-    creditCardCredit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCredit.csv', is_csv_file=True )
+    creditCardCredit = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCredit.csv')
     creditCardCredit.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -899,7 +899,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     creditCardCredit['TransactionType'] = 'CREDIT CARD CREDIT'
-    creditCardCreditLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCreditExpenseLine.csv', is_csv_file=True )
+    creditCardCreditLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCreditExpenseLine.csv')
     creditCardCreditLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     creditCardCreditLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -917,7 +917,7 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
     creditCardCreditLines['Total']=-creditCardCreditLines['Total']
-    billsLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillItemLine.csv', is_csv_file=True )
+    billsLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillItemLine.csv')
     billsLines=billsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
     billsLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -934,7 +934,7 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
 
-    checksLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckItemLine.csv', is_csv_file=True )
+    checksLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckItemLine.csv')
     checksLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     checksLines=checksLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
     checksLines.rename(columns = {
@@ -950,7 +950,7 @@ def process_qb_expense_transactions(
     checksLines['Rate']=checksLines['Total']/checksLines['Quantity']
     checksLines = checksLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    vendorCredit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCredit.csv', is_csv_file=True )
+    vendorCredit = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCredit.csv')
     vendorCredit.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -964,7 +964,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     vendorCredit['TransactionType'] = 'VENDOR CREDIT'
-    vendorCreditLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditItemLine.csv', is_csv_file=True )
+    vendorCreditLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditItemLine.csv')
     vendorCreditLines=vendorCreditLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = 'Fqtxnlinkkey', how = 'left')
     vendorCreditLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -981,7 +981,7 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
     vendorCreditLines['Total']=-vendorCreditLines['Total']
-    vendorCreditExpenseLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditExpenseLine.csv', is_csv_file=True )
+    vendorCreditExpenseLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'VendorCreditExpenseLine.csv')
     vendorCreditExpenseLines.rename(columns = {
         'Txndate':'TransactionDate',
         'Expenselineaccountreffullname':'Accountreffullname',
@@ -998,7 +998,7 @@ def process_qb_expense_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
     vendorCreditExpenseLines['Total']=-vendorCreditExpenseLines['Total']
-    salesReceipts = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceipt.csv', is_csv_file=True )
+    salesReceipts = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceipt.csv')
     salesReceipts.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1013,7 +1013,7 @@ def process_qb_expense_transactions(
     }, inplace = True)
     salesReceipts = salesReceipts [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
     salesReceipts['TransactionType'] = 'SALES RECEIPT'
-    salesReceiptsLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceiptLine.csv', is_csv_file=True )
+    salesReceiptsLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceiptLine.csv')
     salesReceiptsLines=salesReceiptsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
     salesReceiptsLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1028,7 +1028,7 @@ def process_qb_expense_transactions(
     }, inplace = True)
     salesReceiptsLines = salesReceiptsLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    billPaymentCheck = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheck.csv', is_csv_file=True )
+    billPaymentCheck = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheck.csv')
     billPaymentCheck.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1043,7 +1043,7 @@ def process_qb_expense_transactions(
     }, inplace = True)
     billPaymentCheck = billPaymentCheck [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
     billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
-    billPaymentCheckLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheckLine.csv', is_csv_file=True )
+    billPaymentCheckLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheckLine.csv')
     billPaymentCheckLines.rename(columns = {
         'Txndate':'TransactionDate',
         'Txnid':'TransactionId',
@@ -1058,7 +1058,7 @@ def process_qb_expense_transactions(
     billPaymentCheckLines['Rate']=billPaymentCheckLines['Total']
     billPaymentCheckLines = billPaymentCheckLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    creditCardCharge = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCharge.csv', is_csv_file=True )
+    creditCardCharge = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCharge.csv')
     creditCardCharge.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1072,7 +1072,7 @@ def process_qb_expense_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     creditCardCharge['TransactionType'] = 'CREDIT CARD CHARGE'
-    creditCardChargeLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardChargeExpenseLine.csv', is_csv_file=True )
+    creditCardChargeLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardChargeExpenseLine.csv')
     creditCardChargeLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     creditCardChargeLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1166,10 +1166,10 @@ def process_qb_transactions(
     txnsType2 = 'Order'
     txnsType3 = 'Cust'
     customersORvendors = customer.copy()
-    transactions = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv', is_csv_file=True )
+    transactions = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv')
 
-    generalJournal = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv', is_csv_file=True )
-    generalJournalLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv', is_csv_file=True )
+    generalJournal = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv')
+    generalJournalLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv')
     generalJournalLines = generalJournal.merge(generalJournalLines, on = 'Txnid', suffixes = ('_h', ''))
     generalJournalLines = generalJournalLines.reset_index(drop=True).reset_index()
     generalJournalLines['index']='GENERAL JOURNAL' + generalJournalLines['index'].astype(str)
@@ -1194,7 +1194,7 @@ def process_qb_transactions(
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
     generalJournalLines = generalJournalLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    bills = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv', is_csv_file=True )
+    bills = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv')
     bills.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1208,7 +1208,7 @@ def process_qb_transactions(
         'Amountdue':'Total',        
     }, inplace = True)
     bills['TransactionType'] = 'BILL'
-    billExpenseLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillExpenseLine.csv', is_csv_file=True )
+    billExpenseLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillExpenseLine.csv')
     billExpenseLines.rename(columns = {
         'Expenselineaccountreffullname':'Accountreffullname',
         'Txndate':'TransactionDate',
@@ -1223,7 +1223,7 @@ def process_qb_transactions(
     }, inplace = True)
     billExpenseLines['Total']=-billExpenseLines['Total']
 
-    checks = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv', is_csv_file=True )
+    checks = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv')
     checks.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1238,7 +1238,7 @@ def process_qb_transactions(
     }, inplace = True)
     checks = checks [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
     checks['TransactionType'] = 'CHECK'
-    checkExpenseLine = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv', is_csv_file=True )
+    checkExpenseLine = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv')
     checkExpenseLine.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     checkExpenseLine.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1254,7 +1254,7 @@ def process_qb_transactions(
     checkExpenseLine['Rate']=checkExpenseLine['Total']
     checkExpenseLine = checkExpenseLine [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    receivePayment = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePayment.csv', is_csv_file=True )
+    receivePayment = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePayment.csv')
     receivePayment.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1268,7 +1268,7 @@ def process_qb_transactions(
         'Totalamount':'Total',        
     }, inplace = True)
     receivePayment['TransactionType'] = 'RECEIVE PAYMENT'
-    receivePaymentLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePaymentLine.csv', is_csv_file=True )
+    receivePaymentLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'ReceivePaymentLine.csv')
     receivePaymentLines.rename(columns = {
         'Txndate':'TransactionDate',
         'Deposittoaccountreffullname':'Accountreffullname',
@@ -1285,8 +1285,8 @@ def process_qb_transactions(
         'Itemlinecost':'Rate',
     }, inplace = True)
 
-    deposit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Deposit.csv', is_csv_file=True )
-    depositLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'DepositLine.csv', is_csv_file=True )
+    deposit = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Deposit.csv')
+    depositLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'DepositLine.csv')
     depositLines = deposit.merge(depositLines, on = 'Txnid', suffixes = ('_h', ''))
     depositLines = depositLines.reset_index(drop=True).reset_index()
     depositLines['index']='DEPOSIT' + depositLines['index'].astype(str)
@@ -1311,7 +1311,7 @@ def process_qb_transactions(
     deposit['TransactionType'] = 'DEPOSIT'
     depositLines = depositLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
-    invoice = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv', is_csv_file=True )
+    invoice = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv')
     invoice.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1330,7 +1330,7 @@ def process_qb_transactions(
         'Subtotal':'Total',        
     }, inplace = True)
     invoice['TransactionType'] = 'INVOICE'
-    invoiceLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv', is_csv_file=True )
+    invoiceLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'InvoiceLine.csv')
     invoiceLines = invoiceLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
     invoiceLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1344,7 +1344,7 @@ def process_qb_transactions(
         'Invoicelineamount':'Total'
     }, inplace = True)
 
-    creditCardCredit = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCredit.csv', is_csv_file=True )
+    creditCardCredit = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCredit.csv')
     creditCardCredit.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1358,7 +1358,7 @@ def process_qb_transactions(
         'Amount':'Total',        
     }, inplace = True)
     creditCardCredit['TransactionType'] = 'CREDIT CARD CREDIT'
-    creditCardCreditLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCreditExpenseLine.csv', is_csv_file=True )
+    creditCardCreditLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditCardCreditExpenseLine.csv')
     creditCardCreditLines.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
     creditCardCreditLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1377,7 +1377,7 @@ def process_qb_transactions(
     }, inplace = True)
     creditCardCreditLines['Total']=-creditCardCreditLines['Total']
 
-    creditMemo = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditMemo.csv', is_csv_file=True )
+    creditMemo = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditMemo.csv')
     creditMemo.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -1395,7 +1395,7 @@ def process_qb_transactions(
         'Ponumber':'CustPo',
         'Subtotal':'Total'
     }, inplace = True)
-    creditMemoLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditMemoLine.csv', is_csv_file=True )
+    creditMemoLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditMemoLine.csv')
     creditMemoLines=creditMemoLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname']], on = ['Fqtxnlinkkey'], how = 'left')
     creditMemoLines.rename(columns = {
         'Txndate':'TransactionDate',
@@ -1411,7 +1411,7 @@ def process_qb_transactions(
     creditMemoLines['Total']=-creditMemoLines['Total']
     creditMemo['TransactionType'] = 'CREDIT MEMO'
 
-    SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+    SalesRep = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv')
     SalesRep['Salesrepentityreffullname']=SalesRep['Salesrepentityreffullname'].fillna('').astype('str').str.upper()
 
     txns = pd.concat([
@@ -1514,9 +1514,9 @@ def process_qb_orders(
         object_key_8 = 'Subtotal'
         object_key_9 = 'Sales'
 
-    orders = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_1, is_csv_file=True )
-    ordersLines = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_2, is_csv_file=True )
-    SalesRep = read_csv_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv', is_csv_file=True )
+    orders = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_1)
+    ordersLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = object_key_2)
+    SalesRep = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesRep.csv')
     SalesRep['Salesrepentityreffullname']=SalesRep['Salesrepentityreffullname'].fillna('').astype('str').str.upper()
 
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1639,7 +1639,7 @@ def process_qb_orders(
         ordersLines['SerialNo'] = ordersLines['SerialNo'].apply(
             lambda x: re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)).group() if re.search(r'(?<!\d)(\d{4})(?!\d)', str(x)) else None
         )
-        shipInstallDates = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
+        shipInstallDates = read_file_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = 'serialNumberEngineeringReferenceMaster.csv')[['Serial Number', 'Installation Date']].rename(columns = {'Serial Number' : 'SerialNo', 'Ship Date' : 'ShipDate', 'Installation Date' : 'InstallDate'})
         shipInstallDates = shipInstallDates[~shipInstallDates.SerialNo.duplicated()]
         shipInstallDates.SerialNo = shipInstallDates.SerialNo.fillna('').astype('str')
         ordersLines.SerialNo = ordersLines.SerialNo.fillna('').astype('str')
@@ -2085,7 +2085,7 @@ def process_exchange_rates(
 ):
 
     try:
-        df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key)
+        df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key)
         df['Date']= pd.to_datetime(df['Date'], errors='coerce')
         reporting_period = get_reporting_period_label(df['Date'].max())
         dfNew = get_exchange_rates(
@@ -2523,7 +2523,7 @@ def process_data_to_s3(
                     table_exists = s3_object_exists(s3_client, bucket_name, object_key)
                     if table_exists:
                         log_message(f'[INFO] Table "{table}" found in S3. Proceeding to update the "{table}" table with new records...')
-                        df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
+                        df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
                     else:
                         log_message(f'[INFO] Table "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...')
                         id_order_by = f", {id_column}" if id_column else ""
@@ -3653,7 +3653,7 @@ def enrich_and_classify_customers(
         df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
             df[col] = df[col].astype('str').fillna('')
-        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
+        dfCategories = read_file_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
         dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
         dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
         dfCategories['Found'] = False
@@ -3782,7 +3782,7 @@ def enrich_and_classify_items(
         df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
             df[col] = df[col].astype('str').fillna('')
-        dfCategories = read_csv_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
+        dfCategories = read_file_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
         dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
         dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
         dfCategories['Found'] = False
@@ -3925,7 +3925,7 @@ def generate_table_select_queries(
     return table_queries
 
 
-def read_csv_from_s3(
+def read_file_from_s3(
     bucket_name, 
     object_key, 
     s3_client, 
@@ -4551,7 +4551,7 @@ def upload_to_redshift(
                     cur.execute(drop_table_query)
                     conn.commit()
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
-                df = read_csv_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = csv_file, dtype_str=True)
+                df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = csv_file, dtype_str=True)
                 if df.empty:
                     log_message(f'[WARNING] DataFrame is empty. Creating a table with default column structure.')
                     create_table_query = f'CREATE TABLE "{table_name}" ('
