@@ -4483,7 +4483,7 @@ def upload_to_redshift(
     redshift_cluster_type,
     redshift_number_of_nodes,
     createRedshiftCluster=False,
-    max_allowed_length= 870
+    max_allowed_length=870
 ):
     try:
         redshift_iam_role_arn = create_iam_role(iam_client, role_name, trust_policy)
@@ -4562,18 +4562,33 @@ def upload_to_redshift(
                     conn.commit()
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 if is_parquet:
-                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True, file_type='parquet')
+                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, file_type='parquet')
                 else:
                     df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True)
                 if is_parquet:
-                    create_table_query = f'CREATE TABLE "{table_name}" ('
-                    create_table_query += ", ".join([f'"{col}" SUPER' for col in df.columns])
-                    create_table_query += ");"
+                    type_map = {
+                        'int64': 'BIGINT',
+                        'int32': 'INTEGER',
+                        'float64': 'DOUBLE PRECISION',
+                        'float32': 'REAL',
+                        'bool': 'BOOLEAN',
+                        'datetime64[ns]': 'TIMESTAMP',
+                        'datetime64[ns, UTC]': 'TIMESTAMPTZ'
+                    }
+                    column_defs = []
+                    for col_name, dtype in df.dtypes.items():
+                        dtype_str = str(dtype)
+                        if dtype_str in ('object', 'string'):
+                            global max_lengths
+                            byte_len = df[col_name].astype(str).map(lambda x: len(x.encode('utf-8')) if x else 0).max()
+                            v_len = min(max(int(byte_len or 1), 1), max_allowed_length)
+                            redshift_type = f'VARCHAR({v_len})'
+                        else:
+                            redshift_type = type_map.get(dtype_str, 'VARCHAR(MAX)')
+                        column_defs.append(f'"{col_name}" {redshift_type}')
                 elif df.empty:
                     log_message(f'[WARNING] DataFrame is empty. Creating a table with default column structure.')
-                    create_table_query = f'CREATE TABLE "{table_name}" ('
-                    create_table_query += ", ".join([f'"{col}" TEXT' for col in df.columns])
-                    create_table_query += ");"
+                    column_defs = [f'"{col}" TEXT' for col in df.columns]
                 else:
                     global max_lengths
                     max_lengths = df.astype('str').apply(lambda x: x.str.encode('utf-8').str.len().max()).fillna(0).astype('int')
@@ -4582,15 +4597,16 @@ def upload_to_redshift(
                     # for col in cols_to_truncate:
                     #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc_2(x, max_allowed_length))
                     #     max_lengths[col] = max_allowed_length
-                    create_table_query = f'CREATE TABLE "{table_name}" ('
-                    create_table_query += ", ".join([f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()])
-                    create_table_query += ");"
+                    column_defs = [f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()]
+                create_table_query = f'CREATE TABLE "{table_name}" ('
+                create_table_query += ", ".join(column_defs)
+                create_table_query += ");"
                 log_message(f'[INFO] Creating table "{table_name}"...')
                 cur.execute(create_table_query)
                 conn.commit()
                 log_message(f'[SUCCESS] Table "{table_name}" created!')
                 if is_parquet:
-                    copy_options = "FORMAT AS PARQUET SERIALIZETOJSON"
+                    copy_options = "FORMAT AS PARQUET"
                 else:
                     copy_options = """
                     CSV
