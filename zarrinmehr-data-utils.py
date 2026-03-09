@@ -249,8 +249,19 @@ def process_ns_orders(
     header_to_line_columns,
     EntityAddress,
     employee,
-    subsidiaryId
+    subsidiaryId,
+    memo_cols=[]
 ):
+    custom_cols = [i for i in [i for i in transaction.columns.to_list() if 'custbody_' in i] if i in memo_cols]
+    if custom_cols:
+        labels = [c.replace('custbody_', '').replace('_', ' ') + ': ' for c in custom_cols]
+        vals = transaction[custom_cols].fillna('').astype(str).values
+        transaction['Memo'] = [
+            ", ".join(f"{lbl}{v}" for lbl, v in zip(labels, row) if v != '')
+            for row in vals
+        ]
+    else:
+        transaction['Memo'] = None
     TotalCoefficient = -QuantityCoefficient
     orders = transaction.loc[transaction['type'] == txnsType].copy()
     orders['shippingaddress'] = orders['shippingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
@@ -351,7 +362,7 @@ def process_ns_orders(
         orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
         orderTypes[f'{txnsType2}Id'] = orderTypes[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
         orders = orders.merge(orderTypes, on = f'{txnsType2}Id', how = 'left')
-        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'Memo', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
         orders['Company'] = companyName
         orders = orders[['Company'] + orders.columns[:-1].tolist()]
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
