@@ -3986,21 +3986,36 @@ def clean_df(
     s3_bucket_name,
     df,
     df_name,
-    id_column=None,
-    additional_date_columns=None,
+    id_column=[],
+    additional_date_columns=[],
     zip_code_columns=None,
     state_columns=None,
     keep_invalid_as_null=True,
     numeric_id=False, 
     just_useful_columns=False,
-    upload_enabled=False
+    upload_enabled=False,
+    convert_to_upper=True,
+    remove_extra_spaces=True
 ):
-    col_to_date = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
-    col_to_date = list(set(col_to_date))
-    for col in col_to_date:
+    date_cols = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
+    date_cols = list(set(date_cols))
+    for col in date_cols:
+        initial_nulls = df[col].isna().sum()
         df[col] = pd.to_datetime(df[col], errors='coerce')
-    for col in set(df.columns)-set(id_column):
-        df[col] = df[col].apply(lambda x: x.strip().upper() if isinstance(x, str) else x)
+        final_nulls = df[col].isna().sum()
+        coerced_count = final_nulls - initial_nulls
+        if coerced_count > 0:
+            log_message(f"[WARNING] {col}: Coerced {coerced_count} invalid dates to NaT.")
+    if convert_to_upper or remove_extra_spaces:
+        object_cols = [col for col in df.columns if df[col].dtype == 'object']
+        for col in set(object_cols)-set(id_column):
+            not_null = df[col].notna()
+            clean_series = df.loc[not_null, col].astype(str)
+            if convert_to_upper:
+                clean_series = clean_series.str.upper()
+            if remove_extra_spaces:
+                clean_series = clean_series.str.strip().str.replace(r'\s+', ' ', regex=True)
+            df.loc[not_null, col] = clean_series
     if id_column:
         if numeric_id:
             invalid_mask = ~df[id_column].astype('str').apply(lambda x: x.str.isdigit()).any(axis=1)
