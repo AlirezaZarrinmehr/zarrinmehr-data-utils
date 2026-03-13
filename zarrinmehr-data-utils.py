@@ -3268,7 +3268,7 @@ def delete_thing_and_certificates(iot_client, thing_name):
             )
             policies = iot_client.list_attached_policies(target=principal)['policies']
             for policy in policies:
-                log_message(f'[INFO] Detaching policy "{policy['policyName']}" from certificate...')
+                log_message(f'[INFO] Detaching policy "{policy["policyName"]}" from certificate...')
                 iot_client.detach_policy(
                     policyName=policy['policyName'],
                     target=principal
