@@ -3965,7 +3965,9 @@ def read_file_from_s3(
             csv_buffer = io.StringIO(csv_string)
         except:
             log_message(f'[WARNING] Error occurred while reading {object_key}, using fallback method')
-            del stream, csv_string, csv_buffer
+            for var in ['stream', 'csv_string', 'csv_buffer']:
+                if var in locals():
+                    del locals()[var]
             gc.collect()
             stream = stream_with_progress()
             csv_bytes = io.BytesIO(b''.join(stream))
