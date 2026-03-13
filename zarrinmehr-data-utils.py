@@ -3945,22 +3945,32 @@ def read_file_from_s3(
     low_memory = True, 
     dtype_str=False
 ):
-    obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-    file_size = obj['ContentLength']
-    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
-    def stream_with_progress(bytes_io):
+
+    def stream_with_progress():
+        obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        file_size = obj['ContentLength']
+        progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
+        body = obj['Body']
         while True:
-            chunk = bytes_io.read(1024 * 1024)
+            chunk = body.read(1024 * 1024)
             if not chunk:
                 break
             progress.update(len(chunk))
             yield chunk
         progress.close()
-    body = obj['Body']
-    stream = stream_with_progress(body)
+    stream = stream_with_progress()
     if file_type == 'csv':
-        csv_string = b''.join(stream).decode(encoding)
-        csv_buffer = io.StringIO(csv_string)
+        try:
+            csv_string = b''.join(stream).decode(encoding)
+            csv_buffer = io.StringIO(csv_string)
+        except:
+            log_message(f'[WARNING] Error occurred while reading {object_key}, using fallback method')
+            del stream, csv_string, csv_buffer
+            gc.collect()
+            stream = stream_with_progress()
+            csv_bytes = io.BytesIO(b''.join(stream))
+            csv_buffer = io.TextIOWrapper(csv_bytes, encoding=encoding)
+            csv_buffer.seek(0)
         if dtype_str:
             df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
         else:    
