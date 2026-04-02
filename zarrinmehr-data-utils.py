@@ -3960,32 +3960,20 @@ def read_file_from_s3(
         progress.close()
     stream = stream_with_progress()
     if file_type == 'csv':
-        try:
-            csv_string = b''.join(stream).decode(encoding)
-            csv_buffer = io.StringIO(csv_string)
-        except:
-            log_message(f'[WARNING] Error occurred while reading {object_key}, using fallback method')
-            for var in ['stream', 'csv_string', 'csv_buffer']:
-                if var in locals():
-                    del locals()[var]
-            gc.collect()
-            stream = stream_with_progress()
-            csv_bytes = io.BytesIO(b''.join(stream))
-            csv_buffer = io.TextIOWrapper(csv_bytes, encoding=encoding)
-            csv_buffer.seek(0)
+        csv_bytes = io.BytesIO(b''.join(stream))
+        csv_buffer = io.TextIOWrapper(csv_bytes, encoding=encoding)
+        csv_buffer.seek(0)
         if dtype_str:
             df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
         else:    
             df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
     elif file_type == 'parquet':
-        parquet_data = b''.join(stream)
-        parquet_buffer = io.BytesIO(parquet_data)
+        parquet_buffer = io.BytesIO(b''.join(stream))
         df = pd.read_parquet(parquet_buffer)
         if dtype_str:
             df = df.astype(str)
     elif file_type == 'xlsx':
-        xlsx_data = b''.join(stream)
-        xlsx_buffer = io.BytesIO(xlsx_data)
+        xlsx_buffer = io.BytesIO(b''.join(stream))
         df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     else:
         progress.close()
