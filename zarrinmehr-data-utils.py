@@ -65,12 +65,14 @@ modules = [
     ("gc", "gc")
 ]
 for mod, pip_name in modules:
-    try:
-        globals()[mod] = importlib.import_module(mod)
-    except ImportError as e:
-        log_message(f'[ERROR] Failed to import {mod}: {str(e)}')
-        if install_package(pip_name):
+    for attempt in range(2):
+        try:
             globals()[mod] = importlib.import_module(mod)
+            break
+        except Exception as e:
+            log_message(f'[ERROR] Failed to import {mod}: {str(e)}')
+            if install_package(pip_name):
+                globals()[mod] = importlib.import_module(mod)
 
 modules = [
     # Format: (module, object_to_import, pip_install_name)
@@ -101,16 +103,18 @@ modules = [
 ]
 
 for fr_mod, im_mod, pip_name in modules:
-    try:
-        mod = importlib.import_module(fr_mod)
-        obj = getattr(mod, im_mod)
-        globals()[im_mod] = obj
-    except ImportError as e:
-        log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
-        if install_package(pip_name):
+    for attempt in range(2):
+        try:
             mod = importlib.import_module(fr_mod)
             obj = getattr(mod, im_mod)
             globals()[im_mod] = obj
+            break
+        except Exception as e:
+            log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
+            if install_package(pip_name) and attempt == 0:
+                continue
+            else:
+                break
 
 modules = [
     # Format: (module, alias, pip_install_name)
@@ -121,12 +125,16 @@ modules = [
 ]
 
 for mod, alias, pip_name in modules:
-    try:
-        globals()[alias] = importlib.import_module(mod)
-    except ImportError as e:
-        log_message(f'[ERROR] Failed to import {mod} as {alias}: {str(e)}')
-        if install_package(pip_name):
+    for attempt in range(2):
+        try:
             globals()[alias] = importlib.import_module(mod)
+            break
+        except Exception as e:
+            log_message(f'[ERROR] Failed to import {mod} as {alias}: {str(e)}')
+            if install_package(pip_name) and attempt == 0:
+                continue
+            else:
+                break
 
 modules = [
     # Format: (module, object_to_import, alias, pip_install_name)
@@ -134,16 +142,18 @@ modules = [
 ]
 
 for fr_mod, im_mod, alias, pip_name in modules:
-    try:
-        fr_mod = importlib.import_module(fr_mod)
-        obj = getattr(fr_mod, im_mod)
-        globals()[alias] = obj
-    except ImportError as e:
-        log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
-        if install_package(pip_name):
+    for attempt in range(2):
+        try:
             fr_mod = importlib.import_module(fr_mod)
             obj = getattr(fr_mod, im_mod)
             globals()[alias] = obj
+            break
+        except Exception as e:
+            log_message(f'[ERROR] Failed to import {im_mod} from {fr_mod}: {str(e)}')
+            if install_package(pip_name) and attempt == 0:
+                continue
+            else:
+                break
 
 caller_globals = inspect.stack()[1][0].f_globals
 for name in list(globals()):
