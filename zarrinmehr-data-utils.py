@@ -734,6 +734,7 @@ def process_qb_expense_transactions(
     txnsType3 = 'Vend'
     customersORvendors = vendors.copy()
     transactions = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv')
+    transactions = transactions.sort_values(['Fqtxnlinkkey', 'Timemodified']).drop_duplicates(subset=['Fqtxnlinkkey'], keep='last').copy()
 
     generalJournal = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv')
     generalJournalLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv')
@@ -1188,6 +1189,7 @@ def process_qb_transactions(
     txnsType3 = 'Cust'
     customersORvendors = customer.copy()
     transactions = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Transaction.csv')
+    transactions = transactions.sort_values(['Fqtxnlinkkey', 'Timemodified']).drop_duplicates(subset=['Fqtxnlinkkey'], keep='last').copy()
 
     generalJournal = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntry.csv')
     generalJournalLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'JournalEntryLine.csv')
