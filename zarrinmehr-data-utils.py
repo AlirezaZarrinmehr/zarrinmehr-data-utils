@@ -161,6 +161,78 @@ for name in list(globals()):
         caller_globals[name] = globals()[name]
 
 
+valid_us_states = {
+    "DC": "DISTRICT OF COLUMBIA",
+    "AL": "ALABAMA",
+    "AK": "ALASKA",
+    "AZ": "ARIZONA",
+    "AR": "ARKANSAS",
+    "CA": "CALIFORNIA",
+    "CO": "COLORADO",
+    "CT": "CONNECTICUT",
+    "DE": "DELAWARE",
+    "FL": "FLORIDA",
+    "GA": "GEORGIA",
+    "HI": "HAWAII",
+    "ID": "IDAHO",
+    "IL": "ILLINOIS",
+    "IN": "INDIANA",
+    "IA": "IOWA",
+    "KS": "KANSAS",
+    "KY": "KENTUCKY",
+    "LA": "LOUISIANA",
+    "ME": "MAINE",
+    "MD": "MARYLAND",
+    "MA": "MASSACHUSETTS",
+    "MI": "MICHIGAN",
+    "MN": "MINNESOTA",
+    "MS": "MISSISSIPPI",
+    "MO": "MISSOURI",
+    "MT": "MONTANA",
+    "NE": "NEBRASKA",
+    "NV": "NEVADA",
+    "NH": "NEW HAMPSHIRE",
+    "NJ": "NEW JERSEY",
+    "NM": "NEW MEXICO",
+    "NY": "NEW YORK",
+    "NC": "NORTH CAROLINA",
+    "ND": "NORTH DAKOTA",
+    "OH": "OHIO",
+    "OK": "OKLAHOMA",
+    "OR": "OREGON",
+    "PA": "PENNSYLVANIA",
+    "RI": "RHODE ISLAND",
+    "SC": "SOUTH CAROLINA",
+    "SD": "SOUTH DAKOTA",
+    "TN": "TENNESSEE",
+    "TX": "TEXAS",
+    "UT": "UTAH",
+    "VT": "VERMONT",
+    "VA": "VIRGINIA",
+    "WA": "WASHINGTON",
+    "WV": "WEST VIRGINIA",
+    "WI": "WISCONSIN",
+    "WY": "WYOMING"
+}
+valid_ca_states = {
+    "AB": "ALBERTA",
+    "BC": "BRITISH COLUMBIA",
+    "MB": "MANITOBA",
+    "NB": "NEW BRUNSWICK",
+    "NL": "NEWFOUNDLAND AND LABRADOR",
+    "NL": "NEWFOUNDLAND",
+    "NL": "LABRADOR", 
+    "NS": "NOVA SCOTIA",
+    "ON": "ONTARIO",
+    "PE": "PRINCE EDWARD ISLAND",
+    "QC": "QUEBEC",
+    "QC": "QUÉBEC",
+    "SK": "SASKATCHEWAN",
+    "NT": "NORTHWEST TERRITORIES",
+    "NU": "NUNAVUT",
+    "YT": "YUKON"
+}
+
 def copy_bucket_contents(
     s3_resource,
     s3_client,
@@ -3993,108 +4065,6 @@ def read_file_from_s3(
     return df
 
 
-def clean_df(
-    s3_client,
-    s3_bucket_name,
-    df,
-    df_name,
-    id_column=[],
-    additional_date_columns=[],
-    zip_code_columns=None,
-    state_columns=None,
-    keep_invalid_as_null=True,
-    numeric_id=False, 
-    just_useful_columns=False,
-    upload_enabled=False,
-    convert_to_upper=True,
-    remove_extra_spaces=True
-):
-    date_cols = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
-    date_cols = list(set(date_cols))
-    for col in date_cols:
-        initial_nulls = df[col].isna().sum()
-        df[col] = pd.to_datetime(df[col], errors='coerce')
-        final_nulls = df[col].isna().sum()
-        coerced_count = final_nulls - initial_nulls
-        if coerced_count > 0:
-            log_message(f"[WARNING] {col}: Coerced {coerced_count} invalid dates to NaT.")
-    if convert_to_upper or remove_extra_spaces:
-        object_cols = [col for col in df.columns if df[col].dtype == 'object']
-        for col in set(object_cols)-set(id_column):
-            not_null = df[col].notna()
-            clean_series = df.loc[not_null, col].astype(str)
-            if convert_to_upper:
-                clean_series = clean_series.str.upper()
-            if remove_extra_spaces:
-                clean_series = clean_series.str.strip().str.replace(r'\s+', ' ', regex=True)
-            df.loc[not_null, col] = clean_series
-    if id_column:
-        if numeric_id:
-            invalid_mask = ~df[id_column].astype('str').apply(lambda x: x.str.isdigit()).any(axis=1)
-            # invalid_mask = ~df[id_column].astype('str').str.isdigit()
-            invalid_id = df[invalid_mask]
-            df = df[~invalid_mask].copy()
-            log_message(f'[INFO] invalid {id_column} found and removed: {len(invalid_id)}')
-            if len(invalid_id)>0 and upload_enabled:
-                # upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{id_column}.csv", CreateS3Bucket=True)
-                upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
-        duplicated_mask = df[id_column].duplicated()
-        duplicated_id = df[duplicated_mask]
-        df = df[~duplicated_mask].copy()
-        log_message(f'[INFO] duplicated {id_column} found and removed: {len(duplicated_id)}')
-        if len(duplicated_id)>0 and upload_enabled:
-            # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
-            upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
-    if zip_code_columns:
-        invalid_zip_codes = pd.DataFrame()
-        valid_us_zip_regex = r"^\d{5}(\d{4})?$"
-        valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"
-        for col in zip_code_columns:
-            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
-            invalid_mask = ~(df[col].str.match(valid_us_zip_regex) | df[col].str.match(valid_ca_zip_regex))
-            invalid_zip_codes = pd.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
-            df = df[~invalid_mask].copy()
-            df[col] = df[col].apply(lambda x: \
-                                    x[0:5]+'-'+x[0:4] if isinstance(x, str) and re.match(valid_us_zip_regex, x) else \
-                                    x[0:3]+' '+x[3:6] if isinstance(x, str) and re.match(valid_ca_zip_regex, x) else \
-                                    x)
-        log_message(f'[INFO] invalid_zip_codes found: {len(invalid_zip_codes)}')
-        if len(invalid_zip_codes)>0 and upload_enabled:
-            upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
-        if keep_invalid_as_null:
-            for col in zip_code_columns:
-                invalid_zip_codes[col] = np.nan
-            df = pd.concat([df, invalid_zip_codes], ignore_index=True)
-    if state_columns:
-        invalid_states = pd.DataFrame()
-        valid_us_states = { "DC": "District of Columbia", "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming" }
-        valid_ca_states = { "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba", "NB": "New Brunswick", "NL": "Newfoundland and Labrador", "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island", "QC": "Quebec", "SK": "Saskatchewan", "NT": "Northwest Territories", "NU": "Nunavut", "YT": "Yukon" }
-        for col in state_columns:
-            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
-            invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
-            invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
-            df = df[~invalid_mask].copy()
-        log_message(f'[INFO] invalid_states found: {len(invalid_states)}')
-        if len(invalid_states)>0 and upload_enabled:
-            upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
-        if keep_invalid_as_null:
-            for col in state_columns:
-                invalid_states[col] = np.nan
-            df = pd.concat([df, invalid_states], ignore_index=True)
-    if just_useful_columns:
-        useful_columns = find_useful_columns(df)
-        log_message(f'[INFO] {len(useful_columns)} useful variables found!')
-        df = df[useful_columns]
-    return df
-
-
-def find_useful_columns(
-    df
-):
-    useful_cols = [col for col in df.columns if not (df[col].isna().sum() == df.shape[0] or df[col].value_counts().iloc[0] == df.shape[0])]
-    return useful_cols
-
-
 def group(
     x, 
     quantile_values
@@ -4175,35 +4145,6 @@ def convert_to_int_or_keep(
         return x
 
 
-state_map = {
-    'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
-    'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
-    'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
-    'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
-    'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
-    'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
-    'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
-    'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
-    'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
-    'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
-}
-
-abbrev_map = {v: v for v in state_map.values()}
-state_map.update(abbrev_map)
-
-
-def extract_state(
-    text
-):
-    if not isinstance(text, str):
-        return None
-    for key, value in state_map.items():
-        match = re.search(rf'\b{key.lower()}\b', text.lower())
-        if match:
-            return value
-    return None
-
-
 def read_iif_from_s3(
     bucket_name, 
     object_key, 
@@ -4234,6 +4175,125 @@ def read_iif_from_s3(
     return df
 
 
+def find_useful_columns(
+    df
+):
+    useful_cols = [col for col in df.columns if not (df[col].isna().sum() == df.shape[0] or df[col].value_counts().iloc[0] == df.shape[0])]
+    return useful_cols
+
+
+def clean_df(
+    s3_client,
+    s3_bucket_name,
+    df,
+    df_name,
+    id_column=[],
+    additional_date_columns=[],
+    zip_code_columns=None,
+    state_columns=None,
+    keep_invalid_as_null=True,
+    numeric_id=False, 
+    just_useful_columns=False,
+    upload_enabled=False,
+    convert_to_upper=True,
+    remove_extra_spaces=True
+):
+    date_cols = [col for col in df.columns if 'date' in col.lower()] + additional_date_columns
+    date_cols = list(set(date_cols))
+    for col in date_cols:
+        initial_nulls = df[col].isna().sum()
+        df[col] = pd.to_datetime(df[col], errors='coerce')
+        final_nulls = df[col].isna().sum()
+        coerced_count = final_nulls - initial_nulls
+        if coerced_count > 0:
+            log_message(f"[WARNING] {col}: Coerced {coerced_count} invalid dates to NaT.")
+    if convert_to_upper or remove_extra_spaces:
+        object_cols = [col for col in df.columns if df[col].dtype == 'object']
+        for col in set(object_cols)-set(id_column):
+            not_null = df[col].notna()
+            clean_series = df.loc[not_null, col].astype(str)
+            if convert_to_upper:
+                clean_series = clean_series.str.upper()
+            if remove_extra_spaces:
+                clean_series = clean_series.str.strip().str.replace(r'\s+', ' ', regex=True)
+            df.loc[not_null, col] = clean_series
+    if id_column:
+        if numeric_id:
+            invalid_mask = ~df[id_column].astype('str').apply(lambda x: x.str.isdigit()).any(axis=1)
+            # invalid_mask = ~df[id_column].astype('str').str.isdigit()
+            invalid_id = df[invalid_mask]
+            df = df[~invalid_mask].copy()
+            log_message(f'[INFO] invalid {id_column} found and removed: {len(invalid_id)}')
+            if len(invalid_id)>0 and upload_enabled:
+                # upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{id_column}.csv", CreateS3Bucket=True)
+                upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
+        duplicated_mask = df[id_column].duplicated()
+        duplicated_id = df[duplicated_mask]
+        df = df[~duplicated_mask].copy()
+        log_message(f'[INFO] duplicated {id_column} found and removed: {len(duplicated_id)}')
+        if len(duplicated_id)>0 and upload_enabled:
+            # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
+            upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
+    if zip_code_columns:
+        invalid_zip_codes = pd.DataFrame()
+        valid_us_zip_regex = r"^\d{5}(\d{4})?$"
+        valid_ca_zip_regex = r"^[A-Za-z]\d[A-Za-z](\d[A-Za-z]\d)?$"
+        for col in zip_code_columns:
+            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
+            invalid_mask = ~(df[col].str.match(valid_us_zip_regex) | df[col].str.match(valid_ca_zip_regex))
+            invalid_zip_codes = pd.concat([invalid_zip_codes, df[invalid_mask]], ignore_index=True)
+            df = df[~invalid_mask].copy()
+            df[col] = df[col].apply(lambda x: \
+                                    x[0:5]+'-'+x[0:4] if isinstance(x, str) and re.match(valid_us_zip_regex, x) else \
+                                    x[0:3]+' '+x[3:6] if isinstance(x, str) and re.match(valid_ca_zip_regex, x) else \
+                                    x)
+        log_message(f'[INFO] invalid_zip_codes found: {len(invalid_zip_codes)}')
+        if len(invalid_zip_codes)>0 and upload_enabled:
+            upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
+        if keep_invalid_as_null:
+            for col in zip_code_columns:
+                invalid_zip_codes[col] = np.nan
+            df = pd.concat([df, invalid_zip_codes], ignore_index=True)
+    if state_columns:
+        invalid_states = pd.DataFrame()
+        for col in state_columns:
+            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
+            invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
+            invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
+            df = df[~invalid_mask].copy()
+        log_message(f'[INFO] invalid_states found: {len(invalid_states)}')
+        if len(invalid_states)>0 and upload_enabled:
+            upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
+        if keep_invalid_as_null:
+            for col in state_columns:
+                invalid_states[col] = np.nan
+            df = pd.concat([df, invalid_states], ignore_index=True)
+    if just_useful_columns:
+        useful_columns = find_useful_columns(df)
+        log_message(f'[INFO] {len(useful_columns)} useful variables found!')
+        df = df[useful_columns]
+    return df
+
+
+def extract_state(
+    text
+):
+    valid_states = {**valid_us_states, **valid_ca_states}
+    valid_states = {v: k for k, v in valid_states.items()}
+    abbr_set = set(valid_states.values())
+    if pd.isna(text):
+        return text
+    if not isinstance(text, str):
+        return None
+    s = str(text).strip().upper()
+    for state, abbr in valid_states.items():
+        if state in s:
+            return abbr
+    if s.upper() in abbr_set:
+        return s.upper()
+    return text
+
+
 def clean_address(
     df
 ):
@@ -4248,9 +4308,8 @@ def clean_address(
             matches = re.findall(us_zip_pattern, address) or re.findall(ca_zip_pattern, address)
             zip_code = matches[-1]
             address = ''.join(re.split(zip_code, address)[:-1])
-            valid_us_states = {'DISTRICT OF COLUMBIA': 'DC', 'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD', 'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'}
-            valid_ca_states = {'ALBERTA': 'AB', 'BRITISH COLUMBIA': 'BC', 'MANITOBA': 'MB', 'NEW BRUNSWICK': 'NB', 'NEWFOUNDLAND AND LABRADOR': 'NL', 'NOVA SCOTIA': 'NS', 'ONTARIO': 'ON', 'PRINCE EDWARD ISLAND': 'PE', 'QUEBEC': 'QC', 'SASKATCHEWAN': 'SK', 'NORTHWEST TERRITORIES': 'NT', 'NUNAVUT': 'NU', 'YUKON': 'YT'}
             valid_states = {**valid_us_states, **valid_ca_states}
+            valid_states = {v: k for k, v in valid_states.items()}
             state_pattern = re.compile(r'\b(' + '|'.join(re.escape(state) for state in valid_states.keys()) + r')\b', re.IGNORECASE)
             address = state_pattern.sub(lambda match: valid_states[match.group(0).upper()], address)
             state_pattern = r'\b[a-zA-Z]{2}\b'
