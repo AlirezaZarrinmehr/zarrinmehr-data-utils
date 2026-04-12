@@ -4257,7 +4257,7 @@ def clean_df(
     if state_columns:
         invalid_states = pd.DataFrame()
         for col in state_columns:
-            df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
+            df[col] = df[col].apply(extract_state).fillna('').astype('str')
             invalid_mask = ~df[col].isin(set(valid_us_states.values()).union(valid_ca_states.values()))
             invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
@@ -4284,12 +4284,13 @@ def extract_state(
         return text
     if not isinstance(text, str):
         return None
-    s = str(text).strip().upper()
+    s = str(text).strip().upper().replace('-',' ').replace('  ',' ')
     for state, abbr in valid_states.items():
         if state in s:
             return abbr
-    if s.upper() in abbr_set:
-        return s.upper()
+    s = s.replace(' ','')
+    if s in abbr_set:
+        return s
     return text
 
 
