@@ -162,75 +162,75 @@ for name in list(globals()):
 
 
 valid_us_states = {
-    "DC": "DISTRICT OF COLUMBIA",
-    "AL": "ALABAMA",
-    "AK": "ALASKA",
-    "AZ": "ARIZONA",
-    "AR": "ARKANSAS",
-    "CA": "CALIFORNIA",
-    "CO": "COLORADO",
-    "CT": "CONNECTICUT",
-    "DE": "DELAWARE",
-    "FL": "FLORIDA",
-    "GA": "GEORGIA",
-    "HI": "HAWAII",
-    "ID": "IDAHO",
-    "IL": "ILLINOIS",
-    "IN": "INDIANA",
-    "IA": "IOWA",
-    "KS": "KANSAS",
-    "KY": "KENTUCKY",
-    "LA": "LOUISIANA",
-    "ME": "MAINE",
-    "MD": "MARYLAND",
-    "MA": "MASSACHUSETTS",
-    "MI": "MICHIGAN",
-    "MN": "MINNESOTA",
-    "MS": "MISSISSIPPI",
-    "MO": "MISSOURI",
-    "MT": "MONTANA",
-    "NE": "NEBRASKA",
-    "NV": "NEVADA",
-    "NH": "NEW HAMPSHIRE",
-    "NJ": "NEW JERSEY",
-    "NM": "NEW MEXICO",
-    "NY": "NEW YORK",
-    "NC": "NORTH CAROLINA",
-    "ND": "NORTH DAKOTA",
-    "OH": "OHIO",
-    "OK": "OKLAHOMA",
-    "OR": "OREGON",
-    "PA": "PENNSYLVANIA",
-    "RI": "RHODE ISLAND",
-    "SC": "SOUTH CAROLINA",
-    "SD": "SOUTH DAKOTA",
-    "TN": "TENNESSEE",
-    "TX": "TEXAS",
-    "UT": "UTAH",
-    "VT": "VERMONT",
-    "VA": "VIRGINIA",
-    "WA": "WASHINGTON",
-    "WV": "WEST VIRGINIA",
-    "WI": "WISCONSIN",
-    "WY": "WYOMING"
+    "DISTRICT OF COLUMBIA": "DC",
+    "ALABAMA": "AL",
+    "ALASKA": "AK",
+    "ARIZONA": "AZ",
+    "ARKANSAS": "AR",
+    "CALIFORNIA": "CA",
+    "COLORADO": "CO",
+    "CONNECTICUT": "CT",
+    "DELAWARE": "DE",
+    "FLORIDA": "FL",
+    "GEORGIA": "GA",
+    "HAWAII": "HI",
+    "IDAHO": "ID",
+    "ILLINOIS": "IL",
+    "INDIANA": "IN",
+    "IOWA": "IA",
+    "KANSAS": "KS",
+    "KENTUCKY": "KY",
+    "LOUISIANA": "LA",
+    "MAINE": "ME",
+    "MARYLAND": "MD",
+    "MASSACHUSETTS": "MA",
+    "MICHIGAN": "MI",
+    "MINNESOTA": "MN",
+    "MISSISSIPPI": "MS",
+    "MISSOURI": "MO",
+    "MONTANA": "MT",
+    "NEBRASKA": "NE",
+    "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH",
+    "NEW JERSEY": "NJ",
+    "NEW MEXICO": "NM",
+    "NEW YORK": "NY",
+    "NORTH CAROLINA": "NC",
+    "NORTH DAKOTA": "ND",
+    "OHIO": "OH",
+    "OKLAHOMA": "OK",
+    "OREGON": "OR",
+    "PENNSYLVANIA": "PA",
+    "RHODE ISLAND": "RI",
+    "SOUTH CAROLINA": "SC",
+    "SOUTH DAKOTA": "SD",
+    "TENNESSEE": "TN",
+    "TEXAS": "TX",
+    "UTAH": "UT",
+    "VERMONT": "VT",
+    "VIRGINIA": "VA",
+    "WASHINGTON": "WA",
+    "WEST VIRGINIA": "WV",
+    "WISCONSIN": "WI",
+    "WYOMING": "WY"
 }
 valid_ca_states = {
-    "AB": "ALBERTA",
-    "BC": "BRITISH COLUMBIA",
-    "MB": "MANITOBA",
-    "NB": "NEW BRUNSWICK",
-    "NL": "NEWFOUNDLAND AND LABRADOR",
-    "NL": "NEWFOUNDLAND",
-    "NL": "LABRADOR", 
-    "NS": "NOVA SCOTIA",
-    "ON": "ONTARIO",
-    "PE": "PRINCE EDWARD ISLAND",
-    "QC": "QUEBEC",
-    "QC": "QUÉBEC",
-    "SK": "SASKATCHEWAN",
-    "NT": "NORTHWEST TERRITORIES",
-    "NU": "NUNAVUT",
-    "YT": "YUKON"
+    "ALBERTA": "AB",
+    "BRITISH COLUMBIA": "BC",
+    "MANITOBA": "MB",
+    "NEW BRUNSWICK": "NB",
+    "NEWFOUNDLAND AND LABRADOR": "NL",
+    "NEWFOUNDLAND": "NL",
+    "LABRADOR": "NL",
+    "NOVA SCOTIA": "NS",
+    "ONTARIO": "ON",
+    "PRINCE EDWARD ISLAND": "PE",
+    "QUEBEC": "QC",
+    "QUÉBEC": "QC",
+    "SASKATCHEWAN": "SK",
+    "NORTHWEST TERRITORIES": "NT",
+    "NUNAVUT": "NU",
+    "YUKON": "YT"
 }
 
 def copy_bucket_contents(
@@ -4258,7 +4258,7 @@ def clean_df(
         invalid_states = pd.DataFrame()
         for col in state_columns:
             df[col] = df[col].astype('str').str.replace(' ','').str.replace('-','')
-            invalid_mask = ~df[col].isin(set(valid_us_states.keys()).union(valid_ca_states.keys()))
+            invalid_mask = ~df[col].isin(set(valid_us_states.values()).union(valid_ca_states.values()))
             invalid_states = pd.concat([invalid_states, df[invalid_mask]], ignore_index=True)
             df = df[~invalid_mask].copy()
         log_message(f'[INFO] invalid_states found: {len(invalid_states)}')
@@ -4279,7 +4279,6 @@ def extract_state(
     text
 ):
     valid_states = {**valid_us_states, **valid_ca_states}
-    valid_states = {v: k for k, v in valid_states.items()}
     abbr_set = set(valid_states.values())
     if pd.isna(text):
         return text
@@ -4309,7 +4308,6 @@ def clean_address(
             zip_code = matches[-1]
             address = ''.join(re.split(zip_code, address)[:-1])
             valid_states = {**valid_us_states, **valid_ca_states}
-            valid_states = {v: k for k, v in valid_states.items()}
             state_pattern = re.compile(r'\b(' + '|'.join(re.escape(state) for state in valid_states.keys()) + r')\b', re.IGNORECASE)
             address = state_pattern.sub(lambda match: valid_states[match.group(0).upper()], address)
             state_pattern = r'\b[a-zA-Z]{2}\b'
