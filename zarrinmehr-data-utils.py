@@ -212,7 +212,8 @@ valid_us_states = {
     "WASHINGTON": "WA",
     "WEST VIRGINIA": "WV",
     "WISCONSIN": "WI",
-    "WYOMING": "WY"
+    "WYOMING": "WY",
+    "PUERTO RICO": "PR",
 }
 valid_ca_states = {
     "ALBERTA": "AB",
