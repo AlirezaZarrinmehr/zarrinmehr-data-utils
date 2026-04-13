@@ -338,7 +338,7 @@ def process_ns_orders(
     custom_cols = [i for i in [i for i in transaction.columns.to_list() if 'custbody_' in i] if i in memo_cols]
     if custom_cols:
         labels = [c.replace('custbody_', '').replace('_', ' ') + ': ' for c in custom_cols]
-        vals = transaction[custom_cols].fillna('').astype(str).values
+        vals = transaction[custom_cols].fillna('').astype('str').values
         transaction['Memo'] = [
             ", ".join(f"{lbl}{v}" for lbl, v in zip(labels, row) if v != '')
             for row in vals
@@ -2703,7 +2703,7 @@ def process_data_to_s3(
                             try:
                                 df[col] = pd.to_numeric(df[col])
                             except:
-                                df[col] = df[col].fillna('').astype(str)
+                                df[col] = df[col].fillna('').astype('str')
                         if id_column:
                             df = df.sort_values(by=[last_modified_column, id_column], ascending=[False, True])
                             df = df.drop_duplicates(subset=[id_column], keep='first')
@@ -4204,7 +4204,7 @@ def clean_df(
     for col in date_cols:
         initial_nulls = df[col].isna().sum()
         if df[col].dtype == 'object':
-            df[col] = df[col].str.replace(
+            df[col] = df[col].fillna('').astype('str').str.replace(
                 r'(?<=/)(\d{4})$',
                 lambda x: x.group(1) if x.group(1).startswith(('19', '20'))
                 else '20' + x.group(1)[2:],
