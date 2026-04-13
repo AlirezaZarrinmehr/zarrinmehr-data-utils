@@ -4203,6 +4203,13 @@ def clean_df(
     date_cols = list(set(date_cols))
     for col in date_cols:
         initial_nulls = df[col].isna().sum()
+        if df[col].dtype == 'object':
+            df[col] = df[col].str.replace(
+                r'(?<=/)(\d{4})$',
+                lambda x: x.group(1) if x.group(1).startswith(('19', '20'))
+                else '20' + x.group(1)[2:],
+                regex=True
+            )
         df[col] = pd.to_datetime(df[col], errors='coerce')
         final_nulls = df[col].isna().sum()
         coerced_count = final_nulls - initial_nulls
