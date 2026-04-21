@@ -2425,7 +2425,7 @@ def load_data_via_query(
         access_token = auth_client.access_token
         refresh_token = auth_client.refresh_token
         save_qb_tokens(
-            file_path=folder_path + "secrets.json",
+            file_path=file_path,
             access_token=access_token, 
             refresh_token=refresh_token
         )
