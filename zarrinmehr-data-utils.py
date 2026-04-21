@@ -2223,7 +2223,12 @@ def load_data_via_query(
         token_key=None,
         token_secret=None,
         realm=None,
-        active_conn=None
+        active_conn=None,
+        client_id=None,
+        client_secret=None,
+        redirect_uri=None,
+        environment=None,
+        refresh_token=None
 ):
     log_message(f'[INFO] Running {sql_query}')
     
@@ -2382,8 +2387,41 @@ def load_data_via_query(
                     raise Exception(f'Error executing SuiteQL query: {response.status_code}, {response.text}')
         df = pd.DataFrame(all_items)
         return df
+
+    elif source_type == "qboapi":
+        auth_client = AuthClient(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            environment=environment,
+        )
+        auth_client.refresh(refresh_token=refresh_token)
+        access_token = auth_client.access_token
+        refresh_token = auth_client.refresh_token
+        save_qb_tokens(
+            file_path=folder_path + "secrets.json",
+            access_token=access_token, 
+            refresh_token=refresh_token
+        )
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/text'
+        }
+        qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/query?query={sql_query}"
+        response = requests.get(qboapi_url, headers=headers)
+        if response.status_code == 200:
+            result = response.json()
+            result = response.json()
+            queryResponse = result.get("QueryResponse", {})
+            tableName = next(iter(queryResponse.keys()))
+            table = queryResponse.get(tableName, [])
+            df = pd.json_normalize(table)
+            return df
+        else:
+            raise Exception(f'Error executing QBO Api query: {response.status_code}, {response.text}')        
     else:
-        raise ValueError("source_type must be 'mssql', 'bigquery', 'suiteql', or 'qodbc'")
+        raise ValueError("source_type must be 'mssql', 'bigquery', 'suiteql', 'qboapi', or 'qodbc'")
 
 
 def upload_to_s3(
