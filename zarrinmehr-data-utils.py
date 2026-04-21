@@ -2217,7 +2217,7 @@ def save_qb_tokens(
     file_path,
     access_token=None, 
     refresh_token=None, 
-    realm_id=None, 
+    realm=None, 
     state=None
 ):
     with open(file_path, "r") as file:
@@ -2225,7 +2225,7 @@ def save_qb_tokens(
     updates = {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "realm_id": realm_id,
+        "realm": realm,
         "state": state
     }
     updates = {k: v for k, v in updates.items() if v is not None}
@@ -2434,7 +2434,7 @@ def load_data_via_query(
             'Accept': 'application/json',
             'Content-Type': 'application/text'
         }
-        qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/query?query={sql_query}"
+        qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm}/query?query={sql_query}"
         response = requests.get(qboapi_url, headers=headers)
         if response.status_code == 200:
             result = response.json()
