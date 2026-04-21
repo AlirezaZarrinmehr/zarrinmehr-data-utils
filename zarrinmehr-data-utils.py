@@ -2438,9 +2438,8 @@ def load_data_via_query(
         response = requests.get(qboapi_url, headers=headers)
         if response.status_code == 200:
             result = response.json()
-            result = response.json()
             queryResponse = result.get("QueryResponse", {})
-            tableName = next(iter(queryResponse.keys()))
+            tableName = next(iter(queryResponse.keys()), None)
             table = queryResponse.get(tableName, [])
             df = pd.json_normalize(table)
             return df
