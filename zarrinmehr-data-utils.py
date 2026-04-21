@@ -99,7 +99,11 @@ modules = [
     ("sklearn.metrics", "accuracy_score", "scikit-learn"),
     ("psycopg2.errors", "DuplicateObject", "psycopg2"),
     ("psycopg2.errors", "UndefinedTable", "psycopg2"),
-    ("itertools", "islice", "itertools")
+    ("itertools", "islice", "itertools"),
+    ("intuitlib.client", "AuthClient", "intuit-oauth"),
+    ("intuitlib.enums", "Scopes", "intuit-oauth"),
+    ("urllib.parse", "urlparse", None),
+    ("urllib.parse", "parse_qs", None)
 ]
 
 for fr_mod, im_mod, pip_name in modules:
