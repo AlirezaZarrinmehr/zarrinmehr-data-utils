@@ -2442,6 +2442,8 @@ def load_data_via_query(
             tableName = next(iter(queryResponse.keys()), None)
             table = queryResponse.get(tableName, [])
             df = pd.json_normalize(table)
+            if df.empty:
+                df = pd.DataFrame(columns=["Id", "MetaData.LastUpdatedTime"])
             return df
         else:
             raise Exception(f'Error executing QBO Api query: {response.status_code}, {response.text}')        
@@ -2806,7 +2808,7 @@ def process_data_to_s3(
                         for col in df.columns:
                             if col == last_modified_column:
                                 if source_type == "qboapi":
-                                    df[col] = pd.to_datetime(df[col], utc=True)
+                                    df[col] = pd.to_datetime(df[col], format="mixed", utc=True)
                                 else:
                                     df[col] = pd.to_datetime(df[col])
                                 continue
