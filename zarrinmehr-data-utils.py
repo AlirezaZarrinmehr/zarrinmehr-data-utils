@@ -2213,6 +2213,28 @@ def process_exchange_rates(
     return dfAvg
 
 
+def save_qb_tokens(
+    file_path,
+    access_token=None, 
+    refresh_token=None, 
+    realm_id=None, 
+    state=None
+):
+    with open(file_path, "r") as file:
+        secrets = json.load(file)
+    updates = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "realm_id": realm_id,
+        "state": state
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    secrets.update(updates)
+    with open(file_path, "w") as file:
+        json.dump(secrets, file, indent=2)
+    log_message(f'[SUCCESS] QuickBooks credentials saved: {list(updates.keys())}')
+    
+    
 def load_data_via_query(
         sql_query,
         source_type,
