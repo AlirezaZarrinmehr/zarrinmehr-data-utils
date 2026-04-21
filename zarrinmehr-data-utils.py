@@ -2567,7 +2567,12 @@ def process_data_to_s3(
     consumer_secret=None,
     token_key=None,
     token_secret=None,
-    realm=None
+    realm=None,
+    client_id=None,
+    client_secret=None,
+    redirect_uri=None,
+    environment=None,
+    refresh_token=None
 ):
     try:
         if source_type == "qodbc":
@@ -2595,8 +2600,19 @@ def process_data_to_s3(
                     "token_secret": token_secret,
                     "realm": realm
                 }
+            elif source_type == "qboapi":
+                params = {
+                    "source_type":source_type,
+                    "client_id":client_id,
+                    "client_secret":client_secret,
+                    "redirect_uri":redirect_uri,
+                    "environment":environment,
+                    "refresh_token":refresh_token,
+                    "file_path": file_path,
+                    "realm":realm
+                }
             else:
-                raise ValueError("source_type must be 'suiteql', or 'qodbc'")
+                raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
             def build_duplicate_check_query(table, id_column):
                 return f"""
                     SELECT {id_column}, COUNT(*) AS duplicateCount
@@ -2610,7 +2626,7 @@ def process_data_to_s3(
                 id_column = ", ".join(id_column) if isinstance(id_column, list) else id_column
                 last_modified_column = table_info.get("last_modified_column")
                 defined_query = table_info.get("query")
-                if id_column:
+                if id_column and source_type != "qboapi":
                     query = build_duplicate_check_query(table, id_column)
                     for attempt in range(max_retries):
                         try:
@@ -2686,19 +2702,28 @@ def process_data_to_s3(
                     else:
                         log_message(f'[INFO] Table "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...')
                         id_order_by = f", {id_column}" if id_column else ""
-                        if source_type == 'suiteql':
-                            query = f"""
-                                    SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
-                                    FROM {table}
-                                    ORDER BY {last_modified_column}{id_order_by}
-                                    FETCH NEXT 30000 ROWS ONLY
-                                    """
-                        else:
+                        if source_type == "qodbc":
                             query = f"""
                                 SELECT TOP 30000 *
                                 FROM {table}
                                 ORDER BY {last_modified_column}{id_order_by}
                                 """
+                        elif source_type == "suiteql":
+                            query = f"""
+                                SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
+                                FROM {table}
+                                ORDER BY {last_modified_column}{id_order_by}
+                                FETCH NEXT 30000 ROWS ONLY
+                                """
+                        elif source_type == "qboapi":
+                            query = f"""
+                                SELECT *
+                                FROM {table}
+                                ORDER BY {last_modified_column}{id_order_by}
+                                MAXRESULTS 1000
+                                """
+                        else:
+                            raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
                         for attempt in range(max_retries):
                             try:
                                 df = load_data_via_query(sql_query=query, **params)
@@ -2717,14 +2742,30 @@ def process_data_to_s3(
                             continue
                     has_more_records=True
                     while has_more_records:
-                        lastupdate = pd.to_datetime(df[last_modified_column]).max()
-                        if pd.isna(lastupdate):
-                            lastupdate_str = '1970-01-01 00:00:00'
+                        if source_type == "qboapi":
+                            lastupdate = pd.to_datetime(df[last_modified_column], utc=True).max()
                         else:
-                            lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
+                            lastupdate = pd.to_datetime(df[last_modified_column]).max()
+                        if pd.isna(lastupdate):
+                            if source_type == "qboapi":
+                                lastupdate_str = '1970-01-01T00:00:00Z'
+                            else:
+                                lastupdate_str = '1970-01-01 00:00:00'
+                        else:
+                            if source_type == "qboapi":
+                                lastupdate_str = lastupdate.tz_localize('UTC') if lastupdate.tzinfo is None else lastupdate.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+                            else:
+                                lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
                         # log_message(lastupdate_str)
                         id_order_by = f", {id_column}" if id_column else ""
-                        if source_type == 'suiteql':
+                        if source_type == "qodbc":
+                            query = f"""
+                                    SELECT TOP 30000 *
+                                    FROM {table}
+                                    WHERE {last_modified_column} >= {{ts '{lastupdate_str}'}}
+                                    ORDER BY {last_modified_column}{id_order_by}
+                                    """
+                        elif source_type == "suiteql":
                             query = f"""
                                     SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
                                     FROM {table}
@@ -2732,13 +2773,16 @@ def process_data_to_s3(
                                     ORDER BY {last_modified_column}{id_order_by}
                                     FETCH NEXT 30000 ROWS ONLY
                                     """
-                        else:
+                        elif source_type == "qboapi":
                             query = f"""
-                                    SELECT TOP 30000 *
+                                    SELECT *
                                     FROM {table}
-                                    WHERE {last_modified_column} >= {{ts '{lastupdate_str}'}}
+                                    WHERE {last_modified_column} >= '{lastupdate_str}'
                                     ORDER BY {last_modified_column}{id_order_by}
+                                    MAXRESULTS 1000
                                     """
+                        else:
+                            raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
                         for attempt in range(max_retries):
                             try:
                                 new_records = load_data_via_query(sql_query=query, **params)
@@ -2761,7 +2805,10 @@ def process_data_to_s3(
                         
                         for col in df.columns:
                             if col == last_modified_column:
-                                df[col] = pd.to_datetime(df[col])
+                                if source_type == "qboapi":
+                                    df[col] = pd.to_datetime(df[col], utc=True)
+                                else:
+                                    df[col] = pd.to_datetime(df[col])
                                 continue
                             try:
                                 df[col] = pd.to_numeric(df[col])
@@ -2774,7 +2821,11 @@ def process_data_to_s3(
                             df = df.sort_values(by=last_modified_column, ascending=False)
                             df = df.drop_duplicates(keep='first')
                         df.reset_index(drop=True, inplace=True)
-                        if new_records.shape[0]<25000:
+                        if source_type == "qboapi":
+                            limit = 800
+                        else:
+                            limit = 25000
+                        if new_records.shape[0]<limit:
                             has_more_records= False
                 try:
                     upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = aws_region)
