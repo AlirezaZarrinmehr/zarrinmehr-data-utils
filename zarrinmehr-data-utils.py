@@ -2233,8 +2233,8 @@ def save_qb_tokens(
     with open(file_path, "w") as file:
         json.dump(secrets, file, indent=2)
     log_message(f'[SUCCESS] QuickBooks credentials saved: {list(updates.keys())}')
-    
-    
+
+
 def load_data_via_query(
         sql_query,
         source_type,
@@ -2441,7 +2441,17 @@ def load_data_via_query(
             queryResponse = result.get("QueryResponse", {})
             tableName = next(iter(queryResponse.keys()), None)
             table = queryResponse.get(tableName, [])
-            df = pd.json_normalize(table)
+            if tableName == 'RecurringTransaction':
+                rows = []
+                for record in table:
+                    txn_type = list(record.keys())[0]
+                    txn_data = record[txn_type]
+                    flat = pd.json_normalize(txn_data)
+                    flat['transaction_type'] = txn_type
+                    rows.append(flat)
+                df = pd.concat(rows, ignore_index=True)
+            else:
+                df = pd.json_normalize(table)
             if df.empty:
                 df = pd.DataFrame(columns=["Id", "MetaData.LastUpdatedTime"])
             return df
