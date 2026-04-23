@@ -2148,8 +2148,8 @@ def get_exchange_rates(
     find_and_act("react-select-ofx-historical-rates-select-to-field-input", action='send_keys', text=to_currency)
     find_and_act("react-select-ofx-historical-rates-select-to-field-input", action='enter')
     find_and_act(f"choice_frequency_{frequency}")
-    find_and_act("react-select-ofx-historical-rates-select-period-field-input", action='send_keys', text=reporting_period)
-    find_and_act("react-select-ofx-historical-rates-select-period-field-input", action='enter')
+    find_and_act("ofx-historical-rates-select-period-field-input", action='send_keys', text=reporting_period)
+    find_and_act("ofx-historical-rates-select-period-field-input", action='enter')
     table = driver.find_element(By.CLASS_NAME, "ofx-historical-rates__table")
     old_table_html = table.get_attribute("innerHTML")
     retrieve_button = wait.until(EC.element_to_be_clickable(
