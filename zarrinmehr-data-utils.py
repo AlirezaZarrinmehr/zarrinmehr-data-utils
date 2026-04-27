@@ -664,8 +664,8 @@ def process_gp_orders(
     itemsCategoriesV3
 ):
     orders = dfHeader[
-        (pd.to_datetime(dfHeader['DOCDATE'], errors='coerce')>=start_date)&\
-        (pd.to_datetime(dfHeader['DOCDATE'], errors='coerce')<=end_date)&\
+        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce')>=start_date)&\
+        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce')<=end_date)&\
         (dfHeader[txnsType7].isin(txnsType17))
     ].copy()
 
@@ -673,7 +673,7 @@ def process_gp_orders(
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [txnsType], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders.rename(columns = {
         txnsType:f'{txnsType2}No', 
-        'DOCDATE':f'{txnsType2}Date',
+        'CREATDDT':f'{txnsType2}Date',
         txnsType6:f'{txnsType2}Status',
         'ACTLSHIP':'ShipDate',
         txnsType8:txnsType4,
