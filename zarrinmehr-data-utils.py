@@ -2547,7 +2547,7 @@ def upload_to_s3(
                     part_number += 1
                     csv_buffer = io.StringIO()
                     writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
-                    writer.writerow(headers)
+                    # writer.writerow(headers)
             if csv_buffer.tell() > 0:
                 part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
                 parts.append(part)
