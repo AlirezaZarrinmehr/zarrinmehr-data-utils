@@ -370,6 +370,7 @@ def process_ns_orders(
         'custbodycust_duedate':'ReqInstallDate',
         'custbodyschedinstall_date':'PlannedInstallDate',
         'custbody_khor_installdate':'InstallDate',
+        'custbody_commit_date':'CommitDate',
         'shipdate':'PlannedShipDate',
         'actualshipdate':'ShipDate',
         'addressee':'ShipName',
