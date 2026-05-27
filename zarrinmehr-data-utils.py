@@ -502,7 +502,6 @@ def process_ns_orders(
 
 
 def process_gp_transactions(
-    list_of_accounts,
     companyName,
     salesOrderInvoiceHeader,
     salesOrderInvoiceLine,
@@ -519,23 +518,32 @@ def process_gp_transactions(
     generalLedgerLineHistory = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
     generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index=True)
     sourceDocumentMaster = read_file_from_s3(s3_client = s3_client, bucket_name=s3_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
+    account['ACTINDX'] = account['ACTINDX'].astype('str').str.strip()
+    item['ItemId'] = item['ItemId'].astype('str').str.strip()
+    customer['CustId'] = customer['CustId'].astype('str').str.strip()
+    salesOrderInvoiceHeader['CUSTNMBR'] = salesOrderInvoiceHeader['CUSTNMBR'].astype('str').str.strip()
+    salesOrderInvoiceHeader['SOPNUMBE'] = salesOrderInvoiceHeader['SOPNUMBE'].astype('str').str.strip()
+    salesOrderInvoiceLine['SLSINDX'] = salesOrderInvoiceLine['SLSINDX'].astype('str').str.strip()
+    salesOrderInvoiceLine['SOPNUMBE'] = salesOrderInvoiceLine['SOPNUMBE'].astype('str').str.strip()
+    salesOrderInvoiceLine['ITEMNMBR'] = salesOrderInvoiceLine['ITEMNMBR'].astype('str').str.strip()
+    generalLedgerLine['ACTINDX'] = generalLedgerLine['ACTINDX'].astype('str').str.strip()
+    generalLedgerLine['ORDOCNUM'] = generalLedgerLine['ORDOCNUM'].astype('str').str.strip()
+    generalLedgerLine['JRNENTRY'] = generalLedgerLine['JRNENTRY'].astype('str').str.strip()
+    generalLedgerLine['TRXSORCE'] = generalLedgerLine['TRXSORCE'].astype('str').str.strip()
     generalLedgerLine['SOURCDOC'] = generalLedgerLine['SOURCDOC'].astype('str').str.strip()
     sourceDocumentMaster['SOURCDOC'] = sourceDocumentMaster['SOURCDOC'].astype('str').str.strip()
     generalLedgerLine = generalLedgerLine.merge(sourceDocumentMaster[['SOURCDOC', 'SDOCDSCR']], on = 'SOURCDOC', how = 'left')
     generalLedgerLine['SDOCDSCR']=generalLedgerLine['SDOCDSCR'].map({'BBF':'Balance Brought Forward'})
     generalLedgerLine = generalLedgerLine.loc[
-        (generalLedgerLine['ACTINDX'].astype('str').str.strip().isin(list_of_accounts['ACTINDX'].astype('str').astype('str').str.strip()))&\
         (pd.to_datetime(generalLedgerLine['TRXDATE'], errors='coerce')>=start_date)&\
         (pd.to_datetime(generalLedgerLine['TRXDATE'], errors='coerce')<=end_date)
     ].copy()
     generalLedgerLine.rename(columns = {'ORDOCNUM':'SOPNUMBE'}, inplace = True)
-    generalLedgerLine["SOPNUMBE"] = generalLedgerLine["SOPNUMBE"].astype('str').str.strip()
-    generalLedgerLine["ACTINDX"] = generalLedgerLine["ACTINDX"].astype('str').str.strip()
     generalLedgerLine['CRDTAMNT'] = generalLedgerLine['CRDTAMNT'].astype('float')
     generalLedgerLine['DEBITAMT'] = generalLedgerLine['DEBITAMT'].astype('float')
     generalLedgerLine['Total'] = generalLedgerLine['CRDTAMNT'] - generalLedgerLine['DEBITAMT']
-    generalLedgerLine['TransactionId']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY'].astype('str').str.strip() + ' :: ' + generalLedgerLine['TRXSORCE'].astype('str').str.strip()
-    generalLedgerLine['TransactionNo']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY'].astype('str').str.strip()
+    generalLedgerLine['TransactionId']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY'] + ' :: ' + generalLedgerLine['TRXSORCE']
+    generalLedgerLine['TransactionNo']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY']
     generalLedgerLine['TransactionStatus'] = 'CLOSED'
     generalLedgerLine['TransactionType'] = 'GENERAL JOURNAL'
     generalLedgerLine['TransactionDate'] = pd.to_datetime(generalLedgerLine['TRXDATE'])
@@ -549,16 +557,12 @@ def process_gp_transactions(
         (pd.to_datetime(salesOrderInvoiceHeader['GLPOSTDT'], errors='coerce')<=end_date)&\
         (pd.to_datetime(salesOrderInvoiceHeader['GLPOSTDT'], errors='coerce')<=end_date)
     ].copy()
-    txns["SOPNUMBE"] = txns["SOPNUMBE"].astype('str').str.strip()   
     txnsLines = salesOrderInvoiceLine.loc[
-        (salesOrderInvoiceLine['SOPTYPE']=='Invoice')&\
-        (salesOrderInvoiceLine['SLSINDX'].astype('str').str.strip().isin(list_of_accounts['ACTINDX'].astype('str').str.strip()))
+        (salesOrderInvoiceLine['SOPTYPE']=='Invoice')
     ].copy()
     txnsLines.rename(columns = {'SLSINDX':'ACTINDX'}, inplace = True)
-    txnsLines["SOPNUMBE"] = txnsLines["SOPNUMBE"].astype('str').str.strip()
-    txnsLines["ACTINDX"] = txnsLines["ACTINDX"].astype('str').str.strip()
     txnsLines['XTNDPRCE'] = txnsLines['XTNDPRCE'].astype('float')
-    txnsLines = txnsLines.merge(txns, on = ["SOPNUMBE"], suffixes = ('', '_inv'))
+    txnsLines = txnsLines.merge(txns, on = ['SOPNUMBE'], suffixes = ('', '_inv'))
     txnsLines.rename(columns = {
         'ORIGNUMB':'OrderId',
         'GLPOSTDT':'TransactionDate',
@@ -597,16 +601,10 @@ def process_gp_transactions(
     ]
     generalLedgerLine = generalLedgerLine.loc[~generalLedgerLine['SOPNUMBE'].isin(matchedGlTranLin['SOPNUMBE'])]
     txnsLines = pd.concat([txnsLines, generalLedgerLine], ignore_index=True)
-    txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR']].rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
-    txnsLines['CustId'] = txnsLines['CustId'].astype('str').str.strip()
-    customer['CustId'] = customer['CustId'].astype('str').str.strip()
+    txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR', 'AccountType']].drop_duplicates(subset=['ACTINDX']).rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
     txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left')
-    txnsLines['ItemId'] = txnsLines['ItemId'].astype('str').str.strip()
-    item['ItemId'] = item['ItemId'].astype('str').str.strip()
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how = 'left', suffixes = ('', '_Item'))
     billToAdds = customer.rename(columns={'CustName':'BillName', 'CustCity':'BillCity', 'CustState':'BillState', 'CustZip':'BillZip'})[['CustId', 'BillName', 'BillCity', 'BillState', 'BillZip']]
-    billToAdds['CustId'] = billToAdds['CustId'].astype('str').str.strip()
-    customer['CustId'] = customer['CustId'].astype('str').str.strip()
     txnsLines = txnsLines.merge(billToAdds, on = 'CustId', how = 'left')
     txnsLines = txnsLines.merge(CadUsdAvg, left_on=[txnsLines['TransactionDate'].dt.year, txnsLines['TransactionDate'].dt.month], right_on=['Year', 'Month'], how = 'left')
     txnsLines['CAD/USD'] = txnsLines['CAD/USD'].interpolate(method='linear', limit_direction='both')
@@ -614,12 +612,10 @@ def process_gp_transactions(
     txnsLines['Rate']=txnsLines['Rate']*txnsLines['CAD/USD']
     txnsLines['Total']=txnsLines['Total']*txnsLines['CAD/USD']
     txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
-    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
     txns['Company'] = companyName
     txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
-    txns.TransactionId = txns.TransactionId.astype('str').str.strip()
-    txnsLines.TransactionId = txnsLines.TransactionId.astype('str').str.strip()
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['Total_ord'], mismatched_txns['Total_lin'], atol=0.1)]
     log_message(f'[INFO] {mismatched_txns.shape[0]} txns total do not match txnsline total')
