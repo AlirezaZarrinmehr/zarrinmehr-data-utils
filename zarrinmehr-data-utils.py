@@ -274,6 +274,47 @@ def copy_bucket_contents(
             log_message(f'[ERROR] Error copying {obj.key}: {e}')
 
 
+def download_entire_bucket_flat(
+    bucket_name: str,
+    output_folder: str,
+    aws_region: str,
+    aws_access_key: str,
+    aws_secret_key: str
+):
+
+    os.makedirs(output_folder, exist_ok=True)
+
+    s3 = boto3.client(
+        "s3",
+        region_name=aws_region,
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key
+    )
+
+    print(f"Listing objects in bucket '{bucket_name}'...")
+
+    paginator = s3.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=bucket_name)
+
+    files_downloaded = 0
+
+    for page in pages:
+        if "Contents" not in page:
+            continue
+
+        for obj in page["Contents"]:
+            key = obj["Key"] 
+            safe_filename = key.replace("/", "__")
+
+            local_path = os.path.join(output_folder, safe_filename)
+
+            print(f"Downloading: {key} -> {local_path}")
+
+            s3.download_file(bucket_name, key, local_path)
+            files_downloaded += 1
+
+    print(f"Download complete. {files_downloaded} files saved in {output_folder}.")
+    
 def truncate_with_etc_1(s, truncate_len):
     return s[:truncate_len - 5] + ' etc.' if len(s) > truncate_len else s
 
