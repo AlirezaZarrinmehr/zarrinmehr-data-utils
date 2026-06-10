@@ -1088,6 +1088,7 @@ def process_qb_transactions(
         'Itemlinequantity':'Quantity',
         'Itemlinecost':'Total'
     }, inplace = True)
+    checksLines['Quantity'] = checksLines['Quantity'].mask( checksLines['Quantity'].isna() | checksLines['Quantity'].eq(0), 1 )
     checksLines['Rate']=checksLines['Total']/checksLines['Quantity']
     checksLines = checksLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
