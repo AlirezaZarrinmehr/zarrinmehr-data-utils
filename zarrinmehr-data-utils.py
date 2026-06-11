@@ -2251,18 +2251,17 @@ def upload_to_s3(
         except Exception as e:
             log_message(f'[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.')
     if not file_path:
-        clean_data = data.copy()
-        for idx, dtype in enumerate(clean_data.dtypes):
+        for idx, dtype in enumerate(data.dtypes):
             if dtype == 'object' or dtype.name == 'string':
-                clean_data.iloc[:, idx] = (
-                    clean_data.iloc[:, idx]
+                data.iloc[:, idx] = (
+                    data.iloc[:, idx]
                     .fillna('')
                     .apply(lambda x: x.hex() if isinstance(x, bytes) else str(x))
                     .astype('str')
                     .str.replace(r'\r\n|\r|\n|\\n|\\', ' ', regex=True)
                 )
         csv_buffer = io.StringIO()
-        clean_data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding=encoding)
+        data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding=encoding)
         csv_buffer.seek(0)
         data_size = len(csv_buffer.getvalue())
         with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
