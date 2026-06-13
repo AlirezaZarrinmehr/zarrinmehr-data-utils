@@ -2001,6 +2001,105 @@ def save_qb_tokens(
     log_message(f'[SUCCESS] QuickBooks credentials saved: {list(updates.keys())}')
 
 
+def extract_column_values(data, column):
+    values = []
+    if hasattr(data, "columns") and hasattr(data, "to_dict"):
+        matching_column = None
+        for col in data.columns:
+            if str(col).lower() == str(column).lower():
+                matching_column = col
+                break
+        if matching_column is None:
+            raise KeyError(f"Column '{column}' not found. Available columns: {list(data.columns)}")
+        for value in data[matching_column].tolist():
+            if value is not None:
+                values.append(str(value).strip())
+        return values
+    if hasattr(data, "tolist") and not isinstance(data, (list, tuple, dict, str)):
+        for value in data.tolist():
+            if value is not None:
+                values.append(str(value).strip())
+        return values
+    for row in data:
+        value = None
+        if isinstance(row, dict):
+            value = row.get(column)
+            if value is None:
+                for key in row:
+                    if str(key).lower() == str(column).lower():
+                        value = row[key]
+                        break
+        else:
+            try:
+                value = getattr(row, column)
+            except Exception:
+                pass
+            if value is None:
+                try:
+                    value = row[column]
+                except Exception:
+                    pass
+            if value is None:
+                try:
+                    value = row[0]
+                except Exception:
+                    pass
+        if value is not None:
+            values.append(str(value).strip())
+    return values
+
+
+def build_tables(secrets, connection_string):
+    tables_mode = secrets.get("tables_mode", "manual")
+    if tables_mode == "manual":
+        return secrets["tables"]
+    if tables_mode == "query":
+        table_rows = load_data_via_query(
+            sql_query=secrets["table_query"],
+            source_type=secrets.get("table_query_source_type", "mssql"),
+            connection_string=connection_string,
+        )
+        column = secrets["table_name_column"]
+        table_names = extract_column_values(table_rows, column)
+        if secrets.get("uppercase_table_names", False):
+            table_names = [table.upper() for table in table_names]
+        tables_to_remove = [
+            table.upper() if secrets.get("uppercase_table_names", False) else table
+            for table in secrets.get("tables_to_remove", [])
+        ]
+        table_names = [
+            table for table in table_names
+            if table not in tables_to_remove
+        ]
+        table_desc = secrets.get("table_desc", {})
+        table_key_template = secrets.get("table_key_template", "{table}")
+        table_sql_template = secrets.get("table_sql_template", "SELECT * FROM \"{table}\"")
+        tables = {}
+        for table in table_names:
+            table_upper = table.upper()
+            description = table_desc.get(table, table_desc.get(table_upper, "UNKNOWN"))
+            table_key = table_key_template.format(
+                table=table,
+                table_upper=table_upper,
+                description=description
+            )
+            table_sql = table_sql_template.format(
+                table=table,
+                table_upper=table_upper,
+                description=description
+            )
+            tables[table_key] = table_sql
+        return tables
+    raise ValueError(f"Unknown tables_mode: {tables_mode}")
+
+
+def build_process_params(secrets, folder_path):
+    params = secrets.get("process_data_to_s3_params", {}).copy()
+    if "file_path" in params:
+        params["file_path"] = folder_path + params["file_path"]
+    return params
+
+
 def load_data_via_query(
         sql_query,
         source_type,
