@@ -239,6 +239,30 @@ valid_ca_states = {
 }
 
 
+def normalize_nested_json(data):
+    df = pd.json_normalize(data)
+    list_cols = [
+        col for col in df.columns
+        if df[col].apply(lambda x: isinstance(x, list)).any()
+    ]
+    for col in list_cols:
+        df = df.explode(col, ignore_index=True)
+    dict_cols = [
+        col for col in df.columns
+        if df[col].apply(lambda x: isinstance(x, dict)).any()
+    ]
+    for col in dict_cols:
+        normalized = pd.json_normalize(df[col]).add_prefix(f"{col}.")
+        df = pd.concat(
+            [
+                df.drop(columns=[col]).reset_index(drop=True),
+                normalized.reset_index(drop=True)
+            ],
+            axis=1
+        )
+    return df
+
+
 def create_token(username, password, customer_alias, shared_key, create_token_url):
     payload = {
         "SharedKey": shared_key,
@@ -2361,12 +2385,12 @@ def load_data_via_query(
                 for record in table:
                     txn_type = list(record.keys())[0]
                     txn_data = record[txn_type]
-                    flat = pd.json_normalize(txn_data)
+                    flat = normalize_nested_json(txn_data)
                     flat['transaction_type'] = txn_type
                     rows.append(flat)
                 df = pd.concat(rows, ignore_index=True)
             else:
-                df = pd.json_normalize(table)
+                df = normalize_nested_json(table)
             if df.empty:
                 df = pd.DataFrame(columns=["Id", "MetaData.LastUpdatedTime"])
             return df
