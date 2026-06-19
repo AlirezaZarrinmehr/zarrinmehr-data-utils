@@ -283,7 +283,7 @@ def copy_bucket_contents(
     dest_bucket_name,
     aws_region,
     CreateS3Bucket=True,
-    column_exclusion_keywords=None
+    columns_to_redact_keywords=None
 ):
     source_bucket = s3_resource.Bucket(source_bucket_name)
     if CreateS3Bucket:
@@ -301,24 +301,18 @@ def copy_bucket_contents(
     log_message(f'[INFO] Starting copy from {source_bucket_name} to {dest_bucket_name}...')
     for obj in source_bucket.objects.all():
         try:
-            if column_exclusion_keywords:
-                sensitive_words = {word.lower() for word in column_exclusion_keywords}
+            if columns_to_redact_keywords:
+                columns_to_redact_keywords = {word.lower() for word in columns_to_redact_keywords}
                 df = read_file_from_s3(s3_client = s3_client,bucket_name = source_bucket_name, object_key = obj.key)
-                original_cols = list(df.columns)
-                filtered_cols = [
-                    col
-                    for col in df.columns
-                    if not any(word in col.lower() for word in sensitive_words)
-                ]
-                removed_cols = [
-                    col
-                    for col in original_cols
-                    if col not in filtered_cols
-                ]
-                df = df[filtered_cols]
+                redacted_cols = []
+
+                for col in df.columns:
+                    if any(word in col.lower() for word in columns_to_redact_keywords):
+                        df[col] = "REDACTED"
+                        redacted_cols.append(col)
                 upload_to_s3(s3_client = s3_client, data = df, bucket_name = dest_bucket_name, object_key = obj.key)
-                if removed_cols:
-                    log_message(f'[INFO] Columns {", ".join(removed_cols)} were removed from {obj.key}')
+                if redacted_cols:
+                    log_message(f'[INFO] Columns {", ".join(redacted_cols)} were redacted in {obj.key}')
             else:
                 copy_source = {
                     'Bucket': source_bucket_name,
