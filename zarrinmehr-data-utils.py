@@ -238,17 +238,54 @@ valid_ca_states = {
     "YUKON": "YT"
 }
 
+
+def create_token(username, password, customer_alias, shared_key, create_token_url):
+    payload = {
+        "SharedKey": shared_key,
+        "UserName": username,
+        "UserPass": password,
+        "CustomerAlias": customer_alias
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    response = requests.post(
+        create_token_url,
+        json=payload,
+        headers=headers
+    )
+    if response.ok:
+        try:
+            token = response.json()
+        except ValueError:
+            token = response.text.strip()
+
+        if token:
+            log_message('Service Token Retrieved!')
+            return token
+        log_message('[ERROR] Token not found in response.')
+        log_message(response.text)
+        return None
+    log_message(f'[ERROR] Failed to create the token. Status Code: {response.status_code}'
+    )
+    log_message(response.text)
+    return None
+
+
+def tws_date(date):
+    return f"/Date({int(date.timestamp() * 1000)}{date.strftime('%z')})/"
+
+
 def copy_bucket_contents(
     s3_resource,
     s3_client,
-    source_bucket_name, 
+    source_bucket_name,
     dest_bucket_name,
     aws_region,
-    CreateS3Bucket=True
+    CreateS3Bucket=True,
+    column_exclusion_keywords=None
 ):
     source_bucket = s3_resource.Bucket(source_bucket_name)
-    dest_bucket = s3_resource.Bucket(dest_bucket_name)
-    
     if CreateS3Bucket:
         try:
             buckets = s3_client.list_buckets()["Buckets"]
@@ -263,14 +300,33 @@ def copy_bucket_contents(
 
     log_message(f'[INFO] Starting copy from {source_bucket_name} to {dest_bucket_name}...')
     for obj in source_bucket.objects.all():
-        copy_source = {
-            'Bucket': source_bucket_name,
-            'Key': obj.key
-        }
         try:
-            s3_resource.meta.client.copy(copy_source, dest_bucket_name, obj.key)
+            if column_exclusion_keywords:
+                sensitive_words = {word.lower() for word in column_exclusion_keywords}
+                df = read_file_from_s3(s3_client = s3_client,bucket_name = source_bucket_name, object_key = obj.key)
+                original_cols = list(df.columns)
+                filtered_cols = [
+                    col
+                    for col in df.columns
+                    if not any(word in col.lower() for word in sensitive_words)
+                ]
+                removed_cols = [
+                    col
+                    for col in original_cols
+                    if col not in filtered_cols
+                ]
+                df = df[filtered_cols]
+                upload_to_s3(s3_client = s3_client, data = df, bucket_name = dest_bucket_name, object_key = obj.key)
+                if removed_cols:
+                    log_message(f'[INFO] Columns {", ".join(removed_cols)} were removed from {obj.key}')
+            else:
+                copy_source = {
+                    'Bucket': source_bucket_name,
+                    'Key': obj.key
+                }
+                s3_resource.meta.client.copy(copy_source, dest_bucket_name, obj.key)
             log_message(f'[SUCCESS] Successfully copied: {obj.key}')
-        except ClientError as e:
+        except Exception as e:
             log_message(f'[ERROR] Error copying {obj.key}: {e}')
 
 
