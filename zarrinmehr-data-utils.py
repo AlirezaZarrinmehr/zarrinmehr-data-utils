@@ -439,7 +439,7 @@ def process_ns_transactions(
     s3_bucket_name,
     EntityAddress,
     employee,
-    subsidiaryId,
+    subsidiaryId
 ):
     txnsTypes = ['CustInvc', 'CustPymt', 'CustCred', 'VendBill', 'Deposit', 'InvAdjst']
     txns = transaction.loc[transaction['type'].isin(txnsTypes)].copy()
@@ -456,6 +456,7 @@ def process_ns_transactions(
     generalJournalLines['quantity'] = -1
     generalJournalLines['rateamount'] = generalJournalLines['foreignamount']
     generalJournalLines['item'] = generalJournalLines['memo_h']
+    job = read_file_from_s3(s3_client = s3_client,bucket_name = s3_bucket_name, object_key = 'job.csv')
     generalJournalLines = generalJournalLines.rename(columns = {'entity':'jobId'}).merge(job.drop_duplicates(subset = ['id'])[['id', 'customer']].rename(columns = {'id':'jobId', 'customer':'entity'}), on = 'jobId', how = 'left')
     txns = pd.concat([generalJournalLines, txns], ignore_index=True )
     txnsLines = pd.concat([generalJournalLines, txnsLines], ignore_index=True )
@@ -498,8 +499,12 @@ def process_ns_transactions(
         'custbody_stc_total_after_discount':'Total'
     }, inplace = True)
     txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    InvOrdLink = read_file_from_s3(s3_client = s3_client,bucket_name = s3_bucket_name, object_key = 'nextTransactionLineLink.csv')
+    InvOrdLink = InvOrdLink[InvOrdLink['nexttype']=='CustInvc'][['nextdoc','previousdoc']].copy()
+    InvOrdLink.rename( columns = { 'nextdoc':'TransactionId', 'previousdoc':'OrderId' }, inplace = True )
+    InvOrdLink.drop_duplicates(inplace = True)
     InvOrdLink['TransactionId'] = InvOrdLink['TransactionId'].apply(convert_to_int_or_keep).astype('str')
-    InvOrdLink=InvOrdLink.loc[~InvOrdLink['TransactionId'].duplicated()]
+    InvOrdLink = InvOrdLink.loc[~InvOrdLink['TransactionId'].duplicated()]
     txns = txns.merge(InvOrdLink, on = 'TransactionId', how = 'left')
     txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
     transactionLine['transaction'] = transactionLine['transaction'].apply(convert_to_int_or_keep).astype('str')
