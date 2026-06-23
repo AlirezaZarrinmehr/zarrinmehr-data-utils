@@ -426,6 +426,141 @@ def kill_qb_processes():
     log_message('[SUCCESS] Cleaned up lingering QB/QODBC processes.')
 
 
+def process_ns_transactions(
+    accounts,
+    companyName,
+    transaction,
+    transactionLine,
+    item,
+    customer,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name,
+    EntityAddress,
+    employee,
+    subsidiaryId,
+):
+    txnsTypes = ['CustInvc', 'CustPymt', 'CustCred', 'VendBill', 'Deposit', 'InvAdjst']
+    txns = transaction.loc[transaction['type'].isin(txnsTypes)].copy()
+    txnsLines = transactionLine.copy()
+    generalJournal = transaction.loc[transaction['type'].isin(['Journal'])].copy()
+    generalJournalLines = transactionLine[(transactionLine['transaction'].isin(generalJournal['id'].dropna().unique()))].copy()
+    generalJournalLines = generalJournal.merge(generalJournalLines, left_on = 'id', right_on = 'transaction', suffixes = ('_h', ''))
+    generalJournalLines = generalJournalLines.reset_index(drop=True).reset_index()
+    generalJournalLines['index']='GENERAL JOURNAL' + generalJournalLines['index'].astype(str)
+    generalJournalLines['id'] = generalJournalLines['index']
+    generalJournalLines['transaction'] = generalJournalLines['index']
+    generalJournalLines['foreigntotal'] = generalJournalLines['foreignamount']
+    generalJournalLines['custbody_stc_total_after_discount'] = generalJournalLines['foreignamount']
+    generalJournalLines['quantity'] = -1
+    generalJournalLines['rateamount'] = generalJournalLines['foreignamount']
+    generalJournalLines['item'] = generalJournalLines['memo_h']
+    generalJournalLines = generalJournalLines.rename(columns = {'entity':'jobId'}).merge(job.drop_duplicates(subset = ['id'])[['id', 'customer']].rename(columns = {'id':'jobId', 'customer':'entity'}), on = 'jobId', how = 'left')
+    txns = pd.concat([generalJournalLines, txns], ignore_index=True )
+    txnsLines = pd.concat([generalJournalLines, txnsLines], ignore_index=True )
+    txns = txns[
+        (pd.to_datetime(txns['trandate'])>=start_date)&\
+        (pd.to_datetime(txns['trandate'])<=end_date)
+    ].copy() 
+    txns['shippingaddress'] = txns['shippingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
+    txns['billingaddress'] = txns['billingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
+    EntityAddress['nkey'] = EntityAddress['nkey'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
+    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'billingaddress', right_on = 'nkey', how = 'left')
+    txns.rename(columns = {
+        'addressee':'BillName',
+        'city':'BillCity',
+        'state':'BillState',
+        'zip':'BillZip',
+    }, inplace = True)
+    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
+    txns.rename(columns = {
+        'addressee':'ShipName',
+        'city':'ShipCity',
+        'state':'ShipState',
+        'zip':'ShipZip',
+    }, inplace = True)
+    txns['entity'] = txns['entity'].fillna('').apply(convert_to_int_or_keep).astype('str')
+    customer['CustId'] = customer['CustId'].fillna('').apply(convert_to_int_or_keep).astype('str')
+    txns = txns.merge(customer[['CustId', 'CustNo', 'CustName', 'SalesRepID']], left_on = 'entity', right_on = 'CustId', how = 'left')
+    txns = txns.merge(employee[['id', 'Name']].rename(columns = {'id':'employeeId', 'Name':'SalesRepID2'}).drop_duplicates(subset = ['employeeId']), left_on = 'custbodycustbodycsr_assigned', right_on = 'employeeId', how = 'left')
+    txns['typebaseddocumentnumber']=txns['typebaseddocumentnumber'].fillna(txns['number'].fillna('').apply(convert_to_int_or_keep).astype('str'))
+    txns.rename(columns = {
+        'id':'TransactionId',
+        'otherrefnum':'CustPo',
+        'typebaseddocumentnumber':'TransactionNo',
+        'type':'TransactionType',
+        'trandate':'TransactionDate',
+        'closedate':'CloseDate',
+        'billingstatus':'TransactionStatus',
+        'shipdate':'ShipDate',
+        'foreigntotal':'subTotal',
+        'custbody_stc_total_after_discount':'Total'
+    }, inplace = True)
+    txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    InvOrdLink['TransactionId'] = InvOrdLink['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    InvOrdLink=InvOrdLink.loc[~InvOrdLink['TransactionId'].duplicated()]
+    txns = txns.merge(InvOrdLink, on = 'TransactionId', how = 'left')
+    txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    transactionLine['transaction'] = transactionLine['transaction'].apply(convert_to_int_or_keep).astype('str')
+    txnsLines = txnsLines[(txnsLines['transaction'].isin(txns['TransactionId'].dropna().unique()))].copy()
+    remove_accounts = set(
+        ['122', '257']
+    )
+    txnsLines = txnsLines[
+        (txnsLines['subsidiary'].fillna('').astype('str').str.strip()==subsidiaryId)&\
+        (~txnsLines['expenseaccount'].astype('str').isin(remove_accounts))
+    ].copy()
+    txnsLines.rename(columns = {
+        'transaction':'TransactionId',
+        'item':'ItemId',
+        'accountFullName':'Account',
+        'memo':'ItemDescription',
+        'quantity':'Quantity',
+        'rateamount':'Rate',
+        'foreignamount':'Total'
+    }, inplace = True)
+    txnsLines['linelastmodifieddate'] = pd.to_datetime(txnsLines['linelastmodifieddate'], errors='coerce')
+    txnsLines = txnsLines.loc[txnsLines.groupby(['TransactionId', 'linesequencenumber'])['linelastmodifieddate'].idxmax()]
+    txnsLines.loc[txnsLines['itemtype']=='TaxGroup', 'ItemId']=-8
+    txnsLines.ItemId = txnsLines.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
+    item.ItemId = item.ItemId.fillna('').apply(convert_to_int_or_keep).astype('str')
+    txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    txnsLines = txnsLines.merge(txns[['TransactionId', 'TransactionNo']], on='TransactionId', how='left')
+    txnsLines['Rate'] = txnsLines['Rate'].fillna(0.0)
+    txnsLines['Total'] = txnsLines['Total'].fillna(0.0)
+    txnsLines['Quantity'] = txnsLines['Quantity'] * -1
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]  
+    txns['TransactionStatus'] = txns['TransactionStatus'].astype('str').replace({'F': 'Closed', 'T': 'Open'})
+    txns.loc[txns.TransactionStatus=='Open', 'CloseDate'] = pd.NaT
+    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    txnsLines['TransactionId'] = txnsLines['TransactionId'].apply(convert_to_int_or_keep).astype('str')
+    # txnsLines = txnsLines.loc[~txnsLines['TransactionId'].isin(txns[txns['TransactionNo'].str.upper().str.endswith('TB', na=False)]['TransactionId'])]
+    txns.drop(columns = ['Total'], inplace = True)
+    txns = txns.merge(
+        txnsLines.groupby('TransactionId').agg(Total = ('Total', 'sum')).reset_index(),
+        on='TransactionId',
+    )
+    txnsLines.loc[txnsLines['TransactionId'].isin(txns[txns['TransactionType']=='Journal']['TransactionId'].dropna().unique()), ['ItemNo', 'ItemName']] = 'GENERAL JOURNAL'
+    txnsLines.loc[txnsLines['TransactionId'].isin(txns[txns['TransactionType']=='CustPymt']['TransactionId'].dropna().unique()), ['ItemId', 'ItemNo', 'ItemName']] = 'PAYMENT'
+    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns['Company'] = companyName
+    txns = txns[['Company'] + txns.columns[:-1].tolist()]
+    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns.TransactionId = txns.TransactionId.apply(convert_to_int_or_keep).astype('str')
+    txnsLines.TransactionId = txnsLines.TransactionId.apply(convert_to_int_or_keep).astype('str')
+    mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
+    mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['Total_ord'], mismatched_txns['Total_lin'], atol=0.1)]
+    print(f"{mismatched_txns.shape[0]} txns total do not match txnsline total")
+    txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'].dropna().unique())]
+    txnsLines['Company'] = companyName
+    txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
+    txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'].dropna().unique())]
+    txnsLines=txnsLines.merge(accounts[['fullname','AccountType']].drop_duplicates(subset=['fullname']).rename(columns={'fullname':'Account'}), on='Account', how = 'left')
+    return txns, txnsLines
+
+
 def process_ns_orders(
     companyName,
     transaction,
