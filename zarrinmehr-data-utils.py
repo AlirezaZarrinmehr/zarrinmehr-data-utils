@@ -2525,12 +2525,12 @@ def load_data_via_query(
                 for record in table:
                     txn_type = list(record.keys())[0]
                     txn_data = record[txn_type]
-                    flat = normalize_nested_json(txn_data)
+                    flat = pd.json_normalize(txn_data)
                     flat['transaction_type'] = txn_type
                     rows.append(flat)
                 df = pd.concat(rows, ignore_index=True)
             else:
-                df = normalize_nested_json(table)
+                df = pd.json_normalize(table)
             if df.empty:
                 df = pd.DataFrame(columns=["Id", "MetaData.LastUpdatedTime"])
             return df
