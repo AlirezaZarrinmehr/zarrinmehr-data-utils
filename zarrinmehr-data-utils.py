@@ -239,6 +239,840 @@ valid_ca_states = {
 }
 
 
+def flatten_line_items(
+    df,
+    col,
+    parent_id_col,
+    parent_id_name
+):
+    def safe_parse(value, row_index):
+        try:
+            if isinstance(value, list):
+                return value
+            if value is None:
+                return []
+            if isinstance(value, float) and pd.isna(value):
+                return []
+            if pd.isna(value) and not isinstance(value, (list, dict)):
+                return []
+            if isinstance(value, dict):
+                return [value]
+            if isinstance(value, str):
+                value=value.strip()
+                if value=="":
+                    return []
+                try:
+                    parsed=json.loads(value)
+                    if isinstance(parsed, list):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return [parsed]
+                    return []
+                except Exception:
+                    pass
+                try:
+                    parsed=ast.literal_eval(value)
+                    if isinstance(parsed, list):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return [parsed]
+                    return []
+                except Exception:
+                    pass
+            return []
+        except Exception as exc:
+            log_message(
+                f"[WARNING] Could not parse {col}. "
+                f"Row index: {row_index}. "
+                f"Error: {exc}. "
+                f"Value preview: {str(value)[:500]}"
+            )
+            return []
+    if col not in df.columns:
+        log_message(f'[INFO] Column "{col}" not found. Skipping flatten.')
+        return pd.DataFrame()
+    if parent_id_col not in df.columns:
+        log_message(f'[WARNING] Parent ID column "{parent_id_col}" not found.')
+        return pd.DataFrame()
+    df=df.copy()
+    df[col]=[
+        safe_parse(value, row_index)
+        for row_index, value in df[col].items()
+    ]
+    df=df[[parent_id_col, col]].explode(col, ignore_index=True)
+    df=df[df[col].notna()].reset_index(drop=True)
+    if df.empty:
+        return pd.DataFrame()
+    parent_ids=df[parent_id_col].reset_index(drop=True)
+    line_df=pd.json_normalize(df[col]).reset_index(drop=True)
+    if line_df.empty:
+        return pd.DataFrame()
+    line_df.insert(0, parent_id_name, parent_ids)
+    return line_df
+
+
+def merge_flattened_pivot(
+    df,
+    nested_col,
+    name_col,
+    value_col,
+    parent_id_col="Id",
+    parent_id_name="Id",
+    suffix=""
+):
+    df=df.copy()
+    if parent_id_col not in df.columns:
+        log_message(f'[WARNING] Parent ID column "{parent_id_col}" not found. Skipping.')
+        return df
+    if nested_col not in df.columns:
+        log_message(f'[INFO] Column "{nested_col}" not found. Skipping.')
+        return df
+    original_id_dtype=df[parent_id_col].dtype
+    df[parent_id_col]=pd.to_numeric(
+        df[parent_id_col],
+        errors="coerce"
+    )
+    flattened=flatten_line_items(
+        df=df,
+        col=nested_col,
+        parent_id_col=parent_id_col,
+        parent_id_name=parent_id_name
+    )
+    if flattened.empty:
+        log_message(f'[INFO] No data found in "{nested_col}". Skipping.')
+        return df
+    missing_cols=[
+        c for c in [parent_id_name, name_col, value_col]
+        if c not in flattened.columns
+    ]
+    if missing_cols:
+        log_message(
+            f'[WARNING] Missing columns {missing_cols} in "{nested_col}". Skipping.'
+        )
+        return df
+    flattened[parent_id_name]=pd.to_numeric(
+        flattened[parent_id_name],
+        errors="coerce"
+    )
+    flattened=flattened.dropna(subset=[parent_id_name, name_col])
+    if flattened.empty:
+        log_message(f'[INFO] No valid rows found in "{nested_col}" after cleaning.')
+        return df
+    flattened["pivot_col"]=(
+        flattened[name_col]
+        .astype(str)
+        .str.strip()
+        .str.replace(" ", "", regex=False)
+        + suffix
+    )
+    flattened=(
+        flattened
+        .pivot_table(
+            index=parent_id_name,
+            columns="pivot_col",
+            values=value_col,
+            aggfunc=lambda x: ", ".join(x.dropna().astype(str).unique())
+        )
+        .reset_index()
+    )
+    flattened.columns.name=None
+    df=df.merge(
+        flattened,
+        left_on=parent_id_col,
+        right_on=parent_id_name,
+        how="left"
+    )
+    if parent_id_name != parent_id_col and parent_id_name in df.columns:
+        df=df.drop(columns=[parent_id_name])
+    try:
+        df[parent_id_col]=df[parent_id_col].astype(original_id_dtype)
+    except Exception:
+        pass
+    return df
+
+
+def add_flattened_qbo_fields(df):
+    flattened_fields=[
+        {
+            "nested_col": "LinkedTxn",
+            "name_col": "TxnType",
+            "value_col": "TxnId",
+            "parent_id_col": "Id",
+            "parent_id_name": "Id",
+            "suffix": "Id",
+        },
+        {
+            "nested_col": "CustomField",
+            "name_col": "Name",
+            "value_col": "StringValue",
+            "parent_id_col": "Id",
+            "parent_id_name": "Id",
+            "suffix": "",
+        },
+    ]
+    for field in flattened_fields:
+        df=merge_flattened_pivot(
+            df=df,
+            nested_col=field["nested_col"],
+            name_col=field["name_col"],
+            value_col=field["value_col"],
+            parent_id_col=field["parent_id_col"],
+            parent_id_name=field["parent_id_name"],
+            suffix=field["suffix"]
+        )
+    return df
+
+
+def process_qbo_table(config):
+    df = read_file_from_s3(
+        s3_client=s3_client,
+        bucket_name=s3_bucket_name,
+        object_key=config["file"]
+    )
+    table_type = config.get("table_type", "Transaction")
+    if config.get("flatten_transaction_fields", False):
+        df = add_flattened_qbo_fields(df)
+    df.rename(columns=config.get("transaction_rename", {}), inplace=True)
+    df[f"{table_type}Type"] = config["transaction_type"]
+    status = config["status"]
+    if callable(status):
+        df[f"{table_type}Status"] = status(df)
+    else:
+        df[f"{table_type}Status"] = status
+    line_configs = config.get("lines")
+    if isinstance(line_configs, dict):
+        line_configs = [line_configs]
+    all_lines = []
+    if line_configs:
+        for line_config in line_configs:
+            temp_lines = flatten_line_items(
+                df=df,
+                col=line_config["nested_col"],
+                parent_id_col=f"{table_type}Id",
+                parent_id_name=f"{table_type}Id"
+            )
+            if temp_lines.empty:
+                continue
+            if config.get("flatten_line_fields", False):
+                temp_lines = add_flattened_qbo_fields(temp_lines)
+            temp_lines.rename(columns=line_config.get("rename", {}), inplace=True)
+            if "multiply_total" in line_config and "Total" in temp_lines.columns:
+                temp_lines["Total"] = temp_lines["Total"] * line_config["multiply_total"]
+            for col, value in line_config.get("assign", {}).items():
+                if callable(value):
+                    temp_lines[col] = value(temp_lines)
+                else:
+                    temp_lines[col] = value
+            all_lines.append(temp_lines)
+    if all_lines:
+        lines = pd.concat(all_lines, ignore_index=True)
+    else:
+        lines = pd.DataFrame()
+    return df, lines
+
+
+def process_qbo_transactions(
+    account,
+    companyName,
+    item,
+    customer,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name
+):
+
+    generalJournal, generalJournalLines = process_qbo_table({
+        "name": "generalJournal",
+        "file": "JournalEntry.csv",
+        "transaction_type": "GENERAL JOURNAL",
+        "status": "PAID",
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "JournalEntryLineDetail.AccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    bills, billExpenseLines = process_qbo_table({
+        "name": "bills",
+        "file": "Bill.csv",
+        "transaction_type": "BILL",
+        "status": lambda df: np.where(
+            df["Balance"].fillna(0).eq(0),
+            "PAID",
+            "OPEN"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "AccountBasedExpenseLineDetail.AccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    checks, checkExpenseLine = process_qbo_table({
+        "name": "checks",
+        "file": "Purchase.csv",
+        "transaction_type": "CHECK",
+        "status": "PAID",
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "AccountBasedExpenseLineDetail.AccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+            "assign": {
+                "Quantity": 1,
+                "Rate": lambda lines: lines["Total"],
+            },
+        },
+    })
+
+    receivePayment, receivePaymentLines = process_qbo_table({
+        "name": "receivePayment",
+        "file": "Payment.csv",
+        "transaction_type": "RECEIVE PAYMENT",
+        "status": lambda df: np.where(
+            df["UnappliedAmt"].fillna(0).eq(0),
+            "PAID",
+            "OPEN"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "assign": {
+                "Quantity": 1,
+                "Rate": lambda lines: lines["Total"],
+            },
+        },
+    })
+
+    deposit, depositLines = process_qbo_table({
+        "name": "deposit",
+        "file": "Deposit.csv",
+        "transaction_type": "DEPOSIT",
+        "status": "PAID",
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "DepositLineDetail.AccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    invoice, invoiceLines = process_qbo_table({
+        "name": "invoice",
+        "file": "Invoice.csv",
+        "transaction_type": "INVOICE",
+        "status": lambda df: np.where(
+            df["Balance"].fillna(0).eq(0),
+            "PAID",
+            "OPEN"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "CustomerRef.value": "CustId",
+            "CustomerRef.name": "CustNo",
+            "P.O.Number": "CustPo",
+            "SalesRepQBO": "SalesRepID",
+            "BillAddr.Line1": "BillName",
+            "BillAddr.City": "BillCity",
+            "BillAddr.CountrySubDivisionCode": "BillState",
+            "BillAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Description": "ItemDescription",
+                "SalesItemLineDetail.ItemAccountRef.value": "AccountId",
+                "SalesItemLineDetail.ItemRef.name": "ItemId",
+                "Invoicelinedesc": "ItemDescription",
+                "SalesItemLineDetail.Qty": "Quantity",
+                "SalesItemLineDetail.UnitPrice": "Rate",
+                "Amount": "Total",
+            },
+        },
+    })
+
+    vendorCredit, vendorCreditExpenseLines = process_qbo_table({
+        "name": "vendorCredit",
+        "file": "VendorCredit.csv",
+        "transaction_type": "VENDOR CREDIT",
+        "status": lambda df: np.where(
+            df["Balance"].fillna(0).eq(0),
+            "PAID",
+            "OPEN"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "AccountBasedExpenseLineDetail.AccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    billPaymentCheck, billPaymentCheckLines = process_qbo_table({
+        "name": "billPaymentCheck",
+        "file": "BillPayment.csv",
+        "transaction_type": "BILL PAYMENT CHECK",
+        "status": "PAID",
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    creditMemo, creditMemoLines = process_qbo_table({
+        "name": "creditMemo",
+        "file": "CreditMemo.csv",
+        "transaction_type": "CREDIT MEMO",
+        "status": lambda df: np.where(
+            df["Balance"].fillna(0).eq(0),
+            "PAID",
+            "OPEN"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "TransactionId",
+            "DocNumber": "TransactionNo",
+            "TxnDate": "TransactionDate",
+            "PurchaseOrderId": "OrderNo",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": {
+            "nested_col": "Line",
+            "rename": {
+                "Expenselineaccountreffullname": "Accountreffullname",
+                "SalesItemLineDetail.ItemAccountRef.value": "AccountId",
+                "Id": "ItemId",
+                "Description": "ItemDescription",
+                "Amount": "Total",
+            },
+            "multiply_total": -1,
+        },
+    })
+
+    txns=pd.concat([
+        generalJournal,
+        bills,
+        checks,
+        receivePayment,
+        deposit,
+        invoice,
+        creditMemo,
+        vendorCredit,
+        billPaymentCheck,
+    ], ignore_index=True)
+    txnsLines=pd.concat([
+        generalJournalLines,
+        billExpenseLines, 
+        checkExpenseLine,
+        receivePaymentLines,
+        depositLines,
+        invoiceLines,
+        creditMemoLines,
+        vendorCreditExpenseLines, 
+        billPaymentCheckLines,
+    ], ignore_index=True)
+    txns=txns[
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce')>=start_date)&\
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce')<=end_date)
+    ].copy()
+    txnsLines['AccountId']=txnsLines['AccountId'].fillna('').astype(str)
+    account['Id']=account['Id'].fillna('').astype(str)
+    txnsLines=txnsLines.merge(account[['Id', 'Name', 'AccountType']].drop_duplicates(subset=['Id']).rename(columns={'Id':'AccountId', 'Name':'Account'}), on='AccountId', how='left')
+    txnsLines=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txnsLines, df_name='txnsLines', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines.ItemId=txnsLines.ItemId.fillna('').astype('str')
+    item.ItemId=item.ItemId.fillna('').astype('str')
+    txnsLines=txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    txnsLines=txnsLines[['TransactionId', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txnsLines['Company']=companyName
+    txnsLines=txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
+    txns=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txns, df_name='txns', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txns, df_name='txns', id_column=['TransactionId'], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+
+    txns['subTotal']=txns['Total']
+
+    txns["CustNo"]=txns["CustNo"].fillna('').astype('str')
+    customer["CustNo"]=customer["CustNo"].fillna('').astype('str')
+    txns=txns.merge(customer[['CustId', 'CustName']], on="CustId", how='left').copy()
+
+    txns=txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns['Company']=companyName
+    txns=txns[['Company'] + txns.columns[:-1].tolist()]
+    txnsLines=txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
+
+    txns['TransactionId'] = txns['TransactionId'].fillna('').astype('str')
+    txnsLines['TransactionId'] = txnsLines['TransactionId'].fillna('').astype('str')
+
+    return txns, txnsLines
+
+
+def process_qbo_orders(
+    companyName,
+    item,
+    item_df,
+    customer,
+    start_date,
+    end_date,
+    s3_client,
+    s3_bucket_name,
+    orderCloseDates,
+    DBIA,
+    itemsCategoriesV3,
+):
+    orders, ordersLines = process_qbo_table({
+        "table_type": "Order",
+        "name": "orders",
+        "file": "PurchaseOrder.csv",
+        "transaction_type": "PURCHASE ORDER",
+        "status": lambda df: np.where(
+            df["POStatus"].fillna(0).eq('Open'),
+            "OPEN",
+            "Closed"
+        ),
+        "flatten_transaction_fields": True,
+        "flatten_line_fields": True,
+        "transaction_rename": {
+            "Id": "OrderId",
+            "DocNumber": "OrderNo",
+            "TxnDate": "OrderDate",
+            "P.O.Number": "CustSO",
+            "VendorRef.value": "CustId",
+            "VendorRef.name": "CustNo",
+            "VendorAddr.Line1": "BillName",
+            "VendorAddr.City": "BillCity",
+            "VendorAddr.CountrySubDivisionCode": "BillState",
+            "VendorAddr.PostalCode": "BillZip",
+            "ShipAddr.Line1": "ShipName",
+            "ShipAddr.City": "ShipCity",
+            "ShipAddr.CountrySubDivisionCode": "ShipState",
+            "ShipAddr.PostalCode": "ShipZip",
+            "TotalAmt": "Total",
+        },
+        "lines": [
+            {
+                "nested_col": "Line",
+                "rename": {
+                    "Expenselineaccountreffullname": "Accountreffullname",
+                    "SalesItemLineDetail.ItemAccountRef.value": "AccountId",
+                    "Id": "ItemId",
+                    "Description": "ItemDescription",
+                    "ItemBasedExpenseLineDetail.Qty": "Quantity",
+                    "ItemBasedExpenseLineDetail.UnitPrice": "Rate",
+                    "Amount": "Total",
+                },
+                "multiply_total": 1,
+            },
+            { "nested_col": "TxnTaxDetail.TaxLine",
+              "rename": { 
+                  "Expenselineaccountreffullname": "Accountreffullname", 
+                  "SalesItemLineDetail.ItemAccountRef.value": "AccountId", 
+                  "TaxLineDetail.TaxRateRef.value": "ItemId", 
+                  "DetailType": "ItemDescription", 
+                  "TaxLineDetail.TaxPercent": "Quantity", 
+                  "TaxLineDetail.NetAmountTaxable": "Rate", 
+                  "Amount": "Total",
+              }, 
+              "multiply_total": 1, 
+            }
+        ],
+    })
+    ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
+    ordersLines = ordersLines[~ordersLines['OrderId'].isna()].copy()
+    ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
+    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
+    ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
+    ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+    ordersLines = ordersLines[['OrderId', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+    ordersLines = ordersLines.copy()
+    ordersLines[['Quantity', 'Rate', 'Total']] = ordersLines[['Quantity', 'Rate', 'Total']].fillna(0)
+    ordersLines.ItemId = ordersLines.ItemId.fillna('').astype('str')
+    item.ItemId = item.ItemId.fillna('').astype('str')
+    ordersLines = ordersLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    ordersLines.loc[ordersLines['ItemId']=='0', 'ItemId']='ITEM'
+    ordersLines.loc[ordersLines['ItemId']=='0', 'ItemNo']='ITEM'
+    ordersLines.loc[ordersLines['ItemId']=='0', 'ItemName']='ITEM'
+    ordersLines = ordersLines[['OrderId', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
+    ordersLines['Company'] = companyName
+    ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
+    ordersLines = ordersLines.copy()
+    orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
+    ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
+    orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
+    orderCloseDates['OrderId'] = orderCloseDates['OrderId'].fillna('').astype('str')
+    orders = orders.merge(orderCloseDates, on = 'OrderId', how = 'left')
+    if not orders.empty:
+        orders.loc[orders['OrderStatus']=='Open', 'CloseDate'] = pd.NaT
+    else:
+        orders['CloseDate'] = pd.NaT
+    orders['CustId'] = orders['CustId'].fillna('').astype('str')
+    customer['CustId'] = customer['CustId'].fillna('').astype('str')
+    orders = orders.merge(customer[['CustId', 'CustName']], on = 'CustId', how = 'left')
+    for col in ['SalesRepID', 'ShipCity', 'ShipState', 'ShipZip']:
+        if col not in orders.columns:
+            orders[col] = np.nan
+    orders = orders[['OrderId', 'OrderNo', 'OrderStatus', 'OrderDate', 'CloseDate', 'SalesRepID', 'CustSO', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = ['OrderId'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = orders[~orders['OrderId'].str.upper().duplicated()]
+    orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
+    ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
+    mismatched_orders = orders.merge(ordersLines, on='OrderId', how='inner', suffixes=('_ord', '_lin')).groupby('OrderId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
+    mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
+    log_message(f'[INFO] {mismatched_orders.shape[0]} orders total do not match orderline total')
+    orders = orders[~orders['OrderId'].isin(mismatched_orders['OrderId'])]
+    #-----------------------------------------------------------------------------------------------------------
+    orders['CustId'] = orders['CustNo'].copy()
+    #-----------------------------------------------------------------------------------------------------------
+    #-------------------------------------
+    orders = orders.drop_duplicates(subset=['OrderId'])
+    orders = orders.loc[orders['OrderId'].notna() & (orders['OrderId'].fillna('').astype('str').str.strip() != '')]
+    orders['Company'] = companyName
+    orders = orders[['Company'] + orders.columns[:-1].tolist()]
+    #-------------------------------------
+    ordersLines = ordersLines[ordersLines['OrderId'].isin(orders['OrderId'])]
+    #-------------------------------------
+    ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
+        item_df, 
+        companyName, 
+        s3_client, 
+        s3_bucket_name, 
+        DBIA, 
+        itemsCategoriesV3,
+        ordersLines
+    )
+    #-----------------------------------------------------------------------------------------------------------
+    orderTypes = ordersLines.merge(
+                        itemsCategoriesV3[['index', 'ItemLevel2']] \
+                        .rename(columns = {'index':'ItemId'}) \
+                        .drop_duplicates(subset = 'ItemId'), on = 'ItemId'
+                    ) \
+                    .rename(columns={'ItemLevel2': 'OrderType'}) \
+                    .sort_values(['OrderId', 'Total'], ascending=[True, False]) \
+                    .groupby('OrderId').agg({'OrderType': 'first'}).reset_index()
+
+    orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
+    orderTypes['OrderId'] = orderTypes['OrderId'].fillna('').astype('str')
+    orders = orders.merge(orderTypes, on = 'OrderId', how = 'left')
+    for col in ['ShipDate', 'InstallDate', 'InvoiceDate']:
+        if col not in ordersLines.columns:
+            ordersLines[col] = pd.NaT
+    #-----------------------------------------------------------------------------------------------------------
+    ordersLines.loc[
+        (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
+        (pd.to_datetime(ordersLines['ShipDate']) > end_date),
+        'ShipDate'
+    ] = np.nan
+    ordersLines.loc[
+        (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
+        (pd.to_datetime(ordersLines['InstallDate']) > end_date),
+        'InstallDate'
+    ] = np.nan
+    #-----------------------------------------------------------------------------------------------------------
+    orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
+    ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
+    ordersLines = ordersLines.merge(orders[['OrderId', 'OrderStatus']], on = 'OrderId', how = 'left').rename(columns={'OrderStatus':'ItemStatus'})
+    ordersLines.loc[(ordersLines['ShipDate'].notna()), 'ItemStatus'] = 'SHIPPED'
+    ordersLines.loc[(ordersLines['InstallDate'].notna()), 'ItemStatus'] = 'INSTALLED'
+    ordersLines.loc[(ordersLines['InvoiceDate'].notna()), 'ItemStatus'] = 'INVOICED'
+    #-----------------------------------------------------------------------------------------------------------
+    ordersLines.rename(columns = {'CommonName':'ItemType'}, inplace = True)
+    #----------------------------------------------------------------------------
+    return orders, ordersLines, item_df
+
+
 def normalize_nested_json(data):
     df = pd.json_normalize(data)
     list_cols = [
