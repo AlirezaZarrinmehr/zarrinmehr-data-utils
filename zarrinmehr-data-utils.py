@@ -423,7 +423,11 @@ def add_flattened_qbo_fields(df):
     return df
 
 
-def process_qbo_table(config):
+def process_qbo_table(
+    s3_client,
+    s3_bucket_name,
+    config,
+):
     df = read_file_from_s3(
         s3_client=s3_client,
         bucket_name=s3_bucket_name,
@@ -482,7 +486,10 @@ def process_qbo_transactions(
     s3_bucket_name
 ):
 
-    generalJournal, generalJournalLines = process_qbo_table({
+    generalJournal, generalJournalLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "generalJournal",
         "file": "JournalEntry.csv",
         "transaction_type": "GENERAL JOURNAL",
@@ -519,7 +526,10 @@ def process_qbo_transactions(
         },
     })
 
-    bills, billExpenseLines = process_qbo_table({
+    bills, billExpenseLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "bills",
         "file": "Bill.csv",
         "transaction_type": "BILL",
@@ -560,7 +570,10 @@ def process_qbo_transactions(
         },
     })
 
-    checks, checkExpenseLine = process_qbo_table({
+    checks, checkExpenseLine = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "checks",
         "file": "Purchase.csv",
         "transaction_type": "CHECK",
@@ -601,7 +614,10 @@ def process_qbo_transactions(
         },
     })
 
-    receivePayment, receivePaymentLines = process_qbo_table({
+    receivePayment, receivePaymentLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "receivePayment",
         "file": "Payment.csv",
         "transaction_type": "RECEIVE PAYMENT",
@@ -644,7 +660,10 @@ def process_qbo_transactions(
         },
     })
 
-    deposit, depositLines = process_qbo_table({
+    deposit, depositLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "deposit",
         "file": "Deposit.csv",
         "transaction_type": "DEPOSIT",
@@ -681,7 +700,10 @@ def process_qbo_transactions(
         },
     })
 
-    invoice, invoiceLines = process_qbo_table({
+    invoice, invoiceLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "invoice",
         "file": "Invoice.csv",
         "transaction_type": "INVOICE",
@@ -725,7 +747,10 @@ def process_qbo_transactions(
         },
     })
 
-    vendorCredit, vendorCreditExpenseLines = process_qbo_table({
+    vendorCredit, vendorCreditExpenseLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "vendorCredit",
         "file": "VendorCredit.csv",
         "transaction_type": "VENDOR CREDIT",
@@ -766,7 +791,10 @@ def process_qbo_transactions(
         },
     })
 
-    billPaymentCheck, billPaymentCheckLines = process_qbo_table({
+    billPaymentCheck, billPaymentCheckLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "billPaymentCheck",
         "file": "BillPayment.csv",
         "transaction_type": "BILL PAYMENT CHECK",
@@ -802,7 +830,10 @@ def process_qbo_transactions(
         },
     })
 
-    creditMemo, creditMemoLines = process_qbo_table({
+    creditMemo, creditMemoLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "name": "creditMemo",
         "file": "CreditMemo.csv",
         "transaction_type": "CREDIT MEMO",
@@ -912,7 +943,10 @@ def process_qbo_orders(
     DBIA,
     itemsCategoriesV3,
 ):
-    orders, ordersLines = process_qbo_table({
+    orders, ordersLines = process_qbo_table(
+    s3_client=s3_client,
+    s3_bucket_name=s3_bucket_name,
+    config={
         "table_type": "Order",
         "name": "orders",
         "file": "PurchaseOrder.csv",
