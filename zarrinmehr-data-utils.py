@@ -3061,28 +3061,6 @@ def process_exchange_rates(
     return dfAvg
 
 
-def save_qb_tokens(
-    file_path,
-    access_token=None, 
-    refresh_token=None, 
-    realm=None, 
-    state=None
-):
-    with open(file_path, "r") as file:
-        secrets = json.load(file)
-    updates = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "realm": realm,
-        "state": state
-    }
-    updates = {k: v for k, v in updates.items() if v is not None}
-    secrets.update(updates)
-    with open(file_path, "w") as file:
-        json.dump(secrets, file, indent=2)
-    log_message(f'[SUCCESS] QuickBooks credentials saved: {list(updates.keys())}')
-
-
 def extract_column_values(data, column):
     values = []
     if hasattr(data, "columns") and hasattr(data, "to_dict"):
@@ -3182,6 +3160,73 @@ def build_process_params(secrets, folder_path):
     return params
 
 
+def load_and_refresh_qbo_token(
+    qbo_token_path,
+    client_id,
+    client_secret,
+    redirect_uri,
+    environment
+):
+    if not qbo_token_path:
+        raise ValueError("qbo_token_path is required")
+
+    if os.path.exists(qbo_token_path):
+        with open(qbo_token_path, "r") as file:
+            secrets = json.load(file)
+    else:
+        secrets = {}
+
+    access_token = secrets.get("access_token")
+    refresh_token = secrets.get("refresh_token")
+    realm = secrets.get("realm")
+    state = secrets.get("state")
+    auth_client = AuthClient(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        environment=environment,
+    )
+    if not access_token or not refresh_token or not realm or not state:
+        scopes = [
+            Scopes.ACCOUNTING,
+            Scopes.OPENID,
+        ]
+        auth_url = auth_client.get_authorization_url(scopes)
+        print("🔗 Go to this URL to authorize:")
+        print(auth_url)
+        redirect_response = input("\nPaste the FULL redirect URL here:\n")
+        parsed = urlparse(redirect_response)
+        params = parse_qs(parsed.query)
+        auth_code = params.get("code", [None])[0]
+        realm = params.get("realmId", [None])[0]
+        state = params.get("state", [None])[0]
+        if not auth_code or not realm:
+            raise ValueError("Missing code or realmId in redirect URL")
+        auth_client.get_bearer_token(auth_code, realm_id=realm)
+        access_token = auth_client.access_token
+        refresh_token = auth_client.refresh_token
+        log_message("[SUCCESS] QuickBooks first-time authorization complete")
+    else:
+        auth_client.refresh(refresh_token=refresh_token)
+        access_token = auth_client.access_token
+        refresh_token = auth_client.refresh_token
+        log_message("[SUCCESS] QuickBooks token refreshed")
+
+    updates = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "realm": realm,
+        "state": state
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    secrets.update(updates)
+    with open(qbo_token_path, "w") as file:
+        json.dump(secrets, file, indent=2)
+    log_message("[SUCCESS] QuickBooks credentials saved")
+
+    return access_token, realm
+
+
 def load_data_via_query(
         sql_query,
         source_type,
@@ -3201,7 +3246,7 @@ def load_data_via_query(
         client_secret=None,
         redirect_uri=None,
         environment=None,
-        refresh_token=None
+        qbo_token_path=None
 ):
     log_message(f'[INFO] Running {sql_query}')
     
@@ -3362,19 +3407,12 @@ def load_data_via_query(
         return df
 
     elif source_type == "qboapi":
-        auth_client = AuthClient(
+        access_token, realm = load_and_refresh_qbo_token(
+            qbo_token_path=qbo_token_path,
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,
             environment=environment,
-        )
-        auth_client.refresh(refresh_token=refresh_token)
-        access_token = auth_client.access_token
-        refresh_token = auth_client.refresh_token
-        save_qb_tokens(
-            file_path=file_path,
-            access_token=access_token, 
-            refresh_token=refresh_token
         )
         headers = {
             'Authorization': f'Bearer {access_token}',
@@ -3408,104 +3446,6 @@ def load_data_via_query(
         raise ValueError("source_type must be 'mssql', 'bigquery', 'suiteql', 'qboapi', or 'qodbc'")
 
 
-def upload_to_s3(
-    data,
-    bucket_name,
-    object_key,
-    s3_client,
-    CreateS3Bucket=False,
-    aws_region=None,
-    chunk_size=5 * 1024 * 1024,
-    file_path=None,
-    encoding='utf-8'
-):
-
-    if CreateS3Bucket:
-        try:
-            buckets = s3_client.list_buckets()["Buckets"]
-            buckets = [bucket['Name'] for bucket in buckets]
-            if bucket_name not in buckets:
-                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
-                log_message(f'[SUCCESS] Bucket "{bucket_name}" created!')
-            else:
-                log_message(f'[INFO] Bucket "{bucket_name}" already exists.')
-        except Exception as e:
-            log_message(f'[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.')
-    if not file_path:
-        for idx, dtype in enumerate(data.dtypes):
-            if dtype == 'object' or dtype.name == 'string':
-                data.iloc[:, idx] = (
-                    data.iloc[:, idx]
-                    .fillna('')
-                    .apply(lambda x: x.hex() if isinstance(x, bytes) else str(x))
-                    .astype('str')
-                    .str.replace(r'\r\n|\r|\n|\\n|\\', ' ', regex=True)
-                )
-        csv_buffer = io.StringIO()
-        data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding=encoding)
-        csv_buffer.seek(0)
-        data_size = len(csv_buffer.getvalue())
-        with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
-            def callback(bytes_transferred):
-                progress.update(bytes_transferred)
-            bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
-            s3_client.upload_fileobj(
-                Fileobj=bytes_buffer,
-                Bucket=bucket_name,
-                Key=object_key,
-                Callback=callback
-        )
-    else:
-        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=object_key)
-        parts = []
-        part_number = 1
-        total_bytes_uploaded = 0
-        file_size = os.path.getsize(file_path)
-        progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
-        def upload_part(buffer, part_number):
-            nonlocal total_bytes_uploaded
-            buffer.seek(0)
-            response = s3_client.upload_part(
-                Bucket=bucket_name,
-                Key=object_key,
-                PartNumber=part_number,
-                UploadId=multipart_upload['UploadId'],
-                Body=buffer
-            )
-            uploaded_size = buffer.tell()
-            total_bytes_uploaded += uploaded_size
-            progress.update(uploaded_size)
-            return {
-                'PartNumber': part_number,
-                'ETag': response['ETag']
-            }
-        with open(file_path, 'r', encoding=encoding) as csv_file:
-            csv_reader = csv.reader(csv_file)
-            headers = next(csv_reader)
-            csv_buffer = io.StringIO()
-            writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
-            writer.writerow(headers)
-            for row in csv_reader:
-                writer.writerow(row)
-                if csv_buffer.tell() >= chunk_size:
-                    part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
-                    parts.append(part)
-                    part_number += 1
-                    csv_buffer = io.StringIO()
-                    writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
-                    # writer.writerow(headers)
-            if csv_buffer.tell() > 0:
-                part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
-                parts.append(part)
-        progress.close()
-        s3_client.complete_multipart_upload(
-            Bucket=bucket_name,
-            Key=object_key,
-            UploadId=multipart_upload['UploadId'],
-            MultipartUpload={'Parts': parts}
-        )
-
-
 def process_data_to_s3(
     tables,
     s3_client,
@@ -3530,7 +3470,7 @@ def process_data_to_s3(
     client_secret=None,
     redirect_uri=None,
     environment=None,
-    refresh_token=None
+    qbo_token_path=None
 ):
     try:
         if source_type == "qodbc":
@@ -3565,8 +3505,7 @@ def process_data_to_s3(
                     "client_secret":client_secret,
                     "redirect_uri":redirect_uri,
                     "environment":environment,
-                    "refresh_token":refresh_token,
-                    "file_path": file_path,
+                    "qbo_token_path":qbo_token_path,
                     "realm":realm
                 }
             else:
@@ -3867,6 +3806,104 @@ def process_data_to_s3(
             active_conn.close()
         except:
             pass 
+
+
+def upload_to_s3(
+    data,
+    bucket_name,
+    object_key,
+    s3_client,
+    CreateS3Bucket=False,
+    aws_region=None,
+    chunk_size=5 * 1024 * 1024,
+    file_path=None,
+    encoding='utf-8'
+):
+
+    if CreateS3Bucket:
+        try:
+            buckets = s3_client.list_buckets()["Buckets"]
+            buckets = [bucket['Name'] for bucket in buckets]
+            if bucket_name not in buckets:
+                s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': aws_region})
+                log_message(f'[SUCCESS] Bucket "{bucket_name}" created!')
+            else:
+                log_message(f'[INFO] Bucket "{bucket_name}" already exists.')
+        except Exception as e:
+            log_message(f'[ERROR] Failed to create bucket "{bucket_name}". Error: {str(e)}.')
+    if not file_path:
+        for idx, dtype in enumerate(data.dtypes):
+            if dtype == 'object' or dtype.name == 'string':
+                data.iloc[:, idx] = (
+                    data.iloc[:, idx]
+                    .fillna('')
+                    .apply(lambda x: x.hex() if isinstance(x, bytes) else str(x))
+                    .astype('str')
+                    .str.replace(r'\r\n|\r|\n|\\n|\\', ' ', regex=True)
+                )
+        csv_buffer = io.StringIO()
+        data.to_csv(csv_buffer, index=False, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, escapechar='\\', encoding=encoding)
+        csv_buffer.seek(0)
+        data_size = len(csv_buffer.getvalue())
+        with tqdm(total=data_size, unit='B', unit_scale=True, desc=f'Uploading "{object_key}" to S3') as progress:
+            def callback(bytes_transferred):
+                progress.update(bytes_transferred)
+            bytes_buffer = io.BytesIO(csv_buffer.getvalue().encode())
+            s3_client.upload_fileobj(
+                Fileobj=bytes_buffer,
+                Bucket=bucket_name,
+                Key=object_key,
+                Callback=callback
+        )
+    else:
+        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=object_key)
+        parts = []
+        part_number = 1
+        total_bytes_uploaded = 0
+        file_size = os.path.getsize(file_path)
+        progress = tqdm(total=file_size, unit='MB', desc=f'Uploading "{object_key}" to S3')
+        def upload_part(buffer, part_number):
+            nonlocal total_bytes_uploaded
+            buffer.seek(0)
+            response = s3_client.upload_part(
+                Bucket=bucket_name,
+                Key=object_key,
+                PartNumber=part_number,
+                UploadId=multipart_upload['UploadId'],
+                Body=buffer
+            )
+            uploaded_size = buffer.tell()
+            total_bytes_uploaded += uploaded_size
+            progress.update(uploaded_size)
+            return {
+                'PartNumber': part_number,
+                'ETag': response['ETag']
+            }
+        with open(file_path, 'r', encoding=encoding) as csv_file:
+            csv_reader = csv.reader(csv_file)
+            headers = next(csv_reader)
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
+            writer.writerow(headers)
+            for row in csv_reader:
+                writer.writerow(row)
+                if csv_buffer.tell() >= chunk_size:
+                    part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
+                    parts.append(part)
+                    part_number += 1
+                    csv_buffer = io.StringIO()
+                    writer = csv.writer(csv_buffer, quoting=csv.QUOTE_ALL)
+                    # writer.writerow(headers)
+            if csv_buffer.tell() > 0:
+                part = upload_part(io.BytesIO(csv_buffer.getvalue().encode()), part_number)
+                parts.append(part)
+        progress.close()
+        s3_client.complete_multipart_upload(
+            Bucket=bucket_name,
+            Key=object_key,
+            UploadId=multipart_upload['UploadId'],
+            MultipartUpload={'Parts': parts}
+        )
 
 
 def generate_open_cases_df(
