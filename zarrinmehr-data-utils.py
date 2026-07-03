@@ -5876,22 +5876,24 @@ def upload_to_redshift(
     response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message(f'[INFO] 🚀 Upload process completed.')
 
-def get_status(row):
-    if pd.notna(row['InvoiceDate']):
-        return "INVOICED"
-    if pd.notna(row['InstallDate']):
-        return "INSTALLED"
-    if pd.notna(row['PlannedInstallDate']) and row['PlannedInstallDate'] < pd.Timestamp(datetime.now().date()):
-        return "LATE INSTALL"
-    if pd.notna(row['PlannedInstallDate']) and pd.notna(row['ReqInstallDate']) and row['ReqInstallDate'] < row['PlannedInstallDate']:
-        return "LATE PLANNED INSTALL"
-    if pd.notna(row['PlannedInstallDate']):
-        return "PLANNED INSTALL"
-    if pd.notna(row['ShipDate']):
-        return "SHIPPED"
-    if pd.notna(row['PlannedShipDate']) and row['PlannedShipDate'] < pd.Timestamp(datetime.now().date()):
-        return "LATE SHIP"
-    if pd.notna(row['PlannedShipDate']):
-        return "PLANNED SHIP"
-    else:
-        return "UNPLANNED SHIP"
+def get_status(
+        row, 
+        rules = [
+            ("INVOICED", lambda r: pd.notna(r["InvoiceDate"])),
+            ("INSTALLED", lambda r: pd.notna(r["InstallDate"])),
+            ("LATE INSTALL", lambda r: pd.notna(r["PlannedInstallDate"]) and r["PlannedInstallDate"] < pd.Timestamp(datetime.now().date())),
+            ("LATE PLANNED INSTALL", lambda r:
+                pd.notna(r["PlannedInstallDate"]) and
+                pd.notna(r["ReqInstallDate"]) and
+                r["ReqInstallDate"] < r["PlannedInstallDate"]
+            ),
+            ("PLANNED INSTALL", lambda r: pd.notna(r["PlannedInstallDate"])),
+            ("SHIPPED", lambda r: pd.notna(r["ShipDate"])),
+            ("LATE SHIP", lambda r: pd.notna(r["PlannedShipDate"]) and r["PlannedShipDate"] < pd.Timestamp(datetime.now().date())),
+            ("PLANNED SHIP", lambda r: pd.notna(r["PlannedShipDate"])),
+            ("UNPLANNED SHIP", lambda r: True)
+        ]
+):
+    for status, condition in rules:
+        if condition(row):
+            return status
