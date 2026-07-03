@@ -5876,6 +5876,7 @@ def upload_to_redshift(
     response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message(f'[INFO] 🚀 Upload process completed.')
 
+
 def get_status(
         row, 
         rules = [
@@ -5897,3 +5898,23 @@ def get_status(
     for status, condition in rules:
         if condition(row):
             return status
+
+
+def find_date_columns(df, sample_size=500, threshold=0.9):
+    date_cols = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        for col in df.columns:
+            if is_numeric_dtype(df[col]):
+                continue
+            s = df[col].dropna().astype(str).str.strip()
+            s = s[s != ""]
+            if s.empty:
+                continue
+            sample = s.sample(min(sample_size, len(s)), random_state=42)
+            if (
+                pd.to_datetime(sample, errors="coerce").notna().mean() >= threshold
+                and sample.str.contains(r"[-/]", regex=True).mean() >= 0.8
+            ):
+                date_cols.append(col)
+    return date_cols
