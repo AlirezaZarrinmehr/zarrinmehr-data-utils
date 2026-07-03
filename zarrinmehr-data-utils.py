@@ -5875,3 +5875,23 @@ def upload_to_redshift(
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
     response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message(f'[INFO] 🚀 Upload process completed.')
+
+def get_status(row):
+    if pd.notna(row['InvoiceDate']):
+        return "INVOICED"
+    if pd.notna(row['InstallDate']):
+        return "INSTALLED"
+    if pd.notna(row['PlannedInstallDate']) and row['PlannedInstallDate'] < pd.Timestamp(datetime.now().date()):
+        return "LATE INSTALL"
+    if pd.notna(row['PlannedInstallDate']) and pd.notna(row['ReqInstallDate']) and row['ReqInstallDate'] < row['PlannedInstallDate']:
+        return "LATE PLANNED INSTALL"
+    if pd.notna(row['PlannedInstallDate']):
+        return "PLANNED INSTALL"
+    if pd.notna(row['ShipDate']):
+        return "SHIPPED"
+    if pd.notna(row['PlannedShipDate']) and row['PlannedShipDate'] < pd.Timestamp(datetime.now().date()):
+        return "LATE SHIP"
+    if pd.notna(row['PlannedShipDate']):
+        return "PLANNED SHIP"
+    else:
+        return "UNPLANNED SHIP"
