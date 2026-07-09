@@ -1336,16 +1336,18 @@ def process_ns_transactions(
     txns['shippingaddress'] = txns['shippingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
     txns['billingaddress'] = txns['billingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
     EntityAddress['nkey'] = EntityAddress['nkey'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
-    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'billingaddress', right_on = 'nkey', how = 'left')
+    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'address', 'city', 'state', 'zip']], left_on = 'billingaddress', right_on = 'nkey', how = 'left')
     txns.rename(columns = {
         'addressee':'BillName',
+        'address':'BillAddress',
         'city':'BillCity',
         'state':'BillState',
         'zip':'BillZip',
     }, inplace = True)
-    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
+    txns = txns.merge(EntityAddress[['nkey', 'addressee', 'address', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
     txns.rename(columns = {
         'addressee':'ShipName',
+        'address':'ShipAddress',
         'city':'ShipCity',
         'state':'ShipState',
         'zip':'ShipZip',
@@ -1407,7 +1409,7 @@ def process_ns_transactions(
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]  
     txns['TransactionStatus'] = txns['TransactionStatus'].astype('str').replace({'F': 'Closed', 'T': 'Open'})
     txns.loc[txns.TransactionStatus=='Open', 'CloseDate'] = pd.NaT
-    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
     txnsLines['TransactionId'] = txnsLines['TransactionId'].apply(convert_to_int_or_keep).astype('str')
     # txnsLines = txnsLines.loc[~txnsLines['TransactionId'].isin(txns[txns['TransactionNo'].str.upper().str.endswith('TB', na=False)]['TransactionId'])]
@@ -1418,7 +1420,7 @@ def process_ns_transactions(
     )
     txnsLines.loc[txnsLines['TransactionId'].isin(txns[txns['TransactionType']=='Journal']['TransactionId'].dropna().unique()), ['ItemNo', 'ItemName']] = 'GENERAL JOURNAL'
     txnsLines.loc[txnsLines['TransactionId'].isin(txns[txns['TransactionType']=='CustPymt']['TransactionId'].dropna().unique()), ['ItemId', 'ItemNo', 'ItemName']] = 'PAYMENT'
-    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1478,7 +1480,7 @@ def process_ns_orders(
     orders['shippingaddress'] = orders['shippingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
     orders['billingaddress'] = orders['billingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
     EntityAddress['nkey'] = EntityAddress['nkey'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
-    orders = orders.merge(EntityAddress[['nkey', 'addressee', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
+    orders = orders.merge(EntityAddress[['nkey', 'addressee', 'address', 'city', 'state', 'zip']], left_on = 'shippingaddress', right_on = 'nkey', how = 'left')
     orders['entity'] = orders['entity'].fillna('').apply(convert_to_int_or_keep).astype('str')
     customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].fillna('').apply(convert_to_int_or_keep).astype('str')
     orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], left_on = 'entity', right_on = f'{txnsType3}Id', how = 'left')
@@ -1498,6 +1500,7 @@ def process_ns_orders(
         'shipdate':'PlannedShipDate',
         'actualshipdate':'ShipDate',
         'addressee':'ShipName',
+        'address':'ShipAddress',
         'city':'ShipCity',
         'state':'ShipState',
         'zip':'ShipZip',
@@ -1574,7 +1577,7 @@ def process_ns_orders(
         orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
         orderTypes[f'{txnsType2}Id'] = orderTypes[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
         orders = orders.merge(orderTypes, on = f'{txnsType2}Id', how = 'left')
-        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'Memo', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
+        orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'Memo', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
         orders['Company'] = companyName
         orders = orders[['Company'] + orders.columns[:-1].tolist()]
         orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
