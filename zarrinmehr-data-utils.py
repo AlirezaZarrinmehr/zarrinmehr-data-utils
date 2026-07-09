@@ -2724,6 +2724,7 @@ def process_s50_transactions(
             'EmployeeName':'SalesRepID',
             'CustVendId':'CustId',
             'ShipToName':'ShipName',
+            'ShipToAddress':'ShipAddress',
             'ShipToCity':'ShipCity',
             'ShipToState':'ShipState',
             'ShipToZIP':'ShipZip',
@@ -2771,7 +2772,7 @@ def process_s50_transactions(
     txns.CustId = txns.CustId.astype('str')
     customer.CustId = customer.CustId.astype('str')
     txns = txns.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left').copy()
-    txns = txns[['OrderNo', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns = txns[['OrderNo', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns = txns[~txns['TransactionId'].astype('str').str.upper().duplicated()]
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
@@ -2830,6 +2831,7 @@ def process_s50_orders(
         'EmployeeName':txnsType4,
         'CustVendId':f'{txnsType3}Id',
         'ShipToName':'ShipName',
+        'ShipToAddress':'ShipAddress',
         'ShipToCity':'ShipCity',
         'ShipToState':'ShipState',
         'ShipToZIP':'ShipZip',
@@ -2848,7 +2850,7 @@ def process_s50_orders(
     txns_df[txnsType4] = txns_df[txnsType4].fillna('').str.split(':').str[-1]    
     txns_df.drop(columns=['ShipDate'], inplace=True)
     txns_df.rename(columns = rename_map, inplace = True)
-    txns_df = txns_df[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5 , f'{txnsType3}Id', 'BillName', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    txns_df = txns_df[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Date', f'{txnsType2}Status', 'ShipDate', txnsType4, txnsType5 , f'{txnsType3}Id', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date']) > start_date]
     txns_df = txns_df[pd.to_datetime(txns_df[f'{txnsType2}Date']) < end_date]
     orders = txns_df.copy()
@@ -2931,7 +2933,7 @@ def process_s50_orders(
     orders[f'{txnsType3}Id'] = orders[f'{txnsType3}Id'].astype('str')
     customersORvendors[f'{txnsType3}Id'] = customersORvendors[f'{txnsType3}Id'].astype('str')
     orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}Id', how = 'left')
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders['Company'] = companyName
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -2948,7 +2950,7 @@ def process_s50_orders(
     orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
     return orders, ordersLines, item_df
 
-    
+
 def get_reporting_period_label(latest_date):
     date_diff_days = (datetime.today().date() - latest_date.date()).days
     period_thresholds = {
