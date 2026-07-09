@@ -1971,6 +1971,10 @@ def process_qb_transactions(
     generalJournalLines = generalJournalLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
     bills = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Bill.csv')
+    bills['BillAddress'] = bills[['Vendoraddressaddr2', 'Vendoraddressaddr3', 'Vendoraddressaddr4']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     bills.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2000,6 +2004,10 @@ def process_qb_transactions(
     billExpenseLines['Total']=-billExpenseLines['Total']
 
     checks = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Check.csv')
+    checks['BillAddress'] = checks[['Addressaddr2', 'Addressaddr3', 'Addressaddr4', 'Addressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     checks.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2012,7 +2020,7 @@ def process_qb_transactions(
         'Addresspostalcode':'BillZip',
         'Amount':'Total',          
     }, inplace = True)
-    checks = checks [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
+    checks = checks [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName', 'BillAddress', 'BillCity','BillState','BillZip','Total']]
     checks['TransactionType'] = 'CHECK'
     checkExpenseLine = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CheckExpenseLine.csv')
     checkExpenseLine.drop(columns =['Accountreflistid', 'Accountreffullname'], inplace = True)
@@ -2093,6 +2101,14 @@ def process_qb_transactions(
     depositLines = depositLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
     invoice = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'Invoice.csv')
+    invoice['BillAddress'] = invoice[['Billaddressaddr2', 'Billaddressaddr3', 'Billaddressaddr4', 'Billaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
+    invoice['ShipAddress'] = invoice[['Shipaddressaddr2', 'Shipaddressaddr3', 'Shipaddressaddr4', 'Shipaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     invoice.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2235,6 +2251,10 @@ def process_qb_transactions(
     }, inplace = True)
     vendorCreditExpenseLines['Total']=-vendorCreditExpenseLines['Total']
     salesReceipts = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceipt.csv')
+    salesReceipts['BillAddress'] = salesReceipts[['Billaddressaddr2', 'Billaddressaddr3', 'Billaddressaddr4', 'Billaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     salesReceipts.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2247,7 +2267,7 @@ def process_qb_transactions(
         'Billaddresspostalcode':'BillZip',
         'Totalamount':'Total',        
     }, inplace = True)
-    salesReceipts = salesReceipts [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
+    salesReceipts = salesReceipts [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName', 'BillAddress', 'BillCity','BillState','BillZip','Total']]
     salesReceipts['TransactionType'] = 'SALES RECEIPT'
     salesReceiptsLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'SalesReceiptLine.csv')
     salesReceiptsLines=salesReceiptsLines.merge(transactions[['Fqtxnlinkkey', 'Accountreflistid', 'Accountreffullname', 'Amount']], on = ['Fqtxnlinkkey'], how = 'left')
@@ -2265,6 +2285,10 @@ def process_qb_transactions(
     salesReceiptsLines = salesReceiptsLines [['TransactionId','TransactionDate','TransactionNo','Account','ItemId','ItemDescription','Quantity','Rate','Total']]
 
     billPaymentCheck = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheck.csv')
+    billPaymentCheck['BillAddress'] = billPaymentCheck[['Addressaddr2', 'Addressaddr3', 'Addressaddr4', 'Addressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     billPaymentCheck.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2277,7 +2301,7 @@ def process_qb_transactions(
         'Addresspostalcode':'BillZip',
         'Amount':'Total',        
     }, inplace = True)
-    billPaymentCheck = billPaymentCheck [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillCity','BillState','BillZip','Total']]
+    billPaymentCheck = billPaymentCheck [['TransactionId','TransactionNo',f'{txnsType2}No','TransactionDate',f'{txnsType3}No','BillName','BillAddress', 'BillCity','BillState','BillZip','Total']]
     billPaymentCheck['TransactionType'] = 'BILL PAYMENT CHECK'
     billPaymentCheckLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'BillPaymentCheckLine.csv')
     billPaymentCheckLines.rename(columns = {
@@ -2327,6 +2351,14 @@ def process_qb_transactions(
     }, inplace = True)
 
     creditMemo = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'CreditMemo.csv')
+    creditMemo['BillAddress'] = creditMemo[['Billaddressaddr2', 'Billaddressaddr3', 'Billaddressaddr4', 'Billaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
+    creditMemo['ShipAddress'] = creditMemo[['Shipaddressaddr2', 'Shipaddressaddr3', 'Shipaddressaddr4', 'Shipaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     creditMemo.rename(columns = {
         'Txnid':'TransactionId',
         'Refnumber':'TransactionNo',
@@ -2424,7 +2456,7 @@ def process_qb_transactions(
     SalesRep.Listid = SalesRep.Listid.fillna('').astype('str')
     txns=txns.merge(SalesRep[['Listid','Salesrepentityreffullname']].drop_duplicates(subset=['Listid']).rename(columns ={'Listid':'Salesrepreflistid', 'Salesrepentityreffullname':'SalesRepID'}), on='Salesrepreflistid', how='left', suffixes=('', '_'))
 
-    txns = txns[[f'{txnsType2}No', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns = txns[[f'{txnsType2}No', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
@@ -2480,6 +2512,10 @@ def process_qb_orders(
     SalesRep['Salesrepentityreffullname']=SalesRep['Salesrepentityreffullname'].fillna('').astype('str').str.upper()
 
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders['ShipAddress'] = orders[['Shipaddressaddr2', 'Shipaddressaddr3', 'Shipaddressaddr4', 'Shipaddressaddr5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     orders.rename(columns = {
         'Txnid':f'{txnsType2}Id',
         'Refnumber':f'{txnsType2}No',
@@ -2550,7 +2586,7 @@ def process_qb_orders(
     SalesRep.Listid = SalesRep.Listid.fillna('').astype('str')
     orders=orders.merge(SalesRep[['Listid','Salesrepentityreffullname']].drop_duplicates(subset=['Listid']).rename(columns ={'Listid':object_key_4, 'Salesrepentityreffullname':txnsType4}), on=object_key_4, how='left', suffixes=('', '_'))
 
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
