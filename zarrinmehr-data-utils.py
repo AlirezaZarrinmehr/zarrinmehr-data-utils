@@ -1687,6 +1687,10 @@ def process_gp_transactions(
     txnsLines.rename(columns = {'SLSINDX':'ACTINDX'}, inplace = True)
     txnsLines['XTNDPRCE'] = txnsLines['XTNDPRCE'].astype('float')
     txnsLines = txnsLines.merge(txns, on = ['SOPNUMBE'], suffixes = ('', '_inv'))
+    txnsLines['ShipAddress'] = txnsLines[['ADDRESS1', 'ADDRESS2', 'ADDRESS3']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']),
+        axis=1
+    )
     txnsLines.rename(columns = {
         'ORIGNUMB':'OrderId',
         'GLPOSTDT':'TransactionDate',
@@ -1728,14 +1732,14 @@ def process_gp_transactions(
     txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR', 'AccountType']].drop_duplicates(subset=['ACTINDX']).rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
     txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how = 'left', suffixes = ('', '_Item'))
-    billToAdds = customer.rename(columns={'CustName':'BillName', 'CustCity':'BillCity', 'CustState':'BillState', 'CustZip':'BillZip'})[['CustId', 'BillName', 'BillCity', 'BillState', 'BillZip']]
+    billToAdds = customer.rename(columns={'CustName':'BillName', 'CustAddress':'BillAddress', 'CustCity':'BillCity', 'CustState':'BillState', 'CustZip':'BillZip'})[['CustId', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip']]
     txnsLines = txnsLines.merge(billToAdds, on = 'CustId', how = 'left')
     txnsLines = txnsLines.merge(CadUsdAvg, left_on=[txnsLines['TransactionDate'].dt.year, txnsLines['TransactionDate'].dt.month], right_on=['Year', 'Month'], how = 'left')
     txnsLines['CAD/USD'] = txnsLines['CAD/USD'].interpolate(method='linear', limit_direction='both')
     txnsLines['Rate'] = pd.to_numeric(txnsLines['Rate'], errors='coerce')
     txnsLines['Rate']=txnsLines['Rate']*txnsLines['CAD/USD']
     txnsLines['Total']=txnsLines['Total']*txnsLines['CAD/USD']
-    txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
+    txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipAddress': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillAddress': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
     txns['Company'] = companyName
     txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -1792,6 +1796,10 @@ def process_gp_orders(
 
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [txnsType], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders['ShipAddress'] = orders[['ADDRESS1', 'ADDRESS2', 'ADDRESS3']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']),
+        axis=1
+    )
     orders.rename(columns = {
         txnsType:f'{txnsType2}No', 
         'CREATDDT':f'{txnsType2}Date',
@@ -1838,7 +1846,7 @@ def process_gp_orders(
     ordersLines['Rate']=ordersLines['Rate']*ordersLines['CAD/USD']
     ordersLines['Total']=ordersLines['Total']*ordersLines['CAD/USD']
     ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'ShipDate']]
-    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders.drop(columns =['Total'], inplace = True)
     totals = (
         ordersLines
