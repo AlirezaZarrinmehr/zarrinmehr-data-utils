@@ -62,6 +62,7 @@ modules = [
     ("botocore", "boto3"),
     ("serial", "pyserial"),
     ("esptool", "esptool"),
+    ("recordlinkage", "recordlinkage"),
     ("gc", "gc")
 ]
 for mod, pip_name in modules:
@@ -5918,3 +5919,102 @@ def find_date_columns(df, sample_size=500, threshold=0.9):
             ):
                 date_cols.append(col)
     return date_cols
+
+
+def remove_cross_dataframe_duplicates(
+    reference_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    config: dict,
+    block_on: str = None,
+    threshold: float = 0.65,
+    reference_prefix: str = "reference_df_",
+    target_prefix: str = "target_df_",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ref_temp = reference_df.copy()
+    tgt_temp = target_df.copy()
+    for col in config.get("date_cols", []):
+        col_name = col["name"]
+        if col_name in ref_temp.columns and col_name in tgt_temp.columns:
+            dt_ref = pd.to_datetime(ref_temp[col_name], errors="coerce")
+            dt_tgt = pd.to_datetime(tgt_temp[col_name], errors="coerce")
+            ref_temp[f"{col_name}_numeric_days"] = (
+                dt_ref.astype("int64") // 10**9 // 86400
+            )
+            tgt_temp[f"{col_name}_numeric_days"] = (
+                dt_tgt.astype("int64") // 10**9 // 86400
+            )
+    for col in config.get("numeric_cols", []):
+        col_name = col["name"]
+        if col_name in ref_temp.columns and col_name in tgt_temp.columns:
+            ref_temp[f"{col_name}_log_scaled"] = np.log1p(ref_temp[col_name])
+            tgt_temp[f"{col_name}_log_scaled"] = np.log1p(tgt_temp[col_name])
+    indexer = recordlinkage.Index()
+    if block_on and block_on in ref_temp.columns and block_on in tgt_temp.columns:
+        indexer.block(block_on)
+    else:
+        if len(ref_temp) * len(tgt_temp) > 5_000_000:
+            raise ValueError(
+                f"Dataframes are too large ({len(ref_temp)} x {len(tgt_temp)}) for a full index. "
+                "Please specify a column name for 'block_on' (e.g., block_on='ShipCity')."
+            )
+        indexer.full()
+    candidate_links = indexer.index(ref_temp, tgt_temp)
+    compare = recordlinkage.Compare()
+    weights = []
+    for col in config.get("text_cols", []):
+        if col["name"] in ref_temp.columns and col["name"] in tgt_temp.columns:
+            compare.string(
+                col["name"],
+                col["name"],
+                method=col.get("method", "jarowinkler"),
+                label=col["name"],
+            )
+            weights.append(col.get("weight", 1.0))
+    for col in config.get("numeric_cols", []):
+        target_col = f"{col['name']}_log_scaled"
+        if target_col in ref_temp.columns and target_col in tgt_temp.columns:
+            compare.numeric(
+                target_col,
+                target_col,
+                method="gauss",
+                offset=col.get("offset", 0.0),
+                scale=col.get("scale", 1.0),
+                label=col["name"],
+            )
+            weights.append(col.get("weight", 1.0))
+    for col in config.get("date_cols", []):
+        target_col = f"{col['name']}_numeric_days"
+        if target_col in ref_temp.columns and target_col in tgt_temp.columns:
+            compare.numeric(
+                target_col,
+                target_col,
+                method="gauss",
+                offset=col.get("offset", 1),
+                scale=col.get("scale", 10),
+                label=col["name"],
+            )
+            weights.append(col.get("weight", 1.0))
+    features = compare.compute(candidate_links, ref_temp, tgt_temp)
+    total_weight = sum(weights)
+    normalized_weights = [w / total_weight for w in weights]
+    features["weighted_score"] = features.values.dot(normalized_weights)
+    matches = features[features["weighted_score"] >= threshold]
+    duplicate_target_indices = matches.index.get_level_values(1).unique()
+    target_df_duplicates = target_df.loc[duplicate_target_indices].copy()
+    target_df_clean = target_df.drop(index=duplicate_target_indices)
+    if not target_df_duplicates.empty:
+        highest_matches = (
+            matches.reset_index()
+            .sort_values("weighted_score", ascending=False)
+            .drop_duplicates(subset=["level_1"])
+            .set_index("level_1")
+        )
+        target_df_duplicates["match_score"] = highest_matches["weighted_score"]
+        target_df_duplicates["reference_match_index"] = highest_matches["level_0"]
+        target_side = target_df_duplicates.add_prefix(target_prefix)
+        ref_side = reference_df.loc[target_df_duplicates["reference_match_index"]].copy()
+        ref_side = ref_side.add_prefix(reference_prefix)
+        ref_side.index = target_side.index
+        target_df_duplicates = pd.concat([target_side, ref_side], axis=1)
+    return target_df_clean, target_df_duplicates
+
