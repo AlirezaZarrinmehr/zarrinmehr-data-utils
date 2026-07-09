@@ -504,14 +504,6 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -552,10 +544,6 @@ def process_qbo_transactions(
             "VendorAddr.City": "BillCity",
             "VendorAddr.CountrySubDivisionCode": "BillState",
             "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -570,6 +558,10 @@ def process_qbo_transactions(
             "multiply_total": -1,
         },
     })
+    bills['BillAddress'] = bills[['VendorAddr.Line2', 'VendorAddr.Line3', 'VendorAddr.Line4', 'VendorAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
 
     checks, checkExpenseLine = process_qbo_table(
     s3_client=s3_client,
@@ -588,14 +580,10 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
+            "RemitToAddr.Line1": "BillName",
+            "RemitToAddr.City": "BillCity",
+            "RemitToAddr.CountrySubDivisionCode": "BillState",
+            "RemitToAddr.PostalCode": "BillZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -614,6 +602,10 @@ def process_qbo_transactions(
             },
         },
     })
+    checks['BillAddress'] = checks[['RemitToAddr.Line2', 'RemitToAddr.Line3', 'RemitToAddr.Line4', 'RemitToAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
 
     receivePayment, receivePaymentLines = process_qbo_table(
     s3_client=s3_client,
@@ -636,14 +628,6 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -678,14 +662,6 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -747,6 +723,14 @@ def process_qbo_transactions(
             },
         },
     })
+    invoice['BillAddress'] = invoice[['BillAddr.Line2', 'BillAddr.Line3', 'BillAddr.Line4', 'BillAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
+    invoice['ShipAddress'] = invoice[['ShipAddr.Line2', 'ShipAddr.Line3', 'ShipAddr.Line4', 'ShipAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
 
     vendorCredit, vendorCreditExpenseLines = process_qbo_table(
     s3_client=s3_client,
@@ -773,10 +757,6 @@ def process_qbo_transactions(
             "VendorAddr.City": "BillCity",
             "VendorAddr.CountrySubDivisionCode": "BillState",
             "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -791,6 +771,10 @@ def process_qbo_transactions(
             "multiply_total": -1,
         },
     })
+    vendorCredit['BillAddress'] = vendorCredit[['VendorAddr.Line2', 'VendorAddr.Line3', 'VendorAddr.Line4', 'VendorAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
 
     billPaymentCheck, billPaymentCheckLines = process_qbo_table(
     s3_client=s3_client,
@@ -809,14 +793,6 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
-            "ShipAddr.Line1": "ShipName",
-            "ShipAddr.City": "ShipCity",
-            "ShipAddr.CountrySubDivisionCode": "ShipState",
-            "ShipAddr.PostalCode": "ShipZip",
             "TotalAmt": "Total",
         },
         "lines": {
@@ -852,10 +828,10 @@ def process_qbo_transactions(
             "PurchaseOrderId": "OrderNo",
             "VendorRef.value": "CustId",
             "VendorRef.name": "CustNo",
-            "VendorAddr.Line1": "BillName",
-            "VendorAddr.City": "BillCity",
-            "VendorAddr.CountrySubDivisionCode": "BillState",
-            "VendorAddr.PostalCode": "BillZip",
+            "BillAddr.Line1": "BillName",
+            "BillAddr.City": "BillCity",
+            "BillAddr.CountrySubDivisionCode": "BillState",
+            "BillAddr.PostalCode": "BillZip",
             "ShipAddr.Line1": "ShipName",
             "ShipAddr.City": "ShipCity",
             "ShipAddr.CountrySubDivisionCode": "ShipState",
@@ -874,6 +850,14 @@ def process_qbo_transactions(
             "multiply_total": -1,
         },
     })
+    creditMemo['BillAddress'] = creditMemo[['BillAddr.Line2', 'BillAddr.Line3', 'BillAddr.Line4', 'BillAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
+    creditMemo['ShipAddress'] = creditMemo[['ShipAddr.Line2', 'ShipAddr.Line3', 'ShipAddr.Line4', 'ShipAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
 
     txns=pd.concat([
         generalJournal,
@@ -920,7 +904,7 @@ def process_qbo_transactions(
     customer["CustNo"]=customer["CustNo"].fillna('').astype('str')
     txns=txns.merge(customer[['CustId', 'CustName']], on="CustId", how='left').copy()
 
-    txns=txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
+    txns=txns[['OrderNo', 'TransactionId', 'TransactionNo', 'TransactionStatus', 'TransactionType', 'TransactionDate', 'SalesRepID', 'CustPo', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['Company']=companyName
     txns=txns[['Company'] + txns.columns[:-1].tolist()]
     txnsLines=txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
@@ -1004,6 +988,14 @@ def process_qbo_orders(
             }
         ],
     })
+    orders['BillAddress'] = orders[['VendorAddr.Line2', 'VendorAddr.Line3', 'VendorAddr.Line4', 'VendorAddr.Line5']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
+    orders['ShipAddress'] = orders[['ShipAddr.Line2', 'ShipAddr.Line3']].fillna('').apply(
+        lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
+        axis=1
+    )
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines['OrderId'].isna()].copy()
     ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
@@ -1039,7 +1031,7 @@ def process_qbo_orders(
     for col in ['SalesRepID', 'ShipCity', 'ShipState', 'ShipZip']:
         if col not in orders.columns:
             orders[col] = np.nan
-    orders = orders[['OrderId', 'OrderNo', 'OrderStatus', 'OrderDate', 'CloseDate', 'SalesRepID', 'CustSO', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
+    orders = orders[['OrderId', 'OrderNo', 'OrderStatus', 'OrderDate', 'CloseDate', 'SalesRepID', 'CustSO', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = ['OrderId'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders['OrderId'].str.upper().duplicated()]
     orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
@@ -1257,7 +1249,8 @@ def download_entire_bucket_flat(
             files_downloaded += 1
 
     print(f"Download complete. {files_downloaded} files saved in {output_folder}.")
-    
+
+
 def truncate_with_etc_1(s, truncate_len):
     return s[:truncate_len - 5] + ' etc.' if len(s) > truncate_len else s
 
