@@ -106,8 +106,8 @@ modules = [
     ("intuitlib.enums", "Scopes", "intuit-oauth"),
     ("urllib.parse", "urlparse", None),
     ("urllib.parse", "parse_qs", None),
-    ("collections", "Counter", None)
-
+    ("collections", "Counter", None),
+    ("pandas.api.types", "is_numeric_dtype", None)
 ]
 
 for fr_mod, im_mod, pip_name in modules:
