@@ -5975,26 +5975,25 @@ def remove_cross_dataframe_duplicates(
     reference_prefix: str = "reference_df_",
     target_prefix: str = "target_df_",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+
     ref_temp = reference_df.copy()
     tgt_temp = target_df.copy()
     for col in config.get("date_cols", []):
         col_name = col["name"]
-        if col_name in ref_temp.columns and col_name in tgt_temp.columns:
-            dt_ref = pd.to_datetime(ref_temp[col_name], errors="coerce")
-            dt_tgt = pd.to_datetime(tgt_temp[col_name], errors="coerce")
-            ref_temp[f"{col_name}_numeric_days"] = (
-                dt_ref.astype("int64") // 10**9 // 86400
-            )
-            tgt_temp[f"{col_name}_numeric_days"] = (
-                dt_tgt.astype("int64") // 10**9 // 86400
-            )
+        dt_ref = pd.to_datetime(ref_temp[col_name], errors="coerce")
+        dt_tgt = pd.to_datetime(tgt_temp[col_name], errors="coerce")
+        ref_temp[f"{col_name}_numeric_days"] = (
+            dt_ref.astype("int64") // 10**9 // 86400
+        )
+        tgt_temp[f"{col_name}_numeric_days"] = (
+            dt_tgt.astype("int64") // 10**9 // 86400
+        )
     for col in config.get("numeric_cols", []):
         col_name = col["name"]
-        if col_name in ref_temp.columns and col_name in tgt_temp.columns:
-            ref_temp[f"{col_name}_log_scaled"] = np.log1p(ref_temp[col_name])
-            tgt_temp[f"{col_name}_log_scaled"] = np.log1p(tgt_temp[col_name])
+        ref_temp[f"{col_name}_log_scaled"] = np.log1p(ref_temp[col_name])
+        tgt_temp[f"{col_name}_log_scaled"] = np.log1p(tgt_temp[col_name])
     indexer = recordlinkage.Index()
-    if block_on and block_on in ref_temp.columns and block_on in tgt_temp.columns:
+    if block_on:
         indexer.block(block_on)
     else:
         if len(ref_temp) * len(tgt_temp) > 5_000_000:
@@ -6007,38 +6006,35 @@ def remove_cross_dataframe_duplicates(
     compare = recordlinkage.Compare()
     weights = []
     for col in config.get("text_cols", []):
-        if col["name"] in ref_temp.columns and col["name"] in tgt_temp.columns:
-            compare.string(
-                col["name"],
-                col["name"],
-                method=col.get("method", "jarowinkler"),
-                label=col["name"],
-            )
-            weights.append(col.get("weight", 1.0))
+        compare.string(
+            col["name"],
+            col["name"],
+            method=col.get("method", "jarowinkler"),
+            label=col["name"],
+        )
+        weights.append(col.get("weight", 1.0))
     for col in config.get("numeric_cols", []):
         target_col = f"{col['name']}_log_scaled"
-        if target_col in ref_temp.columns and target_col in tgt_temp.columns:
-            compare.numeric(
-                target_col,
-                target_col,
-                method="gauss",
-                offset=col.get("offset", 0.0),
-                scale=col.get("scale", 1.0),
-                label=col["name"],
-            )
-            weights.append(col.get("weight", 1.0))
+        compare.numeric(
+            target_col,
+            target_col,
+            method="gauss",
+            offset=col.get("offset", 0.0),
+            scale=col.get("scale", 1.0),
+            label=col["name"],
+        )
+        weights.append(col.get("weight", 1.0))
     for col in config.get("date_cols", []):
         target_col = f"{col['name']}_numeric_days"
-        if target_col in ref_temp.columns and target_col in tgt_temp.columns:
-            compare.numeric(
-                target_col,
-                target_col,
-                method="gauss",
-                offset=col.get("offset", 1),
-                scale=col.get("scale", 10),
-                label=col["name"],
-            )
-            weights.append(col.get("weight", 1.0))
+        compare.numeric(
+            target_col,
+            target_col,
+            method="gauss",
+            offset=col.get("offset", 1),
+            scale=col.get("scale", 10),
+            label=col["name"],
+        )
+        weights.append(col.get("weight", 1.0))
     features = compare.compute(candidate_links, ref_temp, tgt_temp)
     total_weight = sum(weights)
     normalized_weights = [w / total_weight for w in weights]
