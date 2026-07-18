@@ -3963,7 +3963,6 @@ def generate_open_cases_df(
     n=5
 ):
     df = df[df[openDateCol] >= min_date].copy()
-    df[idCol] = df[idCol].fillna('').astype('str').str.upper().str.strip().apply(convert_to_int_or_keep)
     open_df = pd.DataFrame()
     max_date = pd.to_datetime(datetime.now(timezone).date())
     current_date = min_date
@@ -4084,20 +4083,6 @@ def impute_by_group(df, group_col, target_col, method='median', mask=None):
         df[target_col] = df[target_col].fillna(group_stat)
         df[target_col] = df[target_col].fillna(df[target_col].agg(method))
     return df
-
-
-def impute_zero_lines(ordersLines, txnsLines, columns=['Quantity', 'Rate', 'Total']):
-
-    zero_mask = (ordersLines[columns] == 0).any(axis=1)
-    ordersLines.loc[zero_mask, columns] = 0
-    for col in columns:
-        median_val = txnsLines[col].median()
-        ordersLines.loc[ordersLines[col] == 0, col] = median_val
-
-    if 'Quantity' in columns and 'Rate' in columns and 'Total' in columns:
-        ordersLines['Total'] = ordersLines['Quantity'] * ordersLines['Rate']
-
-    return ordersLines
 
 
 def read_excel_from_googlesheets(apiKey, spreadsheetId, sheetName):
@@ -6056,25 +6041,25 @@ def remove_cross_dataframe_duplicates(
     return target_df_clean, target_df_duplicates
 
 
-def impute_missing_order_lines(
-    df_orders,
+def impute_missing_header_lines(
+    df_header,
     df_lines,
-    join_key,
+    key_cols,
     target_filters=None,
     num_auto_words=10,
 ):
     nltk.download("stopwords", quiet=True)
     from nltk.corpus import stopwords
-    df_orders = df_orders.copy()
+    df_header = df_header.copy()
     df_lines = df_lines.copy()
-    all_order_ids = set(df_orders[join_key].unique())
-    existing_order_ids = set(df_lines[join_key].unique())
-    missing_order_ids = list(all_order_ids - existing_order_ids)
-    print(f"Found {len(missing_order_ids)} orders with zero existing lines.")
-    if not missing_order_ids:
+    all_header_ids = set(df_header[key_cols].unique())
+    existing_header_ids = set(df_lines[key_cols].unique())
+    missing_header_ids = list(all_header_ids - existing_header_ids)
+    print(f"Found {len(missing_header_ids)} header with zero existing lines.")
+    if not missing_header_ids:
         print("No missing lines to impute! Returning original lines.")
         return df_lines
-    dimension_cols = [col for col in df_lines.columns if col != join_key]
+    dimension_cols = [col for col in df_lines.columns if col != key_cols]
     filter_col = None
     keywords = None
     if target_filters:
@@ -6130,10 +6115,10 @@ def impute_missing_order_lines(
     )
     imputed_rows = []
     original_columns = df_lines.columns.tolist()
-    for order_id in missing_order_ids:
+    for header_id in missing_header_ids:
         for _, config in top_configurations.iterrows():
             new_row = {col: config[col] for col in dimension_cols}
-            new_row[join_key] = order_id
+            new_row[key_cols] = header_id
             for col in original_columns:
                 if col not in new_row:
                     new_row[col] = (
