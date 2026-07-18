@@ -3959,15 +3959,11 @@ def generate_open_cases_df(
     closeDateCol,
     idCol,
     timezone,
-    statusCol=None,
-    excludeStatusList=None,
     quantile_values=None,
     n=5
 ):
     df = df[df[openDateCol] >= min_date].copy()
     df[idCol] = df[idCol].fillna('').astype('str').str.upper().str.strip().apply(convert_to_int_or_keep)
-    if excludeStatusList:
-        df = df[~df[statusCol].isin(excludeStatusList)].copy()
     open_df = pd.DataFrame()
     max_date = pd.to_datetime(datetime.now(timezone).date())
     current_date = min_date
