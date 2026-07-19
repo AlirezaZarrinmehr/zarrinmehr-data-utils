@@ -102,12 +102,12 @@ modules = [
     ("psycopg2.errors", "DuplicateObject", "psycopg2"),
     ("psycopg2.errors", "UndefinedTable", "psycopg2"),
     ("itertools", "islice", "itertools"),
-    # ("intuitlib.client", "AuthClient", "intuit-oauth"),
-    # ("intuitlib.enums", "Scopes", "intuit-oauth"),
-    # ("urllib.parse", "urlparse", "requests"),
-    # ("urllib.parse", "parse_qs", "requests"),
-    # ("collections", "Counter", "requests"),
-    # ("pandas.api.types", "is_numeric_dtype", "pandas")
+    ("intuitlib.client", "AuthClient", "intuit-oauth"),
+    ("intuitlib.enums", "Scopes", "intuit-oauth"),
+    ("urllib.parse", "urlparse", None),
+    ("urllib.parse", "parse_qs", None),
+    ("collections", "Counter", None),
+    ("pandas.api.types", "is_numeric_dtype", None)
 ]
 
 for fr_mod, im_mod, pip_name in modules:
@@ -5958,7 +5958,7 @@ def remove_cross_dataframe_duplicates(
     threshold: float = 0.65,
     reference_prefix: str = "reference_df_",
     target_prefix: str = "target_df_",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+):
 
     ref_temp = reference_df.copy()
     tgt_temp = target_df.copy()
@@ -6044,94 +6044,94 @@ def remove_cross_dataframe_duplicates(
     return target_df_clean, target_df_duplicates
 
 
-# def impute_missing_header_lines(
-#     df_header,
-#     df_lines,
-#     key_cols,
-#     target_filters=None,
-#     num_auto_words=10,
-# ):
-#     nltk.download("stopwords", quiet=True)
-#     from nltk.corpus import stopwords
-#     df_header = df_header.copy()
-#     df_lines = df_lines.copy()
-#     all_header_ids = set(df_header[key_cols].unique())
-#     existing_header_ids = set(df_lines[key_cols].unique())
-#     missing_header_ids = list(all_header_ids - existing_header_ids)
-#     print(f"Found {len(missing_header_ids)} header with zero existing lines.")
-#     if not missing_header_ids:
-#         print("No missing lines to impute! Returning original lines.")
-#         return df_lines
-#     dimension_cols = [col for col in df_lines.columns if col != key_cols]
-#     filter_col = None
-#     keywords = None
-#     if target_filters:
-#         potential_col = list(target_filters.keys())[0]
-#         potential_keywords = target_filters[potential_col] 
-#         if isinstance(potential_keywords, list) and len(potential_keywords) > 0:
-#             filter_col = potential_col
-#             keywords = potential_keywords
-#             print(f"Using manual keywords for '{filter_col}' (Count: {len(keywords)}): {keywords}")
-#         else:
-#             filter_col = potential_col
-#     if not keywords:
-#         if not filter_col:
-#             desc_cols = [c for c in dimension_cols if "desc" in c.lower()]
-#             filter_col = desc_cols[0] if desc_cols else None
-#             if not filter_col:
-#                 string_cols = (
-#                     df_lines[dimension_cols]
-#                     .select_dtypes(include=["object", "category"])
-#                     .columns.tolist()
-#                 )
-#                 filter_col = string_cols[0] if string_cols else dimension_cols[0]
-#         english_stopwords = set(stopwords.words("english"))
-#         words = []
-#         for text in df_lines[filter_col].dropna().astype(str):
-#             cleaned_text = re.sub(r"[^a-zA-Z\s]", " ", text.lower())
-#             tokens = [word for word in cleaned_text.split() if len(word) > 2]
-#             filtered_tokens = [word for word in tokens if word not in english_stopwords]
-#             words.extend(filtered_tokens)
-#         word_counts = Counter(words)
-#         keywords = [word for word, count in word_counts.most_common(num_auto_words)]
-#         print(f"NLP Auto-Selected keywords for '{filter_col}' (Count: {len(keywords)}): {keywords}")
-#     line_frequencies = (
-#         df_lines.groupby(dimension_cols).size().reset_index(name="LineCount")
-#     )
-#     def find_keyword_match(value):
-#         value_string = str(value).lower()
-#         for word in keywords:
-#             if word.lower() in value_string:
-#                 return word.lower()
-#         return None
-#     line_frequencies["MatchedCategory"] = line_frequencies[filter_col].apply(
-#         find_keyword_match
-#     )
-#     filtered_frequencies = line_frequencies[
-#         line_frequencies["MatchedCategory"].notna()
-#     ]
-#     top_configurations = (
-#         filtered_frequencies.sort_values("LineCount", ascending=False)
-#         .groupby("MatchedCategory", as_index=False)
-#         .first()
-#         .drop(columns=["MatchedCategory", "LineCount"])
-#     )
-#     imputed_rows = []
-#     original_columns = df_lines.columns.tolist()
-#     for header_id in missing_header_ids:
-#         for _, config in top_configurations.iterrows():
-#             new_row = {col: config[col] for col in dimension_cols}
-#             new_row[key_cols] = header_id
-#             for col in original_columns:
-#                 if col not in new_row:
-#                     new_row[col] = (
-#                         df_lines[col].mode().iloc[0]
-#                         if not df_lines[col].isnull().all()
-#                         else ""
-#                     )
-#             imputed_rows.append(new_row)
-#     df_imputed = pd.DataFrame(imputed_rows, columns=original_columns)
-#     df_final = pd.concat([df_lines, df_imputed], ignore_index=True)
+def impute_missing_header_lines(
+    df_header,
+    df_lines,
+    key_cols,
+    target_filters=None,
+    num_auto_words=10,
+):
+    nltk.download("stopwords", quiet=True)
+    from nltk.corpus import stopwords
+    df_header = df_header.copy()
+    df_lines = df_lines.copy()
+    all_header_ids = set(df_header[key_cols].unique())
+    existing_header_ids = set(df_lines[key_cols].unique())
+    missing_header_ids = list(all_header_ids - existing_header_ids)
+    print(f"Found {len(missing_header_ids)} header with zero existing lines.")
+    if not missing_header_ids:
+        print("No missing lines to impute! Returning original lines.")
+        return df_lines
+    dimension_cols = [col for col in df_lines.columns if col != key_cols]
+    filter_col = None
+    keywords = None
+    if target_filters:
+        potential_col = list(target_filters.keys())[0]
+        potential_keywords = target_filters[potential_col] 
+        if isinstance(potential_keywords, list) and len(potential_keywords) > 0:
+            filter_col = potential_col
+            keywords = potential_keywords
+            print(f"Using manual keywords for '{filter_col}' (Count: {len(keywords)}): {keywords}")
+        else:
+            filter_col = potential_col
+    if not keywords:
+        if not filter_col:
+            desc_cols = [c for c in dimension_cols if "desc" in c.lower()]
+            filter_col = desc_cols[0] if desc_cols else None
+            if not filter_col:
+                string_cols = (
+                    df_lines[dimension_cols]
+                    .select_dtypes(include=["object", "category"])
+                    .columns.tolist()
+                )
+                filter_col = string_cols[0] if string_cols else dimension_cols[0]
+        english_stopwords = set(stopwords.words("english"))
+        words = []
+        for text in df_lines[filter_col].dropna().astype(str):
+            cleaned_text = re.sub(r"[^a-zA-Z\s]", " ", text.lower())
+            tokens = [word for word in cleaned_text.split() if len(word) > 2]
+            filtered_tokens = [word for word in tokens if word not in english_stopwords]
+            words.extend(filtered_tokens)
+        word_counts = Counter(words)
+        keywords = [word for word, count in word_counts.most_common(num_auto_words)]
+        print(f"NLP Auto-Selected keywords for '{filter_col}' (Count: {len(keywords)}): {keywords}")
+    line_frequencies = (
+        df_lines.groupby(dimension_cols).size().reset_index(name="LineCount")
+    )
+    def find_keyword_match(value):
+        value_string = str(value).lower()
+        for word in keywords:
+            if word.lower() in value_string:
+                return word.lower()
+        return None
+    line_frequencies["MatchedCategory"] = line_frequencies[filter_col].apply(
+        find_keyword_match
+    )
+    filtered_frequencies = line_frequencies[
+        line_frequencies["MatchedCategory"].notna()
+    ]
+    top_configurations = (
+        filtered_frequencies.sort_values("LineCount", ascending=False)
+        .groupby("MatchedCategory", as_index=False)
+        .first()
+        .drop(columns=["MatchedCategory", "LineCount"])
+    )
+    imputed_rows = []
+    original_columns = df_lines.columns.tolist()
+    for header_id in missing_header_ids:
+        for _, config in top_configurations.iterrows():
+            new_row = {col: config[col] for col in dimension_cols}
+            new_row[key_cols] = header_id
+            for col in original_columns:
+                if col not in new_row:
+                    new_row[col] = (
+                        df_lines[col].mode().iloc[0]
+                        if not df_lines[col].isnull().all()
+                        else ""
+                    )
+            imputed_rows.append(new_row)
+    df_imputed = pd.DataFrame(imputed_rows, columns=original_columns)
+    df_final = pd.concat([df_lines, df_imputed], ignore_index=True)
 
-#     print(f"Successfully appended {len(df_imputed)} estimated lines to the lines table.")
-#     return df_final
+    print(f"Successfully appended {len(df_imputed)} estimated lines to the lines table.")
+    return df_final
