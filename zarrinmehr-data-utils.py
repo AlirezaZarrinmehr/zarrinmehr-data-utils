@@ -104,10 +104,10 @@ modules = [
     ("itertools", "islice", "itertools"),
     ("intuitlib.client", "AuthClient", "intuit-oauth"),
     ("intuitlib.enums", "Scopes", "intuit-oauth"),
-    ("urllib.parse", "urlparse", None),
-    ("urllib.parse", "parse_qs", None),
-    ("collections", "Counter", None),
-    ("pandas.api.types", "is_numeric_dtype", None)
+    ("urllib.parse", "urlparse", "requests"),
+    ("urllib.parse", "parse_qs", "requests"),
+    ("collections", "Counter", "requests"),
+    ("pandas.api.types", "is_numeric_dtype", "pandas")
 ]
 
 for fr_mod, im_mod, pip_name in modules:
