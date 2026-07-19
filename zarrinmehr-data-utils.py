@@ -5870,6 +5870,9 @@ def upload_to_redshift(
                     log_message(f'[ERROR] Error uploading {file_key}: {e}')
                     conn.rollback()
                     raise
+                if 'df' in locals():
+                    del df
+                gc.collect()
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
