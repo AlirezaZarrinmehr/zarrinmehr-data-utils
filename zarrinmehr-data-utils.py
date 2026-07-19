@@ -4745,14 +4745,14 @@ def stop_driver(ip_address, username, password):
 
 
 def install_device_firmware(
-        ip_address, 
-        username, 
-        password, 
-        firmware_file_name,
-        firmware_file_path, 
-        s3_bucket_name, 
-        s3_client,
-        max_retries=3,
+    ip_address, 
+    username, 
+    password, 
+    firmware_file_name,
+    firmware_file_path, 
+    s3_bucket_name, 
+    s3_client,
+    max_retries=3,
 ):
     log_message(f'[INFO] Installing the firmware...')
 
@@ -4796,7 +4796,10 @@ def find_four_digit_number(string):
         return "No four-digit number found"
 
 
-def timer_and_alert(seconds, sound_file=None):
+def timer_and_alert(
+    seconds, 
+    sound_file=None
+):
     try:
         if seconds <= 0:
             if sound_file:
@@ -4815,28 +4818,28 @@ def timer_and_alert(seconds, sound_file=None):
 
 
 def enrich_and_classify_customers(
-        df,
-        companyName,
-        s3_client,
-        s3_bucket_name,
-        DBIA=False,
-        dfCategories=None,
-        txnsLines=None,
-        dropLookUpIn = True,
-        dfLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5'],
-        lookUpCols = ['CustName'],
-        key_cols = ['CustId', 'CustName'],
-        df_cols = ['CustNo'],
-        extraLevels = ['ParentName'],
-        zip_code_columns = ['CustZip'],
-        state_columns = ['CustState'],
-        cat_object_key = 'customersCategories.csv',
-        dst_object_key = 'customer.csv',
-        idCol = 'CustId',
-        idName = 'CustName',
-        match_method = 'startswith',
-        fillValues = 'CUSTOMER',
-        ):
+    df,
+    companyName,
+    s3_client,
+    s3_bucket_name,
+    DBIA=False,
+    dfCategories=None,
+    txnsLines=None,
+    dropLookUpIn = True,
+    dfLevels =['CustomerLevel1', 'CustomerLevel2', 'CustomerLevel3', 'CustomerLevel4', 'CustomerLevel5'],
+    lookUpCols = ['CustName'],
+    key_cols = ['CustId', 'CustName'],
+    df_cols = ['CustNo'],
+    extraLevels = ['ParentName'],
+    zip_code_columns = ['CustZip'],
+    state_columns = ['CustState'],
+    cat_object_key = 'customersCategories.csv',
+    dst_object_key = 'customer.csv',
+    idCol = 'CustId',
+    idName = 'CustName',
+    match_method = 'startswith',
+    fillValues = 'CUSTOMER',
+):
 
     erpId = 'ERP' + idCol
     searchCol = idCol + '_SearchKey'
@@ -4944,28 +4947,28 @@ def enrich_and_classify_customers(
 
 
 def enrich_and_classify_items(
-        df,
-        companyName,
-        s3_client,
-        s3_bucket_name,
-        DBIA=False,
-        dfCategories=None,
-        txnsLines=None,
-        dropLookUpIn = False,
-        dfLevels =['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5'],
-        lookUpCols = ['ItemNo', 'ItemName', 'ItemDescription'],
-        key_cols = ['ItemId', 'ItemDescription'],
-        df_cols = ['ItemNo', 'ItemName'],
-        extraLevels = [],
-        zip_code_columns = [],
-        state_columns = [],
-        cat_object_key = 'itemsCategories.csv',
-        dst_object_key = 'item.csv',
-        idCol = 'ItemId',
-        idName = 'ItemName',
-        match_method = 'contains',
-        fillValues = 'ITEM'
-        ):
+    df,
+    companyName,
+    s3_client,
+    s3_bucket_name,
+    DBIA=False,
+    dfCategories=None,
+    txnsLines=None,
+    dropLookUpIn = False,
+    dfLevels =['ItemLevel1', 'ItemLevel2', 'ItemLevel3', 'ItemLevel4', 'ItemLevel5'],
+    lookUpCols = ['ItemNo', 'ItemName', 'ItemDescription'],
+    key_cols = ['ItemId', 'ItemDescription'],
+    df_cols = ['ItemNo', 'ItemName'],
+    extraLevels = [],
+    zip_code_columns = [],
+    state_columns = [],
+    cat_object_key = 'itemsCategories.csv',
+    dst_object_key = 'item.csv',
+    idCol = 'ItemId',
+    idName = 'ItemName',
+    match_method = 'contains',
+    fillValues = 'ITEM'
+):
 
     erpId = 'ERP' + idCol
     searchCol = idCol + '_SearchKey'
@@ -5908,29 +5911,33 @@ def upload_to_redshift(
 
 
 def get_status(
-        row, 
-        rules = [
-            ("INVOICED", lambda r: pd.notna(r["InvoiceDate"])),
-            ("INSTALLED", lambda r: pd.notna(r["InstallDate"])),
-            ("LATE INSTALL", lambda r: pd.notna(r["PlannedInstallDate"]) and r["PlannedInstallDate"] < pd.Timestamp(datetime.now().date())),
-            ("LATE PLANNED INSTALL", lambda r:
-                pd.notna(r["PlannedInstallDate"]) and
-                pd.notna(r["ReqInstallDate"]) and
-                r["ReqInstallDate"] < r["PlannedInstallDate"]
-            ),
-            ("PLANNED INSTALL", lambda r: pd.notna(r["PlannedInstallDate"])),
-            ("SHIPPED", lambda r: pd.notna(r["ShipDate"])),
-            ("LATE SHIP", lambda r: pd.notna(r["PlannedShipDate"]) and r["PlannedShipDate"] < pd.Timestamp(datetime.now().date())),
-            ("PLANNED SHIP", lambda r: pd.notna(r["PlannedShipDate"])),
-            ("UNPLANNED SHIP", lambda r: True)
-        ]
+    row, 
+    rules = [
+        ("INVOICED", lambda r: pd.notna(r["InvoiceDate"])),
+        ("INSTALLED", lambda r: pd.notna(r["InstallDate"])),
+        ("LATE INSTALL", lambda r: pd.notna(r["PlannedInstallDate"]) and r["PlannedInstallDate"] < pd.Timestamp(datetime.now().date())),
+        ("LATE PLANNED INSTALL", lambda r:
+            pd.notna(r["PlannedInstallDate"]) and
+            pd.notna(r["ReqInstallDate"]) and
+            r["ReqInstallDate"] < r["PlannedInstallDate"]
+        ),
+        ("PLANNED INSTALL", lambda r: pd.notna(r["PlannedInstallDate"])),
+        ("SHIPPED", lambda r: pd.notna(r["ShipDate"])),
+        ("LATE SHIP", lambda r: pd.notna(r["PlannedShipDate"]) and r["PlannedShipDate"] < pd.Timestamp(datetime.now().date())),
+        ("PLANNED SHIP", lambda r: pd.notna(r["PlannedShipDate"])),
+        ("UNPLANNED SHIP", lambda r: True)
+    ]
 ):
     for status, condition in rules:
         if condition(row):
             return status
 
 
-def find_date_columns(df, sample_size=500, threshold=0.9):
+def find_date_columns(
+    df, 
+    sample_size=500, 
+    threshold=0.9
+):
     date_cols = []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
@@ -5951,13 +5958,13 @@ def find_date_columns(df, sample_size=500, threshold=0.9):
 
 
 def remove_cross_dataframe_duplicates(
-    reference_df: pd.DataFrame,
-    target_df: pd.DataFrame,
-    config: dict,
-    block_on: str = None,
-    threshold: float = 0.65,
-    reference_prefix: str = "reference_df_",
-    target_prefix: str = "target_df_",
+    reference_df,
+    target_df,
+    config,
+    block_on = None,
+    threshold = 0.65,
+    reference_prefix = "reference_df_",
+    target_prefix = "target_df_",
 ):
 
     ref_temp = reference_df.copy()
