@@ -3570,7 +3570,7 @@ def process_data_to_s3(
                             if source_type == "qodbc":
                                 kill_qb_processes()
                                 timer_and_alert(20)
-                                active_conn = pyodbc.connect(connection_string, autocommit=True)                            
+                                active_conn = pyodbc.connect(connection_string, autocommit=True)
                             else:
                                 timer_and_alert(60)
                     else:
@@ -3672,7 +3672,11 @@ def process_data_to_s3(
                         else:
                             log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                             continue
-                    has_more_records=True
+                    if df.empty or last_modified_column not in df.columns:
+                        log_message(f'[WARNING] Table "{table}" is empty or lacks column "{last_modified_column}" in this file. Uploading current state and skipping batch loops.')
+                        has_more_records = False
+                    else:
+                        has_more_records = True
                     while has_more_records:
                         if source_type == "qboapi":
                             lastupdate = pd.to_datetime(df[last_modified_column], utc=True).max()
@@ -3688,7 +3692,7 @@ def process_data_to_s3(
                                 lastupdate_str = lastupdate.tz_localize('UTC') if lastupdate.tzinfo is None else lastupdate.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
                             else:
                                 lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
-                        # log_message(lastupdate_str)
+
                         id_order_by = f", {id_column}" if id_column else ""
                         if source_type == "qodbc":
                             query = f"""
@@ -3731,8 +3735,11 @@ def process_data_to_s3(
                         else:
                             log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
                             continue
+                        if new_records.empty or last_modified_column not in new_records.columns:
+                            log_message(f'[INFO] No newer records fetched.')
+                            has_more_records = False
+                            break
                         log_message(f'[INFO] New records fetched: {new_records.shape[0]}')
-
                         df = pd.concat([df, new_records], ignore_index=True)
                         
                         for col in df.columns:
@@ -3770,7 +3777,6 @@ def process_data_to_s3(
                     del new_records
                 gc.collect()
         else:
-
             params = {
                 "source_type":source_type,
                 "active_conn":active_conn,
@@ -3803,7 +3809,6 @@ def process_data_to_s3(
                     continue
                 object_key = table + '.csv'
                 try:
-
                     if not file_path:
                         upload_to_s3(
                             data=df,
@@ -3836,11 +3841,10 @@ def process_data_to_s3(
                 gc.collect()
 
     finally:
-
         try:
             active_conn.close()
         except:
-            pass 
+            pass
 
 
 def upload_to_s3(
