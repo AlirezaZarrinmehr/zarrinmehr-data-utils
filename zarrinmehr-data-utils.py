@@ -5168,32 +5168,43 @@ def read_file_from_s3(
         file_size = obj['ContentLength']
         progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
         body = obj['Body']
-        while True:
-            chunk = body.read(1024 * 1024)
-            if not chunk:
-                break
-            progress.update(len(chunk))
-            yield chunk
-        progress.close()
+        try:
+            while True:
+                chunk = body.read(1024 * 1024)
+                if not chunk:
+                    break
+                progress.update(len(chunk))
+                yield chunk
+        finally:
+            progress.close()
     stream = stream_with_progress()
     if file_type == 'csv':
         csv_bytes = io.BytesIO(b''.join(stream))
         csv_buffer = io.TextIOWrapper(csv_bytes, encoding=encoding)
         csv_buffer.seek(0)
-        if dtype_str:
-            df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
-        else:    
-            df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
+        try:
+            if dtype_str:
+                df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
+            else:    
+                df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
+        except EmptyDataError:
+            log_message(f'[WARNING] S3 file "{object_key}" is empty. Returning empty DataFrame.')
+            return pd.DataFrame()
     elif file_type == 'parquet':
         parquet_buffer = io.BytesIO(b''.join(stream))
+        if parquet_buffer.getbuffer().nbytes == 0:
+            log_message(f'[WARNING] S3 file "{object_key}" is empty. Returning empty DataFrame.')
+            return pd.DataFrame()
         df = pd.read_parquet(parquet_buffer)
         if dtype_str:
             df = df.astype(str)
     elif file_type == 'xlsx':
         xlsx_buffer = io.BytesIO(b''.join(stream))
+        if xlsx_buffer.getbuffer().nbytes == 0:
+            log_message(f'[WARNING] S3 file "{object_key}" is empty. Returning empty DataFrame.')
+            return pd.DataFrame()
         df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     else:
-        progress.close()
         raise ValueError(f"Unsupported file_type: {file_type}. Use 'csv', 'parquet', or 'xlsx'.")
     return df
 
