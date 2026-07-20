@@ -5712,6 +5712,60 @@ def turn_on_case_sensitivity(
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
 
 
+def get_parquet_schema_from_s3(s3_client, bucket, key):
+    s3_uri = f"s3://{bucket}/{key}"
+    dataset = pq.ParquetDataset(s3_uri, filesystem=boto3.Session().resource('s3'))
+    schema = dataset.schema
+    type_map = {
+        'int64': 'BIGINT',
+        'int32': 'INTEGER',
+        'float64': 'DOUBLE PRECISION',
+        'float32': 'REAL',
+        'bool': 'BOOLEAN',
+        'datetime64[ns]': 'TIMESTAMP',
+        'datetime64[ns, UTC]': 'TIMESTAMPTZ'
+    }
+    column_defs = []
+    seen_cols = {}
+    for field in schema:
+        col_name = field.name
+        if col_name in seen_cols:
+            seen_cols[col_name] += 1
+            col_name = f"{col_name}.{seen_cols[col_name]}"
+        else:
+            seen_cols[col_name] = 0
+        arrow_type = str(field.type).lower()
+        redshift_type = 'VARCHAR(MAX)'
+        for key_type, target_type in type_map.items():
+            if key_type in arrow_type:
+                redshift_type = target_type
+                break
+        column_defs.append(f'"{col_name}" {redshift_type}')
+    return column_defs
+
+
+def get_csv_schema_from_s3(s3_client, bucket, key):
+    response = s3_client.get_object(Bucket=bucket, Key=key, Range='bytes=0-8192')
+    body = response['Body'].read().decode('utf-8', errors='ignore').strip()
+    if not body:
+        return []
+    header_line = body.split('\n')[0]
+    columns = [col.strip().strip('"') for col in header_line.split(',')]
+    column_defs = []
+    seen_cols = {}
+    for col in columns:
+        if not col:
+            continue
+        col_name = col
+        if col_name in seen_cols:
+            seen_cols[col_name] += 1
+            col_name = f"{col_name}.{seen_cols[col_name]}"
+        else:
+            seen_cols[col_name] = 0
+        column_defs.append(f'"{col_name}" VARCHAR(MAX)')
+    return column_defs
+
+
 def upload_to_redshift(
     s3_client,
     redshift_client,
@@ -5769,14 +5823,12 @@ def upload_to_redshift(
             port=5439
         )
         cur = conn.cursor()
-        log_message(f'[SUCCESS] Connected to Redshift!')
-        enable_case_sensitive_query = 'SET enable_case_sensitive_identifier TO true;'
-        cur.execute(enable_case_sensitive_query)
+        log_message('[SUCCESS] Connected to Redshift!')
+        cur.execute('SET enable_case_sensitive_identifier TO true;')
         conn.commit()
-        enable_case_sensitive_query = 'SET enable_case_sensitive_identifier TO on;'
-        cur.execute(enable_case_sensitive_query)
+        cur.execute('SET enable_case_sensitive_identifier TO on;')
         conn.commit()
-        log_message(f'[INFO] Case sensitivity enabled for this session.')
+        log_message('[INFO] Case sensitivity enabled for this session.')
     except Exception as e:
         raise Exception(f'[ERROR] Failed to connect to Redshift: {e}')
     for bucket in s3_bucket_names:
@@ -5795,81 +5847,46 @@ def upload_to_redshift(
                 s3_path = f's3://{bucket}/{file_key}'
                 is_parquet = file_key.lower().endswith('.parquet')
                 ext = '.parquet' if is_parquet else '.csv'
-                table_name = (bucket + '-' + file_key.split(ext)[0])
-                check_table_query = f'''
-                SELECT * FROM information_schema.tables
+                table_name = f'{bucket}-{file_key.split(ext)[0]}'
+                check_table_query = '''
+                SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
                 '''
                 cur.execute(check_table_query)
-                result = cur.fetchall()
-                if table_name in [row[2] for row in result]:
+                existing_tables = [row[0] for row in cur.fetchall()]
+                if table_name in existing_tables:
                     log_message(f'[INFO] Table "{table_name}" exists. Dropping it...')
-                    drop_table_query = f'DROP TABLE "{table_name}";'
-                    cur.execute(drop_table_query)
+                    cur.execute(f'DROP TABLE "{table_name}";')
                     conn.commit()
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 if is_parquet:
-                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, file_type='parquet')
+                    column_defs = get_parquet_schema_from_s3(s3_client, bucket, file_key)
+                    copy_options = "FORMAT AS PARQUET MATCHBYCOLUMN"
                 else:
-                    df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket, object_key = file_key, dtype_str=True)
-                if is_parquet:
-                    type_map = {
-                        'int64': 'BIGINT',
-                        'int32': 'INTEGER',
-                        'float64': 'DOUBLE PRECISION',
-                        'float32': 'REAL',
-                        'bool': 'BOOLEAN',
-                        'datetime64[ns]': 'TIMESTAMP',
-                        'datetime64[ns, UTC]': 'TIMESTAMPTZ'
-                    }
-                    column_defs = []
-                    for col_name, dtype in df.dtypes.items():
-                        dtype_str = str(dtype)
-                        if dtype_str in ('object', 'string'):
-                            global max_lengths
-                            byte_len = df[col_name].astype(str).map(lambda x: len(x.encode('utf-8')) if x else 0).max()
-                            v_len = min(max(int(byte_len or 1), 1), max_allowed_length)
-                            redshift_type = f'VARCHAR({v_len})'
-                        else:
-                            redshift_type = type_map.get(dtype_str, 'VARCHAR(MAX)')
-                        column_defs.append(f'"{col_name}" {redshift_type}')
-                elif df.empty:
-                    log_message(f'[WARNING] DataFrame is empty. Creating a table with default column structure.')
-                    column_defs = [f'"{col}" TEXT' for col in df.columns]
-                else:
-                    global max_lengths
-                    max_lengths = df.astype('str').apply(lambda x: x.str.encode('utf-8').str.len().max()).fillna(0).astype('int')
-                    max_lengths = max_lengths.replace(0,1)
-                    # cols_to_truncate = max_lengths[max_lengths > max_allowed_length].index.tolist()
-                    # for col in cols_to_truncate:
-                    #     df[col] = df[col].astype('str').apply(lambda x: truncate_with_etc_2(x, max_allowed_length))
-                    #     max_lengths[col] = max_allowed_length
-                    column_defs = [f'"{col}" VARCHAR({length})' for col, length in max_lengths.items()]
-                create_table_query = f'CREATE TABLE "{table_name}" ('
-                create_table_query += ", ".join(column_defs)
-                create_table_query += ");"
-                log_message(f'[INFO] Creating table "{table_name}"...')
-                cur.execute(create_table_query)
-                conn.commit()
-                log_message(f'[SUCCESS] Table "{table_name}" created!')
-                if is_parquet:
-                    copy_options = "FORMAT AS PARQUET"
-                else:
+                    column_defs = get_csv_schema_from_s3(s3_client, bucket, file_key)
                     copy_options = """
                     CSV
                     IGNOREHEADER 1
                     DELIMITER ','
                     QUOTE '"'
+                    TRUNCATECOLUMNS
                     """
+                if not column_defs:
+                    log_message(f'[WARNING] Could not parse columns for file {file_key}. Skipping...')
+                    continue
+                create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
+                log_message(f'[INFO] Creating table "{table_name}"...')
+                cur.execute(create_table_query)
+                conn.commit()
+                log_message(f'[SUCCESS] Table "{table_name}" created!')
                 copy_query = f"""
                 COPY "{table_name}"
                 FROM '{s3_path}'
                 IAM_ROLE '{redshift_iam_role_arn}'
-                {copy_options}
-                ;
+                {copy_options};
                 """
                 try:
-                    log_message(f'[INFO] Uploading {file_key} to Redshift table "{table_name}" via {("Parquet" if is_parquet else "csv")} format...')
+                    log_message(f'[INFO] Streaming {file_key} to Redshift table "{table_name}" via {("Parquet" if is_parquet else "csv")} format...')
                     cur.execute(copy_query)
                     conn.commit()
                     log_message(f'[SUCCESS] Uploaded {file_key} to Redshift table "{table_name}"!')
@@ -5877,13 +5894,10 @@ def upload_to_redshift(
                     log_message(f'[ERROR] Error uploading {file_key}: {e}')
                     conn.rollback()
                     raise
-                if 'df' in locals():
-                    del df
-                gc.collect()
+
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
-            
     for redshift_user in redshift_users:
         try:
             create_user_query = f"""CREATE USER "{redshift_user['username']}" WITH PASSWORD '{redshift_user['password']}';"""
@@ -5906,12 +5920,11 @@ def upload_to_redshift(
                 conn.rollback()
                 log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
         log_message(f'[INFO] Permissions granted successfully for {redshift_user["username"]}.')
-
     cur.close()
     conn.close()
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
-    response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
-    log_message(f'[INFO] 🚀 Upload process completed.')
+    redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
+    log_message('[INFO] 🚀 Upload process completed.')
 
 
 def get_status(
