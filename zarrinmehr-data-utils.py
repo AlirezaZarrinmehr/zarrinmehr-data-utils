@@ -3333,9 +3333,9 @@ def _stream_suiteql(sql_query, realm, consumer_key, consumer_secret, token_key, 
             count = result.get('count', 0)
             items = result.get('items', [])
             if items:
-                raw_keys = list(items[0].keys())
+                raw_keys = list(dict.fromkeys(k for item in items for k in item.keys()))
                 columns = [str(k) for k in raw_keys]
-                yield [{col: item[raw_key] for col, raw_key in zip(columns, raw_keys)} for item in items], columns
+                yield [{col: item.get(col) for col in columns} for item in items], columns
             offset += chunksize
             total_results = result.get('totalResults', 0)
             pbar.total = total_results
