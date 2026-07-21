@@ -3151,16 +3151,27 @@ def extract_column_values(data, column):
     return values
 
 
-def build_tables(secrets, connection_string):
+def build_tables(
+    secrets, 
+    connection_string, 
+    file_path = "Temp.csv"
+):
     tables_mode = secrets.get("tables_mode", "manual")
     if tables_mode == "manual":
         return secrets["tables"]
     if tables_mode == "query":
-        table_rows = load_data_via_query(
+        load_data_via_query(
             sql_query=secrets["table_query"],
             source_type=secrets.get("table_query_source_type", "mssql"),
             connection_string=connection_string,
+            file_path=file_path
         )
+        table_rows = []
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                table_rows = list(reader)
+
         column = secrets["table_name_column"]
         table_names = extract_column_values(table_rows, column)
         if secrets.get("uppercase_table_names", False):
