@@ -3492,6 +3492,105 @@ def load_data_via_query(
             conn.close()
 
 
+def execute_with_retry(
+    query, params, max_retries, source_type, connection_string, table
+):
+    for attempt in range(max_retries):
+        try:
+            result = load_data_via_query(sql_query=query, **params)
+            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
+            return result
+        except Exception as e:
+            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
+            if source_type == "qodbc":
+                kill_qb_processes()
+                timer_and_alert(20)
+                active_conn = pyodbc.connect(connection_string, autocommit=True)
+                params["active_conn"] = active_conn
+            else:
+                timer_and_alert(60)
+    log_message(f'[ERROR] All retries failed for table "{table}".')
+    return None
+
+
+def s3_object_exists(s3_client, bucket, key):
+    try:
+        s3_client.head_object(Bucket=bucket, Key=key)
+        return True
+    except s3_client.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            return False
+        raise e
+
+
+def build_incremental_query(
+    source_type, base_target, last_modified_column, lastupdate_str, id_column
+):
+    id_order_by = f", {id_column}" if id_column else ""
+    is_custom_query = base_target.strip().lower().startswith("select")
+    query_base = base_target if is_custom_query else f"SELECT * FROM {base_target}"
+    existing_order_clause = ""
+    if is_custom_query and "order by" in query_base.lower():
+        order_index = query_base.lower().rfind("order by")
+        existing_order_clause = query_base[order_index:].strip()
+        query_base = query_base[:order_index].rstrip()
+    has_order_by = bool(existing_order_clause)
+    if not has_order_by:
+        if last_modified_column:
+            order_clause = f"ORDER BY {last_modified_column}{id_order_by}"
+        elif id_column:
+            order_clause = f"ORDER BY {id_column}"
+        else:
+            order_clause = ""
+    else:
+        order_clause = ""
+    where_keyword = "AND" if (is_custom_query and "where" in query_base.lower()) else "WHERE"
+    order_clause = existing_order_clause or order_clause
+
+    if source_type == "suiteql":
+        where_clause = (
+            f"{where_keyword} {last_modified_column} >= TO_DATE('{lastupdate_str}', 'YYYY-MM-DD HH24:MI:SS')"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        if not is_custom_query and last_modified_column:
+            query_base = f"SELECT *, TO_CHAR({last_modified_column}, 'YYYY-MM-DD HH24:MI:SS') as {last_modified_column} FROM {base_target}"
+        return f"""
+            {query_base}
+            {where_clause}
+            {order_clause}
+        """.strip()
+
+    elif source_type == "qodbc":
+        where_clause = (
+            f"{where_keyword} {last_modified_column} >= {{ts '{lastupdate_str}'}}"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        if not is_custom_query:
+            query_base = f"SELECT TOP 30000 * FROM {base_target}"
+
+        return f"""
+            {query_base}
+            {where_clause}
+            {order_clause}
+        """.strip()
+    elif source_type == "qboapi":
+        where_clause = (
+            f"{where_keyword} {last_modified_column} >= '{lastupdate_str}'"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        return f"""
+            {query_base}
+            {where_clause}
+            {order_clause}
+        """.strip()
+
+    else:
+        raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
+
+
 def process_data_to_s3(
     tables,
     s3_client,
@@ -3518,26 +3617,25 @@ def process_data_to_s3(
     environment=None,
     qbo_token_path=None
 ):
+    active_conn = None
     try:
         if source_type == "qodbc":
             kill_qb_processes()
             timer_and_alert(20)
-            active_conn = pyodbc.connect(connection_string, autocommit=True)      
+            active_conn = pyodbc.connect(connection_string, autocommit=True)
         elif source_type == "mssql":
-            active_conn = pyodbc.connect(connection_string)        
-        else:
-            active_conn = None
+            active_conn = pyodbc.connect(connection_string, autocommit=True)
 
         if incremental_update:
             if source_type == "qodbc":
                 params = {
-                    "source_type":source_type,
+                    "source_type": source_type,
                     "active_conn": active_conn,
                     "chunksize": chunksize
                 }
             elif source_type == "suiteql":
                 params = {
-                    "source_type":source_type,
+                    "source_type": source_type,
                     "consumer_key": consumer_key,
                     "consumer_secret": consumer_secret,
                     "token_key": token_key,
@@ -3546,23 +3644,17 @@ def process_data_to_s3(
                 }
             elif source_type == "qboapi":
                 params = {
-                    "source_type":source_type,
-                    "client_id":client_id,
-                    "client_secret":client_secret,
-                    "redirect_uri":redirect_uri,
-                    "environment":environment,
-                    "qbo_token_path":qbo_token_path,
-                    "realm":realm
+                    "source_type": source_type,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                    "environment": environment,
+                    "qbo_token_path": qbo_token_path,
+                    "realm": realm
                 }
             else:
                 raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
-            def build_duplicate_check_query(table, id_column):
-                return f"""
-                    SELECT {id_column}, COUNT(*) AS duplicateCount
-                    FROM {table}
-                    GROUP BY {id_column}
-                    HAVING COUNT(*) > 1
-                """
+
             for table, table_info in tables.items():
                 object_key = table + '.csv'
                 id_column = table_info.get("id_column")
@@ -3570,215 +3662,139 @@ def process_data_to_s3(
                 last_modified_column = table_info.get("last_modified_column")
                 defined_query = table_info.get("query")
                 if id_column and source_type != "qboapi":
-                    query = build_duplicate_check_query(table, id_column)
-                    for attempt in range(max_retries):
-                        try:
-                            duplicated_ids = load_data_via_query(sql_query=query, **params)
-                            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                            break
-                        except Exception as e:
-                            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                            if source_type == "qodbc":
-                                kill_qb_processes()
-                                timer_and_alert(20)
-                                active_conn = pyodbc.connect(connection_string, autocommit=True)
-                            else:
-                                timer_and_alert(60)
-                    else:
-                        log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
-                        continue
-                    if not duplicated_ids.empty:
-                        raise ValueError(f"Duplicate IDs ({id_column}) found in {table}")
-                if defined_query:
-                    log_message(f'[INFO] Running: "{defined_query}"')
-                    for attempt in range(max_retries):
-                        try:
-                            df = load_data_via_query(sql_query=defined_query, **params)
-                            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                            break
-                        except Exception as e:
-                            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                            if source_type == "qodbc":
-                                kill_qb_processes()
-                                timer_and_alert(20)
-                                active_conn = pyodbc.connect(connection_string, autocommit=True)   
-                            else:
-                                timer_and_alert(60)
-                    else:
-                        log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
-                        continue
-                elif not last_modified_column:
-                    query = f"""
-                            SELECT * 
-                            FROM {table} 
-                            """
-                    for attempt in range(max_retries):
-                        try:
-                            df = load_data_via_query(sql_query=query, **params)
-                            log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                            break
-                        except Exception as e:
-                            log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                            if source_type == "qodbc":
-                                kill_qb_processes()
-                                timer_and_alert(20)
-                                active_conn = pyodbc.connect(connection_string, autocommit=True)   
-                            else:
-                                timer_and_alert(60)
-                    else:
-                        log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
-                        continue
-                else:
-                    def s3_object_exists(s3_client, bucket, key):
-                        try:
-                            s3_client.head_object(Bucket=bucket, Key=key)
-                            return True
-                        except s3_client.exceptions.ClientError as e:
-                            if e.response['Error']['Code'] == "404":
-                                return False
-                            else:
-                                raise e
-                    table_exists = s3_object_exists(s3_client, bucket_name, object_key)
-                    if table_exists:
-                        log_message(f'[INFO] Table "{table}" found in S3. Proceeding to update the "{table}" table with new records...')
-                        df = read_file_from_s3(s3_client = s3_client, bucket_name = bucket_name, object_key = object_key, low_memory = False)
-                    else:
-                        log_message(f'[INFO] Table "{table}" does not exist in S3. Creating the "{table}" table with full data from {source_type}...')
-                        id_order_by = f", {id_column}" if id_column else ""
-                        if source_type == "qodbc":
-                            query = f"""
-                                SELECT TOP 30000 *
-                                FROM {table}
-                                ORDER BY {last_modified_column}{id_order_by}
-                                """
-                        elif source_type == "suiteql":
-                            query = f"""
-                                SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
-                                FROM {table}
-                                ORDER BY {last_modified_column}{id_order_by}
-                                FETCH NEXT 30000 ROWS ONLY
-                                """
-                        elif source_type == "qboapi":
-                            query = f"""
-                                SELECT *
-                                FROM {table}
-                                ORDER BY {last_modified_column}{id_order_by}
-                                MAXRESULTS 1000
-                                """
-                        else:
-                            raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
-                        for attempt in range(max_retries):
-                            try:
-                                df = load_data_via_query(sql_query=query, **params)
-                                log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                                break
-                            except Exception as e:
-                                log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                                if source_type == "qodbc":
-                                    kill_qb_processes()
-                                    timer_and_alert(20)
-                                    active_conn = pyodbc.connect(connection_string, autocommit=True)   
-                                else:
-                                    timer_and_alert(60)
-                        else:
-                            log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
-                            continue
-                    if df.empty or last_modified_column not in df.columns:
-                        log_message(f'[WARNING] Table "{table}" is empty or lacks column "{last_modified_column}" in this file. Uploading current state and skipping batch loops.')
-                        has_more_records = False
-                    else:
-                        has_more_records = True
-                    while has_more_records:
-                        if source_type == "qboapi":
-                            lastupdate = pd.to_datetime(df[last_modified_column], utc=True).max()
-                        else:
-                            lastupdate = pd.to_datetime(df[last_modified_column]).max()
-                        if pd.isna(lastupdate):
-                            if source_type == "qboapi":
-                                lastupdate_str = '1970-01-01T00:00:00Z'
-                            else:
-                                lastupdate_str = '1970-01-01 00:00:00'
-                        else:
-                            if source_type == "qboapi":
-                                lastupdate_str = lastupdate.tz_localize('UTC') if lastupdate.tzinfo is None else lastupdate.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
-                            else:
-                                lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
+                    try:
+                        dup_query = f"""
+                            SELECT {id_column}, COUNT(*) AS duplicateCount
+                            FROM {table}
+                            GROUP BY {id_column}
+                            HAVING COUNT(*) > 1
+                        """
+                        duplicated_ids = execute_with_retry(
+                            dup_query,
+                            params,
+                            max_retries=1,
+                            source_type=source_type,
+                            connection_string=connection_string,
+                            table=table,
+                        )
+                        if duplicated_ids is not None and not duplicated_ids.empty:
+                            log_message(f"[WARNING] Duplicate IDs ({id_column}) found in {table}")
+                    except Exception as e:
+                        log_message(f"[WARNING] Skipping duplicate check for {table} ({e}). Continuing to main data pull.")
 
-                        id_order_by = f", {id_column}" if id_column else ""
-                        if source_type == "qodbc":
-                            query = f"""
-                                    SELECT TOP 30000 *
-                                    FROM {table}
-                                    WHERE {last_modified_column} >= {{ts '{lastupdate_str}'}}
-                                    ORDER BY {last_modified_column}{id_order_by}
-                                    """
-                        elif source_type == "suiteql":
-                            query = f"""
-                                    SELECT * , TO_CHAR ( {last_modified_column}, 'YYYY-MM-DD HH24:MI:SS' ) as {last_modified_column}
-                                    FROM {table}
-                                    WHERE {last_modified_column} >= TO_DATE( '{lastupdate_str}', 'YYYY-MM-DD HH24:MI:SS' )
-                                    ORDER BY {last_modified_column}{id_order_by}
-                                    FETCH NEXT 30000 ROWS ONLY
-                                    """
-                        elif source_type == "qboapi":
-                            query = f"""
-                                    SELECT *
-                                    FROM {table}
-                                    WHERE {last_modified_column} >= '{lastupdate_str}'
-                                    ORDER BY {last_modified_column}{id_order_by}
-                                    MAXRESULTS 1000
-                                    """
-                        else:
-                            raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
-                        for attempt in range(max_retries):
-                            try:
-                                new_records = load_data_via_query(sql_query=query, **params)
-                                log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                                break
-                            except Exception as e:
-                                log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                                if source_type == "qodbc":
-                                    kill_qb_processes()
-                                    timer_and_alert(20)
-                                    active_conn = pyodbc.connect(connection_string, autocommit=True)   
-                                else:
-                                    timer_and_alert(60)
-                        else:
-                            log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
-                            continue
-                        if new_records.empty or last_modified_column not in new_records.columns:
-                            log_message(f'[INFO] No newer records fetched.')
-                            has_more_records = False
-                            break
-                        log_message(f'[INFO] New records fetched: {new_records.shape[0]}')
-                        df = pd.concat([df, new_records], ignore_index=True)
-                        
-                        for col in df.columns:
-                            if col == last_modified_column:
-                                if source_type == "qboapi":
-                                    df[col] = pd.to_datetime(df[col], format="mixed", utc=True)
-                                else:
-                                    df[col] = pd.to_datetime(df[col])
-                                continue
-                            try:
-                                df[col] = pd.to_numeric(df[col])
-                            except:
-                                df[col] = df[col].fillna('').astype('str')
-                        if id_column:
-                            df = df.sort_values(by=[last_modified_column, id_column], ascending=[False, True])
-                            df = df.drop_duplicates(subset=[id_column], keep='first')
-                        else:
-                            df = df.sort_values(by=last_modified_column, ascending=False)
-                            df = df.drop_duplicates(keep='first')
-                        df.reset_index(drop=True, inplace=True)
+                table_exists = s3_object_exists(s3_client, bucket_name, object_key)
+                if table_exists:
+                    log_message(f'[INFO] Table "{table}" found in S3. Updating with new records...')
+                    df = read_file_from_s3(
+                        s3_client = s3_client,
+                        bucket_name = bucket_name,
+                        object_key = object_key,
+                        low_memory = False
+                    )
+                else:
+                    log_message(f'[INFO] Table "{table}" not in S3. Fetching full baseline dataset...')
+                    base_target = defined_query if defined_query else table
+                    init_query = build_incremental_query(
+                        source_type,
+                        base_target,
+                        last_modified_column or "1",
+                        None,
+                        id_column,
+                    )
+                    df = execute_with_retry(
+                        init_query,
+                        params,
+                        max_retries,
+                        source_type,
+                        connection_string,
+                        table,
+                    )
+                    if df is None:
+                        continue
+                if df.empty or (last_modified_column and last_modified_column not in df.columns):
+                    log_message(f'[WARNING] Table "{table}" is empty or missing "{last_modified_column}". Skipping batch loop.')
+                    has_more_records = False
+                else:
+                    has_more_records = True
+                while has_more_records and last_modified_column:
+                    if source_type == "qboapi":
+                        lastupdate = pd.to_datetime(df[last_modified_column], utc=True).max()
+                    else:
+                        lastupdate = pd.to_datetime(df[last_modified_column]).max()
+                    if pd.isna(lastupdate):
                         if source_type == "qboapi":
-                            limit = 800
+                            lastupdate_str = '1970-01-01T00:00:00Z'
                         else:
-                            limit = 25000
-                        if new_records.shape[0]<limit:
-                            has_more_records= False
+                            lastupdate_str = '1970-01-01 00:00:00'
+                    else:
+                        if source_type == "qboapi":
+                            lastupdate_str = (
+                                lastupdate.tz_localize('UTC')
+                                if lastupdate.tzinfo is None
+                                else lastupdate.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+                            )
+                        else:
+                            lastupdate_str = lastupdate.strftime('%Y-%m-%d %H:%M:%S')
+
+                    base_target = defined_query if defined_query else table
+                    inc_query = build_incremental_query(
+                        source_type,
+                        base_target,
+                        last_modified_column,
+                        lastupdate_str,
+                        id_column,
+                    )
+                    new_records = execute_with_retry(
+                        inc_query,
+                        params,
+                        max_retries,
+                        source_type,
+                        connection_string,
+                        table,
+                    )
+
+                    if (
+                        new_records is None
+                        or new_records.empty
+                        or last_modified_column not in new_records.columns
+                    ):
+                        log_message('[INFO] No newer records fetched.')
+                        has_more_records = False
+                        break
+                    log_message(f'[INFO] New records fetched: {new_records.shape[0]}')
+                    df = pd.concat([df, new_records], ignore_index=True)
+
+                    for col in df.columns:
+                        if col == last_modified_column:
+                            if source_type == "qboapi":
+                                df[col] = pd.to_datetime(df[col], format="mixed", utc=True)
+                            else:
+                                df[col] = pd.to_datetime(df[col])
+                            continue
+                        try:
+                            df[col] = pd.to_numeric(df[col])
+                        except:
+                            df[col] = df[col].fillna('').astype('str')
+                    if id_column:
+                        df = df.sort_values(by=[last_modified_column, id_column], ascending=[False, True])
+                        df = df.drop_duplicates(subset=[id_column], keep='first')
+                    else:
+                        df = df.sort_values(by=last_modified_column, ascending=False)
+                        df = df.drop_duplicates(keep='first')
+                    df.reset_index(drop=True, inplace=True)
+                    limit = 800 if source_type == "qboapi" else 25000
+                    if new_records.shape[0] < limit:
+                        has_more_records = False
+
                 try:
-                    upload_to_s3(s3_client = s3_client, data = df, bucket_name = bucket_name, object_key = object_key, CreateS3Bucket=True, aws_region = aws_region)
+                    upload_to_s3(
+                        s3_client = s3_client,
+                        data = df,
+                        bucket_name = bucket_name,
+                        object_key = object_key,
+                        CreateS3Bucket=True,
+                        aws_region = aws_region
+                    )
                     log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
                 except Exception as e:
                     log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
@@ -3789,34 +3805,25 @@ def process_data_to_s3(
                 gc.collect()
         else:
             params = {
-                "source_type":source_type,
-                "active_conn":active_conn,
-                "project_id":project_id,
-                "credentials":credentials,
-                "chunksize":chunksize,
-                "file_path":file_path,
-                "encoding":encoding
+                "source_type": source_type,
+                "active_conn": active_conn,
+                "project_id": project_id,
+                "credentials": credentials,
+                "chunksize": chunksize,
+                "file_path": file_path,
+                "encoding": encoding
             }
 
             for table, sql_query in tables.items():
-                for attempt in range(max_retries):
-                    try:
-                        if not file_path:
-                            df = load_data_via_query(sql_query=sql_query, **params)
-                        else:
-                            load_data_via_query(sql_query=sql_query, **params)
-                        log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
-                        break
-                    except Exception as e:
-                        log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
-                        if source_type == "qodbc":
-                            kill_qb_processes()
-                            timer_and_alert(20)
-                            active_conn = pyodbc.connect(connection_string, autocommit=True)   
-                        else:
-                            timer_and_alert(60)
-                else:
-                    log_message(f'[ERROR] All retries failed for table "{table}". Skipping upload.')
+                df = execute_with_retry(
+                    sql_query,
+                    params,
+                    max_retries,
+                    source_type,
+                    connection_string,
+                    table,
+                )
+                if df is None and not file_path:
                     continue
                 object_key = table + '.csv'
                 try:
@@ -3841,7 +3848,7 @@ def process_data_to_s3(
                             s3_client=s3_client,
                             CreateS3Bucket=CreateS3Bucket,
                             aws_region=aws_region,
-                            file_path = file_path,
+                            file_path=file_path,
                             encoding=encoding
                         )
                     log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
