@@ -5766,23 +5766,25 @@ def get_parquet_schema_from_s3(s3_client, bucket, key):
 
 
 def get_csv_schema_from_s3(s3_client, bucket, key):
-    response = s3_client.get_object(Bucket=bucket, Key=key, Range='bytes=0-8192')
-    body = response['Body'].read().decode('utf-8', errors='ignore').strip()
-    if not body:
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    stream = io.TextIOWrapper(response["Body"], encoding="utf-8-sig", newline="")
+    reader = csv.reader(stream)
+    try:
+        columns = next(reader)
+    except StopIteration:
         return []
-    header_line = body.split('\n')[0]
-    columns = [col.strip().strip('"') for col in header_line.split(',')]
     column_defs = []
     seen_cols = {}
-    for col in columns:
-        if not col:
-            continue
-        col_name = col
+    for idx, col in enumerate(columns, start=1):
+        col_name = (col or f"column_{idx}").strip()
+        if not col_name:
+            col_name = f"column_{idx}"
         if col_name in seen_cols:
             seen_cols[col_name] += 1
-            col_name = f"{col_name}.{seen_cols[col_name]}"
+            col_name = f"{col_name}_{seen_cols[col_name]}"
         else:
             seen_cols[col_name] = 0
+        col_name = col_name.replace('"', '""')
         column_defs.append(f'"{col_name}" VARCHAR(MAX)')
     return column_defs
 
