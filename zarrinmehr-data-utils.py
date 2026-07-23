@@ -5885,7 +5885,7 @@ def upload_to_redshift(
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 if is_parquet:
                     column_defs = get_parquet_schema_from_s3(s3_client, bucket, file_key)
-                    copy_options = "FORMAT AS PARQUET MATCHBYCOLUMN"
+                    copy_options = "FORMAT AS PARQUET"
                 else:
                     column_defs = get_csv_schema_from_s3(s3_client, bucket, file_key)
                     copy_options = """
