@@ -5739,13 +5739,7 @@ def get_parquet_schema_from_s3(s3_client, bucket, key):
     buffer = io.BytesIO(response['Body'].read())
     schema = pq.ParquetFile(buffer).schema_arrow
     type_map = {
-        'int64': 'BIGINT',
-        'int32': 'INTEGER',
-        'float64': 'DOUBLE PRECISION',
-        'float32': 'REAL',
-        'bool': 'BOOLEAN',
-        'datetime64[ns]': 'TIMESTAMP',
-        'datetime64[ns, UTC]': 'TIMESTAMPTZ'
+        'double': 'DOUBLE PRECISION'
     }
     column_defs = []
     seen_cols = {}
