@@ -127,6 +127,7 @@ for fr_mod, im_mod, pip_name in modules:
 modules = [
     # Format: (module, alias, pip_install_name)
     ("pandas", "pd", "pandas"),
+    ("pyarrow.parquet", "pq", "pyarrow"),
     ("numpy", "np", "numpy"),
     ("selenium.webdriver.support.expected_conditions", "EC", "selenium"),
     ("selenium.webdriver", "webdriver", "selenium")
@@ -5734,9 +5735,9 @@ def turn_on_case_sensitivity(
 
 
 def get_parquet_schema_from_s3(s3_client, bucket, key):
-    s3_uri = f"s3://{bucket}/{key}"
-    dataset = pq.ParquetDataset(s3_uri, filesystem=boto3.Session().resource('s3'))
-    schema = dataset.schema
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    buffer = io.BytesIO(response['Body'].read())
+    schema = pq.ParquetFile(buffer).schema_arrow
     type_map = {
         'int64': 'BIGINT',
         'int32': 'INTEGER',
@@ -5909,7 +5910,7 @@ def upload_to_redshift(
                 {copy_options};
                 """
                 try:
-                    log_message(f'[INFO] Streaming {file_key} to Redshift table "{table_name}" via {("Parquet" if is_parquet else "csv")} format...')
+                    log_message(f'[INFO] Streaming {file_key}...')
                     cur.execute(copy_query)
                     conn.commit()
                     log_message(f'[SUCCESS] Uploaded {file_key} to Redshift table "{table_name}"!')
