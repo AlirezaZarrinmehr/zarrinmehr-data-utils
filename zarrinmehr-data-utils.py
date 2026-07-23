@@ -3534,18 +3534,19 @@ def build_incremental_query(
         order_index = query_base.lower().rfind("order by")
         existing_order_clause = query_base[order_index:].strip()
         query_base = query_base[:order_index].rstrip()
-    has_order_by = bool(existing_order_clause)
-    if not has_order_by:
+
+    if existing_order_clause:
+        order_clause = existing_order_clause
+    else:
         if last_modified_column:
             order_clause = f"ORDER BY {last_modified_column}{id_order_by}"
         elif id_column:
             order_clause = f"ORDER BY {id_column}"
         else:
             order_clause = ""
-    else:
-        order_clause = ""
+
+
     where_keyword = "AND" if (is_custom_query and "where" in query_base.lower()) else "WHERE"
-    order_clause = existing_order_clause or order_clause
 
     if source_type == "suiteql":
         where_clause = (
@@ -3555,11 +3556,6 @@ def build_incremental_query(
         )
         if not is_custom_query and last_modified_column:
             query_base = f"SELECT *, TO_CHAR({last_modified_column}, 'YYYY-MM-DD HH24:MI:SS') as {last_modified_column} FROM {base_target}"
-        return f"""
-            {query_base}
-            {where_clause}
-            {order_clause}
-        """.strip()
 
     elif source_type == "qodbc":
         where_clause = (
@@ -3570,25 +3566,20 @@ def build_incremental_query(
         if not is_custom_query:
             query_base = f"SELECT TOP 30000 * FROM {base_target}"
 
-        return f"""
-            {query_base}
-            {where_clause}
-            {order_clause}
-        """.strip()
     elif source_type == "qboapi":
         where_clause = (
             f"{where_keyword} {last_modified_column} >= '{lastupdate_str}'"
             if (lastupdate_str and last_modified_column)
             else ""
         )
-        return f"""
-            {query_base}
-            {where_clause}
-            {order_clause}
-        """.strip()
-
     else:
         raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
+
+    return f"""
+        {query_base}
+        {where_clause}
+        {order_clause}
+    """.strip()
 
 
 def process_data_to_s3(
@@ -3619,48 +3610,79 @@ def process_data_to_s3(
 ):
     active_conn = None
     try:
-        if source_type == "qodbc":
-            kill_qb_processes()
-            timer_and_alert(20)
-            active_conn = pyodbc.connect(connection_string, autocommit=True)
-        elif source_type == "mssql":
+
+        if source_type in ["qodbc", "mssql"]:
+            if source_type == "qodbc":
+                kill_qb_processes()
+                timer_and_alert(20)
             active_conn = pyodbc.connect(connection_string, autocommit=True)
 
-        if incremental_update:
-            if source_type == "qodbc":
-                params = {
-                    "source_type": source_type,
-                    "active_conn": active_conn,
-                    "chunksize": chunksize
-                }
-            elif source_type == "suiteql":
-                params = {
-                    "source_type": source_type,
+        params = {"source_type": source_type, "chunksize": chunksize}
+
+        if source_type in ["qodbc", "mssql"]:
+            params["active_conn"] = active_conn
+            params["project_id"] = project_id
+            params["credentials"] = credentials
+            params["file_path"] = file_path
+            params["encoding"] = encoding
+        elif source_type == "suiteql":
+            params.update(
+                {
                     "consumer_key": consumer_key,
                     "consumer_secret": consumer_secret,
                     "token_key": token_key,
                     "token_secret": token_secret,
                     "realm": realm
                 }
-            elif source_type == "qboapi":
-                params = {
-                    "source_type": source_type,
+            )
+        elif source_type == "qboapi":
+            params.update(
+                {
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "redirect_uri": redirect_uri,
                     "environment": environment,
                     "qbo_token_path": qbo_token_path,
-                    "realm": realm
+                    "realm": realm,
                 }
-            else:
-                raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
+            )
+        else:
+            raise ValueError("source_type must be 'suiteql', 'qboapi', 'qodbc', or 'mssql'")
 
-            for table, table_info in tables.items():
-                object_key = table + '.csv'
+        for table, table_info in tables.items():
+            object_key = table + '.csv'
+
+            if isinstance(table_info, dict):
                 id_column = table_info.get("id_column")
                 id_column = ", ".join(id_column) if isinstance(id_column, list) else id_column
                 last_modified_column = table_info.get("last_modified_column")
                 defined_query = table_info.get("query")
+            else:
+                id_column = None
+                last_modified_column = None
+                defined_query = table_info
+
+            is_safe_incremental = incremental_update and bool(last_modified_column)
+
+            if incremental_update and not is_safe_incremental:
+                if id_column:
+                    log_message(
+                        f'[WARNING] Table "{table}" has id_column ("{id_column}") but lacks last_modified_column. '
+                        f"Incremental sync blocked to prevent missing updated records. Forcing Full Refresh."
+                    )
+                else:
+                    log_message(
+                        f'[WARNING] Table "{table}" has neither last_modified_column nor id_column. '
+                        f"Incremental sync blocked to prevent silent stale data. Forcing Full Refresh."
+                    )
+
+            if is_safe_incremental:
+                if not id_column:
+                    log_message(
+                        f'[WARNING] Table "{table}" running incremental sync with last_modified_column '
+                        f'("{last_modified_column}") BUT missing id_column. Updated records may create duplicate S3 rows.'
+                    )
+
                 if id_column and source_type != "qboapi":
                     try:
                         dup_query = f"""
@@ -3680,11 +3702,11 @@ def process_data_to_s3(
                         if duplicated_ids is not None and not duplicated_ids.empty:
                             log_message(f"[WARNING] Duplicate IDs ({id_column}) found in {table}")
                     except Exception as e:
-                        log_message(f"[WARNING] Skipping duplicate check for {table} ({e}). Continuing to main data pull.")
+                        log_message(f"[WARNING] Skipping duplicate check for {table} ({e}).")
 
                 table_exists = s3_object_exists(s3_client, bucket_name, object_key)
                 if table_exists:
-                    log_message(f'[INFO] Table "{table}" found in S3. Updating with new records...')
+                    log_message(f'[INFO] Table "{table}" found in S3.')
                     df = read_file_from_s3(
                         s3_client = s3_client,
                         bucket_name = bucket_name,
@@ -3692,14 +3714,14 @@ def process_data_to_s3(
                         low_memory = False
                     )
                 else:
-                    log_message(f'[INFO] Table "{table}" not in S3. Fetching full baseline dataset...')
+                    log_message(f'[INFO] Table "{table}" not in S3. Fetching initial baseline dataset...')
                     base_target = defined_query if defined_query else table
                     init_query = build_incremental_query(
                         source_type,
                         base_target,
-                        last_modified_column or "1",
+                        last_modified_column,
                         None,
-                        id_column,
+                        id_column
                     )
                     df = execute_with_retry(
                         init_query,
@@ -3711,16 +3733,18 @@ def process_data_to_s3(
                     )
                     if df is None:
                         continue
-                if df.empty or (last_modified_column and last_modified_column not in df.columns):
-                    log_message(f'[WARNING] Table "{table}" is empty or missing "{last_modified_column}". Skipping batch loop.')
+                if df.empty or (last_modified_column not in df.columns):
+                    log_message(f'[WARNING] Table "{table}" is empty or missing "{last_modified_column}". Skipping incremental loop.')
                     has_more_records = False
                 else:
                     has_more_records = True
-                while has_more_records and last_modified_column:
+
+                while has_more_records:
                     if source_type == "qboapi":
                         lastupdate = pd.to_datetime(df[last_modified_column], utc=True).max()
                     else:
                         lastupdate = pd.to_datetime(df[last_modified_column]).max()
+
                     if pd.isna(lastupdate):
                         if source_type == "qboapi":
                             lastupdate_str = '1970-01-01T00:00:00Z'
@@ -3742,7 +3766,7 @@ def process_data_to_s3(
                         base_target,
                         last_modified_column,
                         lastupdate_str,
-                        id_column,
+                        id_column
                     )
                     new_records = execute_with_retry(
                         inc_query,
@@ -3786,37 +3810,13 @@ def process_data_to_s3(
                     if new_records.shape[0] < limit:
                         has_more_records = False
 
-                try:
-                    upload_to_s3(
-                        s3_client = s3_client,
-                        data = df,
-                        bucket_name = bucket_name,
-                        object_key = object_key,
-                        CreateS3Bucket=True,
-                        aws_region = aws_region
-                    )
-                    log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
-                except Exception as e:
-                    log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
-                if 'df' in locals():
-                    del df
-                if 'new_records' in locals():
-                    del new_records
-                gc.collect()
-        else:
-            params = {
-                "source_type": source_type,
-                "active_conn": active_conn,
-                "project_id": project_id,
-                "credentials": credentials,
-                "chunksize": chunksize,
-                "file_path": file_path,
-                "encoding": encoding
-            }
 
-            for table, sql_query in tables.items():
+            else:
+                log_message(f'[INFO] Table "{table}": Performing Full Table Refresh...')
+                full_query = defined_query if defined_query else f"SELECT * FROM {table}"
+
                 df = execute_with_retry(
-                    sql_query,
+                    full_query,
                     params,
                     max_retries,
                     source_type,
@@ -3824,40 +3824,43 @@ def process_data_to_s3(
                     table,
                 )
                 if df is None and not file_path:
+                    log_message(f'[ERROR] Table "{table}": Failed to extract full dataset. Skipping upload.')
                     continue
-                object_key = table + '.csv'
-                try:
-                    if not file_path:
-                        upload_to_s3(
-                            data=df,
-                            bucket_name=bucket_name,
-                            object_key=object_key,
-                            s3_client=s3_client,
-                            CreateS3Bucket=CreateS3Bucket,
-                            aws_region=aws_region,
-                            encoding=encoding
-                        )
-                    else:
-                        if not os.path.getsize(file_path):
-                            log_message(f'[ERROR] File "{file_path}" is missing!')
-                            continue
-                        upload_to_s3(
-                            data=None,
-                            bucket_name=bucket_name,
-                            object_key=object_key,
-                            s3_client=s3_client,
-                            CreateS3Bucket=CreateS3Bucket,
-                            aws_region=aws_region,
-                            file_path=file_path,
-                            encoding=encoding
-                        )
-                    log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket !')
-                except Exception as e:
-                    log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
-                if 'df' in locals():
-                    del df
-                gc.collect()
+            try:
+                if not file_path:
+                    upload_to_s3(
+                        data=df,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        s3_client=s3_client,
+                        CreateS3Bucket=CreateS3Bucket,
+                        aws_region=aws_region,
+                        encoding=encoding
+                    )
+                else:
+                    if not os.path.exists(file_path) or not os.path.getsize(file_path):
+                        log_message(f'[ERROR] File "{file_path}" is missing or empty!')
+                        continue
+                    upload_to_s3(
+                        data=None,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        s3_client=s3_client,
+                        CreateS3Bucket=CreateS3Bucket,
+                        aws_region=aws_region,
+                        file_path=file_path,
+                        encoding=encoding
+                    )
+                log_message(f'[SUCCESS] "{object_key}" table is loaded to S3 "{bucket_name}" bucket!')
+            except Exception as e:
+                log_message(f'[ERROR] Failed to load table "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}')
 
+            if 'df' in locals():
+                del df
+            if 'new_records' in locals():
+                del new_records
+            gc.collect()
+            
     finally:
         try:
             active_conn.close()
