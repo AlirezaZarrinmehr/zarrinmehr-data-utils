@@ -3611,44 +3611,54 @@ def process_data_to_s3(
 ):
     active_conn = None
     try:
-
+        params = {
+            "source_type": source_type,
+            "chunksize": chunksize,
+            "file_path": file_path,
+            "encoding": encoding,
+        }
         if source_type in ["qodbc", "mssql"]:
             if source_type == "qodbc":
                 kill_qb_processes()
                 timer_and_alert(20)
             active_conn = pyodbc.connect(connection_string, autocommit=True)
+            params.update(
+                {
+                    "active_conn": active_conn,
+                }
+            )
 
-        params = {"source_type": source_type, "chunksize": chunksize}
+        elif source_type == "bigquery":
+            params.update(
+                {
+                    "project_id": project_id,
+                    "credentials": credentials,
+                }
+            )
 
-        if source_type in ["qodbc", "mssql"]:
-            params["active_conn"] = active_conn
-            params["project_id"] = project_id
-            params["credentials"] = credentials
-            params["file_path"] = file_path
-            params["encoding"] = encoding
         elif source_type == "suiteql":
             params.update(
                 {
+                    "realm": realm,
                     "consumer_key": consumer_key,
                     "consumer_secret": consumer_secret,
                     "token_key": token_key,
                     "token_secret": token_secret,
-                    "realm": realm
                 }
             )
         elif source_type == "qboapi":
             params.update(
                 {
+                    "realm": realm,
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "redirect_uri": redirect_uri,
                     "environment": environment,
                     "qbo_token_path": qbo_token_path,
-                    "realm": realm,
                 }
             )
         else:
-            raise ValueError("source_type must be 'suiteql', 'qboapi', 'qodbc', or 'mssql'")
+            raise ValueError(f'Unsupported source: "{source_type}"')
 
         for table, table_info in tables.items():
             object_key = table + '.csv'
