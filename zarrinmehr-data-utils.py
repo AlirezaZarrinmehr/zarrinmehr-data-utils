@@ -5749,7 +5749,22 @@ def get_parquet_schema_from_s3(s3_client, bucket, key):
     buffer = io.BytesIO(response['Body'].read())
     schema = pq.ParquetFile(buffer).schema_arrow
     type_map = {
-        'double': 'DOUBLE PRECISION'
+        'boolean': 'BOOLEAN',
+        'bool': 'BOOLEAN',
+        'float64': 'DOUBLE PRECISION',
+        'double': 'DOUBLE PRECISION',
+        'float32': 'REAL',
+        'float': 'REAL',
+        'int96': 'TIMESTAMP',
+        'timestamp': 'TIMESTAMP',
+        'date32': 'DATE',
+        'date64': 'DATE',
+        'int8': 'SMALLINT',
+        'int16': 'SMALLINT',
+        'int32': 'INTEGER',
+        'int64': 'BIGINT',
+        'large_binary': 'VARBYTE',
+        'binary': 'VARBYTE',
     }
     column_defs = []
     seen_cols = {}
@@ -5868,14 +5883,30 @@ def upload_to_redshift(
                 continue
             data_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].lower().endswith(('.csv', '.parquet'))]
             if not data_files:
-                log_message(f'[INFO] No csv or Parquet files found in bucket "{bucket}". Skipping...')
+                log_message(f'[INFO] No valid CSV or Parquet files found in bucket "{bucket}". Skipping...')
                 continue
-            log_message(f'[INFO] Found {len(data_files)} csv or Parquet file(s) in bucket "{bucket}". Uploading to Redshift...')
+            targets = {}
             for file_key in data_files:
-                s3_path = f's3://{bucket}/{file_key}'
                 is_parquet = file_key.lower().endswith('.parquet')
-                ext = '.parquet' if is_parquet else '.csv'
-                table_name = f'{bucket}-{file_key.split(ext)[0]}'
+                if '/' in file_key:
+                    parent_dir = file_key.rsplit('/', 1)[0]
+                    s3_path = f's3://{bucket}/{parent_dir}/'
+                    table_name = f'{bucket}-{parent_dir.replace("/", "_")}'
+                else:
+                    s3_path = f's3://{bucket}/{file_key}'
+                    table_name = f'{bucket}-{file_key.rsplit(".", 1)[0]}'
+                if s3_path not in targets:
+                    targets[s3_path] = {
+                        'table_name': table_name,
+                        'sample_file_key': file_key,
+                        'is_parquet': is_parquet
+                    }
+            log_message(f'[INFO] Found {len(targets)} valid target dataset(s) in bucket "{bucket}". Uploading to Redshift...')
+            for s3_path, info in targets.items():
+                table_name = info['table_name']
+                sample_file_key = info['sample_file_key']
+                is_parquet = info['is_parquet']
+
                 check_table_query = '''
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
@@ -5888,10 +5919,10 @@ def upload_to_redshift(
                     conn.commit()
                     log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 if is_parquet:
-                    column_defs = get_parquet_schema_from_s3(s3_client, bucket, file_key)
+                    column_defs = get_parquet_schema_from_s3(s3_client, bucket, sample_file_key)
                     copy_options = "FORMAT AS PARQUET"
                 else:
-                    column_defs = get_csv_schema_from_s3(s3_client, bucket, file_key)
+                    column_defs = get_csv_schema_from_s3(s3_client, bucket, sample_file_key)
                     copy_options = """
                     CSV
                     IGNOREHEADER 1
@@ -5900,7 +5931,7 @@ def upload_to_redshift(
                     TRUNCATECOLUMNS
                     """
                 if not column_defs:
-                    log_message(f'[WARNING] Could not parse columns for file {file_key}. Skipping...')
+                    log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
                     continue
                 create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
                 log_message(f'[INFO] Creating table "{table_name}"...')
@@ -5914,12 +5945,12 @@ def upload_to_redshift(
                 {copy_options};
                 """
                 try:
-                    log_message(f'[INFO] Streaming {file_key}...')
+                    log_message(f'[INFO] Streaming {s3_path}...')
                     cur.execute(copy_query)
                     conn.commit()
-                    log_message(f'[SUCCESS] Uploaded {file_key} to Redshift table "{table_name}"!')
+                    log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
                 except Exception as e:
-                    log_message(f'[ERROR] Error uploading {file_key}: {e}')
+                    log_message(f'[ERROR] Error uploading {s3_path}: {e}')
                     conn.rollback()
                     raise
 
@@ -5954,7 +5985,7 @@ def upload_to_redshift(
     redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message('[INFO] 🚀 Upload process completed.')
 
-
+    
 def get_status(
     row, 
     rules = [
