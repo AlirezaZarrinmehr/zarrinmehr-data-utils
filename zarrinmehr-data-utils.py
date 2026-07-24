@@ -1933,22 +1933,10 @@ def process_qb_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name
+    s3_bucket_name_bronze
 ):
 
     customersORvendors = customer.copy()
-    def safe_read_s3(object_key, default_columns):
-        try:
-            return read_file_from_s3(
-                s3_client = s3_client, 
-                bucket_name = s3_bucket_name_bronze, 
-                object_key = object_key
-            )
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == "NoSuchKey":
-                log_message(f"[WARNING] {object_key} not found in S3. Creating empty schema fallback.")
-                return pd.DataFrame(columns=default_columns)
-            raise e
     transactions = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'Transaction.csv')
     transactions = transactions.sort_values(['FQTxnLinkKey', 'TimeModified']).drop_duplicates(subset = ['FQTxnLinkKey'], keep='last').copy()
 
@@ -2148,7 +2136,7 @@ def process_qb_transactions(
     }, inplace = True)
 
     cc_credit_headers = ['TxnID', 'RefNumber', 'Memo', 'TxnDate', 'Amount']
-    creditCardCredit = safe_read_s3('CreditCardCredit.csv', cc_credit_headers)
+    creditCardCredit = safe_read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'CreditCardCredit.csv', expected_columns = cc_credit_headers)
     creditCardCredit.rename(columns = {
         'TxnID': 'TransactionId',
         'RefNumber': 'TransactionNo',
@@ -2158,7 +2146,7 @@ def process_qb_transactions(
     }, inplace = True)
     creditCardCredit['TransactionType'] = 'CREDIT CARD CREDIT'
     cc_credit_line_headers = ['AccountRefListID', 'AccountRefFullName', 'TxnDate', 'ExpenseLineAccountRefFullName', 'ExpenseLineAmount', 'TxnID', 'RefNumber', 'ItemLineItemRefFullName', 'ItemLineDesc', 'ItemLineQuantity', 'ItemLineCost']
-    creditCardCreditLines = safe_read_s3('CreditCardCreditExpenseLine.csv', cc_credit_line_headers)
+    creditCardCreditLines = safe_read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'CreditCardCreditExpenseLine.csv', expected_columns = cc_credit_line_headers)
     creditCardCreditLines.drop(columns = ['AccountRefListID', 'AccountRefFullName'], inplace = True)
     creditCardCreditLines.rename(columns = {
         'TxnDate': 'TransactionDate',
@@ -2314,7 +2302,7 @@ def process_qb_transactions(
     billPaymentCheckLines = billPaymentCheckLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     cc_charge_headers = ['TxnID', 'RefNumber', 'Memo', 'TxnDate', 'VendorRefFullName', 'VendorAddressAddr1', 'VendorAddressCity', 'VendorAddressState', 'VendorAddressPostalCode', 'AmountDue']
-    creditCardCharge = safe_read_s3('CreditCardCharge.csv', cc_charge_headers)
+    creditCardCharge = safe_read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'CreditCardCharge.csv', expected_columns = cc_charge_headers)
     creditCardCharge.rename(columns = {
         'TxnID': 'TransactionId',
         'RefNumber': 'TransactionNo',
@@ -2329,7 +2317,7 @@ def process_qb_transactions(
     }, inplace = True)
     creditCardCharge['TransactionType'] = 'CREDIT CARD CHARGE'
     cc_charge_line_headers = ['AccountRefListID', 'AccountRefFullName', 'TxnDate', 'ExpenseLineAccountRefFullName', 'ExpenseLineAmount', 'TxnID', 'RefNumber', 'AccountRefFullName', 'ItemLineItemRefFullName', 'ItemLineDesc', 'ItemLineQuantity', 'ItemLineCost']
-    creditCardChargeLines = safe_read_s3('CreditCardChargeExpenseLine.csv', cc_charge_line_headers)
+    creditCardChargeLines = safe_read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'CreditCardChargeExpenseLine.csv', expected_columns = cc_charge_line_headers)
     creditCardChargeLines.drop(columns = ['AccountRefListID', 'AccountRefFullName'], inplace = True)
     creditCardChargeLines.rename(columns = {
         'TxnDate': 'TransactionDate',
@@ -2429,15 +2417,15 @@ def process_qb_transactions(
         (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce')<=end_date)
     ].copy()  
     txnsLines = txnsLines.merge(account[['FullName', 'AccountType']].drop_duplicates(subset = ['FullName']).rename(columns = {'FullName': 'Account'}), on = 'Account', how = 'left')
-    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on = 'ItemId', how = 'left')
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
 
     txns['subTotal'] = txns['Total']
     txns['TransactionStatus'] = txns['IsPaid'].fillna('').astype('str').replace({'True': 'INVOICED/PAID IN FULL', 'False': 'NOT INVOICED/PAID IN FULL', '': 'NOT INVOICED/PAID IN FULL'})
@@ -2459,14 +2447,13 @@ def process_qb_transactions(
 
 def process_qb_orders(
     companyName,
-    transactions,
     item,
     item_df,
     customersORvendors,
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name,
+    s3_bucket_name_bronze,
     txnsType,
     txnsType2,
     txnsType3,
@@ -2505,7 +2492,7 @@ def process_qb_orders(
     SalesRep = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'SalesRep.csv')
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders['ShipAddress'] = orders[['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2544,7 +2531,7 @@ def process_qb_orders(
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
@@ -2586,7 +2573,7 @@ def process_qb_orders(
     )
 
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
@@ -2604,7 +2591,7 @@ def process_qb_orders(
         item_df, 
         companyName, 
         s3_client, 
-        s3_bucket_name, 
+        s3_bucket_name_bronze, 
         DBIA, 
         itemsCategoriesV3,
         ordersLines
@@ -5239,6 +5226,32 @@ def read_file_from_s3(
     else:
         raise ValueError(f"Unsupported file_type: {file_type}. Use 'csv', 'parquet', or 'xlsx'.")
     return df
+
+
+def safe_read_file_from_s3(
+        bucket_name, 
+        object_key, 
+        s3_client,
+        expected_columns
+    ):
+        try:
+            df = read_file_from_s3(
+                s3_client=s3_client,
+                bucket_name=bucket_name,
+                object_key=object_key
+            )
+        except Exception as e:
+            log_message(f"[WARNING] Failed reading {object_key} from {bucket_name}: {e}. Returning fallback schema.")
+            df = pd.DataFrame(columns=expected_columns)
+        if df.empty and not list(df.columns):
+            df = pd.DataFrame(columns=expected_columns)
+        missing_cols = set(expected_columns) - set(df.columns)
+        if missing_cols:
+            for col in missing_cols:
+                df[col] = None
+            df = df[expected_columns]
+    
+        return df
 
 
 def group(
