@@ -5219,7 +5219,7 @@ def read_file_from_s3(
                 df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
             else:    
                 df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
-        except EmptyDataError:
+        except:
             log_message(f'[WARNING] S3 file "{object_key}" is empty. Returning empty DataFrame.')
             return pd.DataFrame()
     elif file_type == 'parquet':
@@ -5985,7 +5985,7 @@ def upload_to_redshift(
     redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message('[INFO] 🚀 Upload process completed.')
 
-    
+
 def get_status(
     row, 
     rules = [
