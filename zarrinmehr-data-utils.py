@@ -1977,9 +1977,8 @@ def process_qb_transactions(
     generalJournalLines['Total'] = generalJournalLines['Total']
     generalJournalLines['Quantity'] = 1
     generalJournalLines['Rate'] = generalJournalLines['Total']
-    generalJournal = generalJournalLines[['TransactionId', 'TransactionNo', 'OrderNo', 'TransactionDate', 'CustNo', 'Total']].copy()
+    generalJournal = generalJournalLines.copy()
     generalJournal['TransactionType'] = 'GENERAL JOURNAL'
-    generalJournalLines = generalJournalLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Bills ---
     config = {
@@ -2052,7 +2051,6 @@ def process_qb_transactions(
         axis=1
     )
     checks.rename(columns=config['rename'], inplace=True)
-    checks = checks[['TransactionId', 'TransactionNo', 'OrderNo', 'TransactionDate', 'CustNo', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'Total']]
     checks['TransactionType'] = config['transaction_type']
 
     config = {
@@ -2075,7 +2073,6 @@ def process_qb_transactions(
     checkExpenseLine['Total'] = checkExpenseLine['Total'] * config['multiply_total']
     checkExpenseLine['Quantity'] = 1
     checkExpenseLine['Rate'] = checkExpenseLine['Total']
-    checkExpenseLine = checkExpenseLine[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Receive Payment ---
     config = {
@@ -2124,7 +2121,6 @@ def process_qb_transactions(
     receivePaymentLines.rename(columns=config['rename'], inplace=True)
     receivePaymentLines['Quantity'] = 1
     receivePaymentLines['Rate'] = receivePaymentLines['Total']
-    receivePaymentLines = receivePaymentLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Deposit ---
     config = {
@@ -2158,9 +2154,8 @@ def process_qb_transactions(
     depositLines['Total'] = depositLines['Total']
     depositLines['Quantity'] = 1
     depositLines['Rate'] = depositLines['Total']
-    deposit = depositLines[['TransactionId', 'TransactionNo', 'OrderNo', 'TransactionDate', 'CustNo', 'Total']].copy()
+    deposit = depositLines.copy()
     deposit['TransactionType'] = 'DEPOSIT'
-    depositLines = depositLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Invoice ---
     config = {
@@ -2295,7 +2290,6 @@ def process_qb_transactions(
     checksLines.rename(columns=config['rename'], inplace=True)
     checksLines['Quantity'] = checksLines['Quantity'].mask(checksLines['Quantity'].isna() | checksLines['Quantity'].eq(0), 1)
     checksLines['Rate'] = checksLines['Total'] / checksLines['Quantity']
-    checksLines = checksLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Vendor Credit ---
     config = {
@@ -2385,7 +2379,6 @@ def process_qb_transactions(
         axis=1
     )
     salesReceipts.rename(columns=config['rename'], inplace=True)
-    salesReceipts = salesReceipts[['TransactionId', 'TransactionNo', 'OrderNo', 'TransactionDate', 'CustNo', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'Total']]
     salesReceipts['TransactionType'] = config['transaction_type']
 
     config = {
@@ -2406,7 +2399,6 @@ def process_qb_transactions(
     salesReceiptsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     salesReceiptsLines = salesReceiptsLines.merge(transactions[['FQTxnLinkKey', 'AccountRefListID', 'AccountRefFullName', 'Amount']], on=['FQTxnLinkKey'], how='left')
     salesReceiptsLines.rename(columns=config['rename'], inplace=True)
-    salesReceiptsLines = salesReceiptsLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Bill Payment Checks ---
     config = {
@@ -2432,7 +2424,6 @@ def process_qb_transactions(
         axis=1
     )
     billPaymentCheck.rename(columns=config['rename'], inplace=True)
-    billPaymentCheck = billPaymentCheck[['TransactionId', 'TransactionNo', 'OrderNo', 'TransactionDate', 'CustNo', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'Total']]
     billPaymentCheck['TransactionType'] = config['transaction_type']
 
     config = {
@@ -2454,7 +2445,6 @@ def process_qb_transactions(
     billPaymentCheckLines['ItemDescription'] = billPaymentCheckLines['ItemId']
     billPaymentCheckLines['Quantity'] = 1
     billPaymentCheckLines['Rate'] = billPaymentCheckLines['Total']
-    billPaymentCheckLines = billPaymentCheckLines[['TransactionId', 'TransactionDate', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
 
     # --- Credit Card Charge ---
     config = {
