@@ -1925,6 +1925,18 @@ def process_gp_orders(
     return orders, ordersLines, item_df
 
 
+def get_expected_columns(
+    config, 
+    extra=None
+):
+    cols = (
+        list(config.get('rename', {}).keys()) 
+        + config.get('drop', []) 
+        + (extra or [])
+    )
+    return list(dict.fromkeys(cols))
+
+
 def process_qb_transactions(
     account,
     companyName,
@@ -1936,14 +1948,6 @@ def process_qb_transactions(
     s3_bucket_name_bronze
 ):
     customersORvendors = customer.copy()
-
-    def get_expected_columns(config, extra=None):
-        cols = (
-            list(config.get('rename', {}).keys()) 
-            + config.get('drop', []) 
-            + (extra or [])
-        )
-        return list(dict.fromkeys(cols))
 
     # --- Transactions Base ---
     config = {
@@ -2650,13 +2654,15 @@ def process_qb_orders(
     orderCloseDates,
     DBIA,
     itemsCategoriesV3,
-    SalesOrderLinkedTxn
+    txns
 ):
     log_message(f'{txnsType2}...')
     #### orders
     if txnsType == 'PURCHORD':
         object_key_1 = 'PurchaseOrder.csv'
         object_key_2 = 'PurchaseOrderLine.csv'
+        object_key_a = 'PurchaseOrderLinkedTxn.csv'
+        object_key_b = 'Bill'
         object_key_3 = 'IsFullyReceived'
         object_key_4 = 'InventorySiteRefListID'
         object_key_5 = 'VendorRefFullName'
@@ -2667,6 +2673,8 @@ def process_qb_orders(
     else:
         object_key_1 = 'SalesOrder.csv'
         object_key_2 = 'SalesOrderLine.csv'
+        object_key_a = 'SalesOrderLinkedTxn.csv'
+        object_key_b = 'Invoice'
         object_key_3 = 'IsFullyInvoiced'
         object_key_4 = 'SalesRepRefListID'
         object_key_5 = 'CustomerRefFullName'
@@ -2675,29 +2683,72 @@ def process_qb_orders(
         object_key_8 = 'Subtotal'
         object_key_9 = 'Sales'
 
-    orders = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = object_key_1)
-    ordersLines = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = object_key_2)
-    SalesRep = read_file_from_s3( s3_client = s3_client, bucket_name = s3_bucket_name_bronze, object_key = 'SalesRep.csv')
-    SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
-
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    # --- OrderLinkedTxn ---
+    config = {
+        "file": object_key_a,
+        "rename": {
+            'RefNumber':f'{txnsType2}No', 
+            'LinkedTxnRefNumber':'TransactionNo'
+        }
+    }
+    expected_columns = get_expected_columns(config, extra=['LinkedTxnTxnType'])
+    SalesOrderLinkedTxn = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    SalesOrderLinkedTxn = SalesOrderLinkedTxn[SalesOrderLinkedTxn['LinkedTxnTxnType'] == object_key_b].copy()
+    SalesOrderLinkedTxn.rename(columns=config['rename'], inplace=True)
+    SalesOrderLinkedTxn = SalesOrderLinkedTxn[[f'{txnsType2}No', 'TransactionNo']].copy()
+    SalesOrderLinkedTxn.TransactionNo = SalesOrderLinkedTxn.TransactionNo.astype(str)
+    txns.TransactionNo = txns.TransactionNo.astype(str)
+    SalesOrderLinkedTxn = SalesOrderLinkedTxn.merge(txns[['TransactionNo', 'TransactionDate']], on = 'TransactionNo', how = 'left').drop(columns = ['TransactionNo']).dropna().drop_duplicates(subset = [f'{txnsType2}No']).rename(columns = {'TransactionDate':'InvoiceDate'})
+    # --- orders ---
+    config = {
+        "file": object_key_1,
+        "rename": {
+            'TxnID': f'{txnsType2}Id',
+            'RefNumber': f'{txnsType2}No',
+            'TxnDate': f'{txnsType2}Date',
+            object_key_5: f'{txnsType3}No',
+            object_key_6: txnsType5,
+            object_key_7: 'ShipDate',
+            'ShipAddressAddr1': 'ShipName',
+            'ShipAddressCity': 'ShipCity',
+            'ShipAddressState': 'ShipState',
+            'ShipAddressPostalCode': 'ShipZip',
+            object_key_8: 'Total'
+        }
+    }
+    expected_columns = get_expected_columns(config, extra=['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
+    orders = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     orders['ShipAddress'] = orders[['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
     )
-    orders.rename(columns = {
-        'TxnID': f'{txnsType2}Id',
-        'RefNumber': f'{txnsType2}No',
-        'TxnDate': f'{txnsType2}Date',
-        object_key_5: f'{txnsType3}No',
-        object_key_6: txnsType5,
-        object_key_7: 'ShipDate',
-        'ShipAddressAddr1': 'ShipName',
-        'ShipAddressCity': 'ShipCity',
-        'ShipAddressState': 'ShipState',
-        'ShipAddressPostalCode': 'ShipZip',
-        object_key_8: 'Total'
-    }, inplace = True)
+    orders.rename(columns=config['rename'], inplace=True)
+    # --- orders Lines ---
+    config = {
+        "file": object_key_2,
+        "rename": {
+            'TxnID': f'{txnsType2}Id',
+            'RefNumber': f'{txnsType2}No',
+            f'{object_key_9}OrderLineItemRefFullName': 'ItemId',
+            f'{object_key_9}OrderLineDesc': 'ItemDescription',
+            f'{object_key_9}OrderLineQuantity': 'Quantity',
+            f'{object_key_9}OrderLineRate': 'Rate',
+            f'{object_key_9}OrderLineAmount': 'Total'
+        }
+    }
+    expected_columns = get_expected_columns(config)
+    ordersLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    ordersLines.rename(columns=config['rename'], inplace=True)
+    # --- Sales Rep ---
+    config = {
+        "file": "SalesRep.csv"
+    }
+    expected_columns = get_expected_columns(config, extra=['SalesRepEntityRefFullName'])
+    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
+
+    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     orders[f'{txnsType2}Status'] = 'Open'
     orders.loc[(orders['IsManuallyClosed'] == 1) | (orders[object_key_3] == 1), f'{txnsType2}Status'] = 'Closed'
@@ -2707,15 +2758,6 @@ def process_qb_orders(
     ].copy()
     orders = orders.copy()
     #### Lines
-    ordersLines.rename(columns = {
-        'TxnID': f'{txnsType2}Id',
-        'RefNumber': f'{txnsType2}No',
-        f'{object_key_9}OrderLineItemRefFullName': 'ItemId',
-        f'{object_key_9}OrderLineDesc': 'ItemDescription',
-        f'{object_key_9}OrderLineQuantity': 'Quantity',
-        f'{object_key_9}OrderLineRate': 'Rate',
-        f'{object_key_9}OrderLineAmount': 'Total'
-    }, inplace = True)
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
@@ -2813,13 +2855,13 @@ def process_qb_orders(
         ordersLines['InstallDate'] = np.nan
     #-----------------------------------------------------------------------------------------------------------
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['ShipDate']) < start_date) |
-        (pd.to_datetime(ordersLines['ShipDate']) > end_date),
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce') < start_date) |
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce') > end_date),
         'ShipDate'
     ] = np.nan
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['InstallDate']) < start_date) |
-        (pd.to_datetime(ordersLines['InstallDate']) > end_date),
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce') < start_date) |
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce') > end_date),
         'InstallDate'
     ] = np.nan
     #-----------------------------------------------------------------------------------------------------------
