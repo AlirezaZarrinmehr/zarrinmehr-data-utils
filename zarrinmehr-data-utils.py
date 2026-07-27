@@ -2716,7 +2716,7 @@ def process_qb_orders(
             object_key_8: 'Total'
         }
     }
-    expected_columns = get_expected_columns(config, extra=['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
+    expected_columns = get_expected_columns(config, extra=['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5', 'IsManuallyClosed', object_key_3, object_key_4])
     orders = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     orders['ShipAddress'] = orders[['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
@@ -2743,7 +2743,7 @@ def process_qb_orders(
     config = {
         "file": "SalesRep.csv"
     }
-    expected_columns = get_expected_columns(config, extra=['SalesRepEntityRefFullName'])
+    expected_columns = get_expected_columns(config, extra=['ListID', 'SalesRepEntityRefFullName'])
     SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
