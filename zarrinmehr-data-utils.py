@@ -3586,12 +3586,27 @@ def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect
     start_position = 1
     has_more = True
     first_loop = True
-    
+
     with tqdm(desc="Fetching data from QuickBooks", unit="chunk") as pbar:
         while has_more:
             paginated_query = f"{sql_query} STARTPOSITION {start_position} MAXRESULTS {chunksize}"
             qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm}/query?query={paginated_query}"
             response = requests.get(qboapi_url, headers=headers)
+            if response.status_code == 401:
+                log_message(
+                    "[WARNING] QuickBooks access token expired during pull. "
+                    "Refreshing token and retrying current page..."
+                )
+                access_token, realm = load_and_refresh_qbo_token(
+                    qbo_token_path=qbo_token_path,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    redirect_uri=redirect_uri,
+                    environment=environment
+                )
+                headers['Authorization'] = f'Bearer {access_token}'
+                qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm}/query?query={paginated_query}"
+                response = requests.get(qboapi_url, headers=headers)
             if response.status_code != 200:
                 raise Exception(f'QBO Api Error: {response.status_code}, {response.text}')
             result = response.json()
