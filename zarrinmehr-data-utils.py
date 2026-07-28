@@ -6109,6 +6109,35 @@ def get_csv_schema_from_s3(s3_client, bucket, key):
     return column_defs
 
 
+def get_table_schema_from_redshift(cur, table_name):
+    cur.execute(
+        """
+        SELECT column_name, data_type, character_maximum_length
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        ORDER BY ordinal_position;
+        """,
+        (table_name,)
+    )
+    column_defs = []
+    for col_name, data_type, character_maximum_length in cur.fetchall():
+        col_name = col_name.replace('"', '""')
+        data_type = data_type.lower()
+        if data_type in ('character varying', 'varchar'):
+            if character_maximum_length == 65535:
+                redshift_type = 'VARCHAR(MAX)'
+            else:
+                redshift_type = f'VARCHAR({character_maximum_length})'
+        elif data_type in ('timestamp without time zone', 'timestamp'):
+            redshift_type = 'TIMESTAMP'
+        elif data_type == 'double precision':
+            redshift_type = 'DOUBLE PRECISION'
+        else:
+            redshift_type = data_type.upper()
+        column_defs.append(f'"{col_name}" {redshift_type}')
+    return column_defs
+
+
 def upload_to_redshift(
     s3_client,
     redshift_client,
@@ -6157,13 +6186,27 @@ def upload_to_redshift(
     turn_on_case_sensitivity(redshift_client, redshift_cluster_identifier)
     response = redshift_client.describe_clusters(ClusterIdentifier=redshift_cluster_identifier)
     cluster_endpoint = response["Clusters"][0]["Endpoint"]["Address"]
+    conn = None
+    cur = None
+    def safe_rollback():
+        if conn is not None and not conn.closed:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     try:
         conn = psycopg2.connect(
             dbname=redshift_db_name,
             user=redshift_master_username,
             password=redshift_master_password,
             host=cluster_endpoint,
-            port=5439
+            port=5439,
+            sslmode="require",
+            connect_timeout=30,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
         )
         cur = conn.cursor()
         log_message('[SUCCESS] Connected to Redshift!')
@@ -6213,11 +6256,6 @@ def upload_to_redshift(
                 '''
                 cur.execute(check_table_query)
                 existing_tables = [row[0] for row in cur.fetchall()]
-                if table_name in existing_tables:
-                    log_message(f'[INFO] Table "{table_name}" exists. Dropping it...')
-                    cur.execute(f'DROP TABLE "{table_name}";')
-                    conn.commit()
-                    log_message(f'[SUCCESS] Table "{table_name}" dropped!')
                 if is_parquet:
                     column_defs = get_parquet_schema_from_s3(s3_client, bucket, sample_file_key)
                     copy_options = "FORMAT AS PARQUET"
@@ -6233,11 +6271,26 @@ def upload_to_redshift(
                 if not column_defs:
                     log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
                     continue
-                create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
-                log_message(f'[INFO] Creating table "{table_name}"...')
-                cur.execute(create_table_query)
-                conn.commit()
-                log_message(f'[SUCCESS] Table "{table_name}" created!')
+                create_table = True
+                if table_name in existing_tables:
+                    existing_schema = get_table_schema_from_redshift(cur, table_name)
+                    if existing_schema == column_defs:
+                        log_message(f'[INFO] Table "{table_name}" exists and schema matches. Deleting existing rows...')
+                        cur.execute(f'TRUNCATE TABLE "{table_name}";')
+                        conn.commit()
+                        log_message(f'[SUCCESS] Existing rows deleted from "{table_name}"!')
+                        create_table = False
+                    else:
+                        log_message(f'[INFO] Table "{table_name}" exists but schema does not match. Dropping it...')
+                        cur.execute(f'DROP TABLE "{table_name}";')
+                        conn.commit()
+                        log_message(f'[SUCCESS] Table "{table_name}" dropped!')
+                if create_table:
+                    create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
+                    log_message(f'[INFO] Creating table "{table_name}"...')
+                    cur.execute(create_table_query)
+                    conn.commit()
+                    log_message(f'[SUCCESS] Table "{table_name}" created!')
                 copy_query = f"""
                 COPY "{table_name}"
                 FROM '{s3_path}'
@@ -6251,7 +6304,7 @@ def upload_to_redshift(
                     log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
                 except Exception as e:
                     log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                    conn.rollback()
+                    safe_rollback()
                     raise
 
         except Exception as e:
@@ -6264,7 +6317,7 @@ def upload_to_redshift(
             conn.commit()
             log_message(f'[SUCCESS] User {redshift_user["username"]} created successfully.')
         except DuplicateObject:
-            conn.rollback()
+            safe_rollback()
             log_message(f'[INFO] User {redshift_user["username"]} already exists. Skipping creation.')
         grant_usage_query = f"""GRANT USAGE ON SCHEMA public TO "{redshift_user['username']}";"""
         cur.execute(grant_usage_query)
@@ -6276,7 +6329,7 @@ def upload_to_redshift(
                 conn.commit()
                 log_message(f'[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.')
             except UndefinedTable:
-                conn.rollback()
+                safe_rollback()
                 log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
         log_message(f'[INFO] Permissions granted successfully for {redshift_user["username"]}.')
     cur.close()
