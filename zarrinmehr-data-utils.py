@@ -3633,6 +3633,12 @@ def _stream_bigquery(sql_query, project_id, credentials, chunksize):
             pbar.update(1)
 
 
+class PartialDataLoadError(Exception):
+    def __init__(self, message, partial_data):
+        super().__init__(message)
+        self.partial_data = partial_data
+
+
 def load_data_via_query(
         sql_query,
         source_type,
@@ -3695,8 +3701,13 @@ def load_data_via_query(
             return None
         else:
             all_chunks = []
-            for chunk_data, _ in data_generator:
-                all_chunks.extend(chunk_data)
+            try:
+                for chunk_data, _ in data_generator:
+                    all_chunks.extend(chunk_data)
+            except Exception as e:
+                if all_chunks:
+                    raise PartialDataLoadError(str(e), pd.DataFrame(all_chunks)) from e
+                raise
                 
             if not all_chunks:
                 return pd.DataFrame()
@@ -3716,6 +3727,14 @@ def execute_with_retry(
             result = load_data_via_query(sql_query=query, **params)
             log_message(f'[SUCCESS] Table "{table}" retrieved from {source_type} !')
             return result
+        except PartialDataLoadError as e:
+            partial_data = e.partial_data
+            partial_data.attrs["partial_load_error"] = str(e)
+            log_message(
+                f'[WARNING] Table "{table}" partially retrieved from {source_type}; '
+                f'preserving {partial_data.shape[0]} rows before retry. Error: {str(e)}'
+            )
+            return partial_data
         except Exception as e:
             log_message(f'[ERROR] Failed to retrieve table "{table}". Error: {str(e)}. Retry {attempt + 1}/{max_retries} in 1 minute...')
             if source_type == "qodbc":
@@ -4011,6 +4030,7 @@ def process_data_to_s3(
                         log_message('[INFO] No newer records fetched.')
                         has_more_records = False
                         break
+                    partial_load_error = new_records.attrs.get("partial_load_error")
                     log_message(f'[INFO] New records fetched: {new_records.shape[0]}')
                     df = pd.concat([df, new_records], ignore_index=True)
 
@@ -4032,8 +4052,28 @@ def process_data_to_s3(
                         df = df.sort_values(by=last_modified_column, ascending=False)
                         df = df.drop_duplicates(keep='first')
                     df.reset_index(drop=True, inplace=True)
+                    if partial_load_error and not file_path:
+                        try:
+                            upload_to_s3(
+                                data=df,
+                                bucket_name=bucket_name,
+                                object_key=object_key,
+                                s3_client=s3_client,
+                                CreateS3Bucket=CreateS3Bucket,
+                                aws_region=aws_region,
+                                encoding=encoding
+                            )
+                            log_message(
+                                f'[SUCCESS] Uploaded cleaned partial "{object_key}" after retrieval error; retrying.'
+                            )
+                        except Exception as e:
+                            log_message(
+                                f'[ERROR] Failed to upload cleaned partial "{object_key}" to S3 bucket "{bucket_name}". Error: {str(e)}'
+                            )
                     limit = 800 if source_type == "qboapi" else 25000
-                    if new_records.shape[0] < limit:
+                    if partial_load_error:
+                        has_more_records = True
+                    elif new_records.shape[0] < limit:
                         has_more_records = False
 
 
