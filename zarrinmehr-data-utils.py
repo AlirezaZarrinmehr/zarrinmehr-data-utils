@@ -462,6 +462,34 @@ def process_qbo_table(
             )
             if temp_lines.empty:
                 continue
+
+            group_lines_config = line_config.get("group_lines")
+            if group_lines_config:
+                if isinstance(group_lines_config, str):
+                    group_lines_config = {"nested_col": group_lines_config}
+
+                group_lines = flatten_line_items(
+                    df=temp_lines,
+                    col=group_lines_config.get("nested_col", "GroupLineDetail.Line"),
+                    parent_id_col=f"{table_type}Id",
+                    parent_id_name=f"{table_type}Id"
+                )
+
+                drop_detail_types = group_lines_config.get(
+                    "drop_detail_types",
+                    ["GroupLineDetail", "SubTotalLineDetail"]
+                )
+
+                if "DetailType" in temp_lines.columns:
+                    temp_lines = temp_lines[
+                        ~temp_lines["DetailType"].isin(drop_detail_types)
+                    ].copy()
+
+                if not group_lines.empty:
+                    temp_lines = pd.concat(
+                        [temp_lines, group_lines],
+                        ignore_index=True
+                    )
             if config.get("flatten_line_fields", False):
                 temp_lines = add_flattened_qbo_fields(temp_lines)
             temp_lines.rename(columns=line_config.get("rename", {}), inplace=True)
@@ -716,10 +744,13 @@ def process_qbo_transactions(
         },
         "lines": {
             "nested_col": "Line",
+            "group_lines": {
+                "nested_col": "GroupLineDetail.Line",
+            },
             "rename": {
                 "Description": "ItemDescription",
                 "SalesItemLineDetail.ItemAccountRef.value": "AccountId",
-                "SalesItemLineDetail.ItemRef.name": "ItemId",
+                "SalesItemLineDetail.ItemRef.value": "ItemId",
                 "Invoicelinedesc": "ItemDescription",
                 "SalesItemLineDetail.Qty": "Quantity",
                 "SalesItemLineDetail.UnitPrice": "Rate",
@@ -844,6 +875,9 @@ def process_qbo_transactions(
         },
         "lines": {
             "nested_col": "Line",
+            "group_lines": {
+                "nested_col": "GroupLineDetail.Line",
+            },
             "rename": {
                 "Expenselineaccountreffullname": "Accountreffullname",
                 "SalesItemLineDetail.ItemAccountRef.value": "AccountId",
