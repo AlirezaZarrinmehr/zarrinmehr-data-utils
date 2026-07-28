@@ -1425,7 +1425,9 @@ def process_ns_transactions(
         'memo':'ItemDescription',
         'quantity':'Quantity',
         'rateamount':'Rate',
-        'foreignamount':'Total'
+        'foreignamount':'Total',
+        'foreignamountunpaid': 'OpenTotal',
+        'duedate': 'DueDate',
     }, inplace = True)
     txnsLines['linelastmodifieddate'] = pd.to_datetime(txnsLines['linelastmodifieddate'], errors='coerce')
     txnsLines = txnsLines.loc[txnsLines.groupby(['TransactionId', 'linesequencenumber'])['linelastmodifieddate'].idxmax()]
@@ -1437,7 +1439,7 @@ def process_ns_transactions(
     txnsLines['Rate'] = txnsLines['Rate'].fillna(0.0)
     txnsLines['Total'] = txnsLines['Total'].fillna(0.0)
     txnsLines['Quantity'] = txnsLines['Quantity'] * -1
-    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total']]  
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemNo', 'SerialNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'OpenTotal', 'DueDate']]  
     txns['TransactionStatus'] = txns['TransactionStatus'].astype('str').replace({'F': 'Closed', 'T': 'Open'})
     txns.loc[txns.TransactionStatus=='Open', 'CloseDate'] = pd.NaT
     txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
