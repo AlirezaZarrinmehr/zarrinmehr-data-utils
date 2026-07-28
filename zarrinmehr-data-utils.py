@@ -3630,8 +3630,12 @@ def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect
                 df = pd.json_normalize(table)
             yield df.to_dict(orient='records'), list(df.columns)
             first_loop = False
-            start_position += chunksize
             pbar.update(1)
+
+            if query_response.get("maxResults", len(table)) < chunksize:
+                has_more = False
+            else:
+                start_position += chunksize
 
 
 def _stream_bigquery(sql_query, project_id, credentials, chunksize):
