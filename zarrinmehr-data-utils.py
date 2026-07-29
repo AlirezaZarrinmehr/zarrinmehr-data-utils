@@ -3404,9 +3404,9 @@ def extract_column_values(data, column):
 
 
 def build_tables(
-    secrets, 
-    connection_string, 
-    file_path = "Temp.csv"
+    secrets,
+    connection_string,
+    file_path="Temp.csv"
 ):
     tables_mode = secrets.get("tables_mode", "manual")
     if tables_mode == "manual":
@@ -3416,7 +3416,8 @@ def build_tables(
             sql_query=secrets["table_query"],
             source_type=secrets.get("table_query_source_type", "mssql"),
             connection_string=connection_string,
-            file_path=file_path
+            file_path=file_path,
+            timeout_seconds=secrets.get("timeout_seconds", 900)
         )
         table_rows = []
         if os.path.exists(file_path):
@@ -3476,7 +3477,7 @@ def load_and_refresh_qbo_token(
         raise ValueError("qbo_token_path is required")
 
     if os.path.exists(qbo_token_path):
-        with open(qbo_token_path, "r") as file:
+        with open(qbo_token_path, 'r') as file:
             secrets = json.load(file)
     else:
         secrets = {}
@@ -3525,22 +3526,20 @@ def load_and_refresh_qbo_token(
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     secrets.update(updates)
-    with open(qbo_token_path, "w") as file:
+    with open(qbo_token_path, 'w') as file:
         json.dump(secrets, file, indent=2)
     log_message("[SUCCESS] QuickBooks credentials saved")
 
     return access_token, realm
 
 
-def _stream_mssql(sql_query, conn, chunksize):
+def _stream_mssql(sql_query, conn, chunksize, timeout_seconds):
     cursor = conn.cursor()
+    cursor.timeout = timeout_seconds
     try:
-        cursor.execute(f"SELECT COUNT(*) FROM ({sql_query}) AS subquery")
-        total_rows = cursor.fetchone()[0]
-        total_chunks = (total_rows // chunksize) + (total_rows % chunksize > 0)
         cursor.execute(sql_query)
         columns = [str(column[0]) for column in cursor.description]
-        with tqdm(total=total_chunks, desc="Fetching data from MS SQL") as pbar:
+        with tqdm(desc="Fetching data from MS SQL", unit="chunk") as pbar:
             while True:
                 rows = cursor.fetchmany(chunksize)
                 if not rows:
@@ -3551,8 +3550,9 @@ def _stream_mssql(sql_query, conn, chunksize):
         cursor.close()
 
 
-def _stream_qodbc(sql_query, conn, chunksize):
+def _stream_qodbc(sql_query, conn, chunksize, timeout_seconds):
     cursor = conn.cursor()
+    cursor.timeout = timeout_seconds
     try:
         cursor.execute(sql_query)
         columns = [str(col[0]) for col in cursor.description]
@@ -3568,14 +3568,23 @@ def _stream_qodbc(sql_query, conn, chunksize):
         cursor.close()
 
 
-def _stream_suiteql(sql_query, realm, consumer_key, consumer_secret, token_key, token_secret, chunksize):
+def _stream_suiteql(
+    sql_query,
+    realm,
+    consumer_key,
+    consumer_secret,
+    token_key,
+    token_secret,
+    chunksize,
+    timeout_seconds
+):
     auth = OAuth1(
         consumer_key,
         consumer_secret,
         token_key,
         token_secret,
         realm=realm,
-        signature_method='HMAC-SHA256'
+        signature_method="HMAC-SHA256"
     )
     headers = {
         'Content-Type': 'application/json',
@@ -3588,7 +3597,13 @@ def _stream_suiteql(sql_query, realm, consumer_key, consumer_secret, token_key, 
     with tqdm(total=total_results, desc="Fetching data from NetSuite", unit="records") as pbar:
         while has_more:
             suiteql_url = f'https://{realm}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit={chunksize}&offset={offset}'
-            response = requests.post(suiteql_url, auth=auth, headers=headers, json={"q": sql_query})
+            response = requests.post(
+                suiteql_url,
+                auth=auth,
+                headers=headers,
+                json={"q": sql_query},
+                timeout=timeout_seconds
+            )
             if response.status_code != 200:
                 raise Exception(f'SuiteQL Error: {response.status_code}, {response.text}')
             result = response.json()
@@ -3606,7 +3621,16 @@ def _stream_suiteql(sql_query, realm, consumer_key, consumer_secret, token_key, 
             pbar.refresh()
 
 
-def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect_uri, environment, chunksize):
+def _stream_qboapi(
+    sql_query,
+    qbo_token_path,
+    client_id,
+    client_secret,
+    redirect_uri,
+    environment,
+    chunksize,
+    timeout_seconds
+):
     access_token, realm = load_and_refresh_qbo_token(
         qbo_token_path=qbo_token_path,
         client_id=client_id,
@@ -3627,7 +3651,11 @@ def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect
         while has_more:
             paginated_query = f"{sql_query} STARTPOSITION {start_position} MAXRESULTS {chunksize}"
             qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm}/query?query={paginated_query}"
-            response = requests.get(qboapi_url, headers=headers)
+            response = requests.get(
+                qboapi_url,
+                headers=headers,
+                timeout=timeout_seconds
+            )
             if response.status_code == 401:
                 log_message(
                     "[WARNING] QuickBooks access token expired during pull. "
@@ -3641,8 +3669,11 @@ def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect
                     environment=environment
                 )
                 headers['Authorization'] = f'Bearer {access_token}'
-                qboapi_url = f"https://quickbooks.api.intuit.com/v3/company/{realm}/query?query={paginated_query}"
-                response = requests.get(qboapi_url, headers=headers)
+                response = requests.get(
+                    qboapi_url,
+                    headers=headers,
+                    timeout=timeout_seconds
+                )
             if response.status_code != 200:
                 raise Exception(f'QBO Api Error: {response.status_code}, {response.text}')
             result = response.json()
@@ -3674,10 +3705,23 @@ def _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect
                 start_position += chunksize
 
 
-def _stream_bigquery(sql_query, project_id, credentials, chunksize):
+def _stream_bigquery(sql_query, project_id, credentials, chunksize, timeout_seconds):
     client = bigquery.Client(project=project_id, credentials=credentials)
-    query_job = client.query(sql_query)
-    results = query_job.result()
+    job_config = bigquery.QueryJobConfig(
+        job_timeout_ms=timeout_seconds * 1000
+    )
+    query_job = client.query(
+        sql_query,
+        job_config=job_config,
+        timeout=timeout_seconds
+    )
+    try:
+        results = query_job.result(
+            timeout=timeout_seconds
+        )
+    except Exception:
+        query_job.cancel()
+        raise
     results.page_size = chunksize
     df_iterator = results.to_dataframe_iterable()
     with tqdm(desc="Fetching data from BigQuery", unit="chunk") as pbar:
@@ -3713,7 +3757,8 @@ def load_data_via_query(
         client_secret=None,
         redirect_uri=None,
         environment=None,
-        qbo_token_path=None
+        qbo_token_path=None,
+        timeout_seconds=900
 ):
     log_message(f'[INFO] Running {sql_query} via {source_type}')
     conn = active_conn
@@ -3726,15 +3771,49 @@ def load_data_via_query(
 
     try:
         if source_type == "mssql":
-            data_generator = _stream_mssql(sql_query, conn, chunksize)
+            data_generator = _stream_mssql(
+                sql_query,
+                conn,
+                chunksize,
+                timeout_seconds
+            )
         elif source_type == "qodbc":
-            data_generator = _stream_qodbc(sql_query, conn, chunksize)
+            data_generator = _stream_qodbc(
+                sql_query,
+                conn,
+                chunksize,
+                timeout_seconds
+            )
         elif source_type == "bigquery":
-            data_generator = _stream_bigquery(sql_query, project_id, credentials, chunksize)
+            data_generator = _stream_bigquery(
+                sql_query,
+                project_id,
+                credentials,
+                chunksize,
+                timeout_seconds
+            )
         elif source_type == "suiteql":
-            data_generator = _stream_suiteql(sql_query, realm, consumer_key, consumer_secret, token_key, token_secret, chunksize)
+            data_generator = _stream_suiteql(
+                sql_query,
+                realm,
+                consumer_key,
+                consumer_secret,
+                token_key,
+                token_secret,
+                chunksize,
+                timeout_seconds
+            )
         elif source_type == "qboapi":
-            data_generator = _stream_qboapi(sql_query, qbo_token_path, client_id, client_secret, redirect_uri, environment, chunksize)
+            data_generator = _stream_qboapi(
+                sql_query,
+                qbo_token_path,
+                client_id,
+                client_secret,
+                redirect_uri,
+                environment,
+                chunksize,
+                timeout_seconds
+            )
         else:
             raise ValueError(f"Unknown source_type: {source_type}")
 
@@ -3754,20 +3833,17 @@ def load_data_via_query(
                         else:
                             writer.writerow([str(v) for v in row])
             return None
-        else:
-            all_chunks = []
-            try:
-                for chunk_data, _ in data_generator:
-                    all_chunks.extend(chunk_data)
-            except Exception as e:
-                if all_chunks:
-                    raise PartialDataLoadError(str(e), pd.DataFrame(all_chunks)) from e
-                raise
-                
-            if not all_chunks:
-                return pd.DataFrame()
-                
-            return pd.DataFrame(all_chunks)
+        all_chunks = []
+        try:
+            for chunk_data, _ in data_generator:
+                all_chunks.extend(chunk_data)
+        except Exception as e:
+            if all_chunks:
+                raise PartialDataLoadError(str(e), pd.DataFrame(all_chunks)) from e
+            raise
+        if not all_chunks:
+            return pd.DataFrame()
+        return pd.DataFrame(all_chunks)
 
     finally:
         if should_close_conn and conn:
@@ -3775,7 +3851,12 @@ def load_data_via_query(
 
 
 def execute_with_retry(
-    query, params, max_retries, source_type, connection_string, table
+    query,
+    params,
+    max_retries,
+    source_type,
+    connection_string,
+    table
 ):
     for attempt in range(max_retries):
         try:
@@ -3814,7 +3895,11 @@ def s3_object_exists(s3_client, bucket, key):
 
 
 def build_incremental_query(
-    source_type, base_target, last_modified_column, lastupdate_str, id_column
+    source_type,
+    base_target,
+    last_modified_column,
+    lastupdate_str,
+    id_column
 ):
     id_order_by = f", {id_column}" if id_column else ""
     is_custom_query = base_target.strip().lower().startswith("select")
@@ -3834,7 +3919,6 @@ def build_incremental_query(
             order_clause = f"ORDER BY {id_column}"
         else:
             order_clause = ""
-
 
     where_keyword = "AND" if (is_custom_query and "where" in query_base.lower()) else "WHERE"
 
@@ -3896,7 +3980,8 @@ def process_data_to_s3(
     client_secret=None,
     redirect_uri=None,
     environment=None,
-    qbo_token_path=None
+    qbo_token_path=None,
+    timeout_seconds=900
 ):
     active_conn = None
     try:
@@ -3905,6 +3990,7 @@ def process_data_to_s3(
             "chunksize": chunksize,
             "file_path": file_path,
             "encoding": encoding,
+            "timeout_seconds": timeout_seconds,
         }
         if source_type in ["qodbc", "mssql"]:
             if source_type == "qodbc":
@@ -4008,10 +4094,10 @@ def process_data_to_s3(
                 if table_exists:
                     log_message(f'[INFO] Table "{table}" found in S3.')
                     df = read_file_from_s3(
-                        s3_client = s3_client,
-                        bucket_name = bucket_name,
-                        object_key = object_key,
-                        low_memory = False
+                        s3_client=s3_client,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        low_memory=False
                     )
                 else:
                     log_message(f'[INFO] Table "{table}" not in S3. Fetching initial baseline dataset...')
@@ -4131,7 +4217,6 @@ def process_data_to_s3(
                     elif new_records.shape[0] < limit:
                         has_more_records = False
 
-
             else:
                 log_message(f'[INFO] Table "{table}": Performing Full Table Refresh...')
                 full_query = defined_query if defined_query else f"SELECT * FROM {table}"
@@ -4181,7 +4266,7 @@ def process_data_to_s3(
             if 'new_records' in locals():
                 del new_records
             gc.collect()
-            
+
     finally:
         try:
             active_conn.close()
