@@ -3533,9 +3533,8 @@ def load_and_refresh_qbo_token(
     return access_token, realm
 
 
-def _stream_mssql(sql_query, conn, chunksize, timeout_seconds):
+def _stream_mssql(sql_query, conn, chunksize):
     cursor = conn.cursor()
-    cursor.timeout = timeout_seconds
     try:
         cursor.execute(sql_query)
         columns = [str(column[0]) for column in cursor.description]
@@ -3550,9 +3549,8 @@ def _stream_mssql(sql_query, conn, chunksize, timeout_seconds):
         cursor.close()
 
 
-def _stream_qodbc(sql_query, conn, chunksize, timeout_seconds):
+def _stream_qodbc(sql_query, conn, chunksize):
     cursor = conn.cursor()
-    cursor.timeout = timeout_seconds
     try:
         cursor.execute(sql_query)
         columns = [str(col[0]) for col in cursor.description]
@@ -3766,23 +3764,20 @@ def load_data_via_query(
     if source_type in ["mssql", "qodbc"] and not conn:
         if not connection_string:
             raise ValueError(f'Either active_conn or connection_string must be provided for the "{source_type}" source type')
-        conn = pyodbc.connect(connection_string, autocommit=True)
-        should_close_conn = True
+        conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
 
     try:
         if source_type == "mssql":
             data_generator = _stream_mssql(
                 sql_query,
                 conn,
-                chunksize,
-                timeout_seconds
+                chunksize
             )
         elif source_type == "qodbc":
             data_generator = _stream_qodbc(
                 sql_query,
                 conn,
-                chunksize,
-                timeout_seconds
+                chunksize
             )
         elif source_type == "bigquery":
             data_generator = _stream_bigquery(
@@ -3856,7 +3851,8 @@ def execute_with_retry(
     max_retries,
     source_type,
     connection_string,
-    table
+    table,
+    timeout_seconds=900
 ):
     for attempt in range(max_retries):
         try:
@@ -3876,7 +3872,7 @@ def execute_with_retry(
             if source_type == "qodbc":
                 kill_qb_processes()
                 timer_and_alert(20)
-                active_conn = pyodbc.connect(connection_string, autocommit=True)
+                active_conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
                 params["active_conn"] = active_conn
             else:
                 timer_and_alert(60)
@@ -3996,7 +3992,7 @@ def process_data_to_s3(
             if source_type == "qodbc":
                 kill_qb_processes()
                 timer_and_alert(20)
-            active_conn = pyodbc.connect(connection_string, autocommit=True)
+            active_conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
             params.update(
                 {
                     "active_conn": active_conn,
@@ -4084,6 +4080,7 @@ def process_data_to_s3(
                             source_type=source_type,
                             connection_string=connection_string,
                             table=table,
+                            timeout_seconds=timeout_seconds
                         )
                         if duplicated_ids is not None and not duplicated_ids.empty:
                             log_message(f"[WARNING] Duplicate IDs ({id_column}) found in {table}")
@@ -4116,6 +4113,7 @@ def process_data_to_s3(
                         source_type,
                         connection_string,
                         table,
+                        timeout_seconds=timeout_seconds
                     )
                     if df is None:
                         continue
@@ -4161,6 +4159,7 @@ def process_data_to_s3(
                         source_type,
                         connection_string,
                         table,
+                        timeout_seconds=timeout_seconds
                     )
 
                     if (
@@ -4228,6 +4227,7 @@ def process_data_to_s3(
                     source_type,
                     connection_string,
                     table,
+                    timeout_seconds=timeout_seconds
                 )
                 if df is None and not file_path:
                     log_message(f'[ERROR] Table "{table}": Failed to extract full dataset. Skipping upload.')
