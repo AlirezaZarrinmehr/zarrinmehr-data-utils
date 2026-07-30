@@ -547,7 +547,7 @@ def process_qbo_transactions(
                 "Description": "ItemDescription",
                 "Amount": "Total",
             },
-            "multiply_total": -1,
+            "multiply_total": 1,
         },
     })
 
@@ -2070,14 +2070,19 @@ def process_qb_transactions(
             'ItemLineDesc': 'ItemDescription',
             'ItemLineQuantity': 'Quantity',
             'ItemLineCost': 'Rate',
-            'ExpenseLineAmount': 'Total'
+            'ExpenseLineAmount': 'Total',
+            'DueDate':'DueDate'
         }
     }
     expected_columns = get_expected_columns(config)
     billExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     billExpenseLines.rename(columns=config['rename'], inplace=True)
     billExpenseLines['Total'] = billExpenseLines['Total'] * config['multiply_total']
-
+    billExpenseLines["OpenTotal"] = np.where(
+        billExpenseLines["IsPaid"].astype(str).str.lower().eq("true"),
+        0,
+        billExpenseLines["Total"]
+    )
     # --- Checks ---
     config = {
         "file": "Check.csv",
@@ -2249,12 +2254,12 @@ def process_qb_transactions(
             'TxnDate': 'TransactionDate',
             'TxnID': 'TransactionId',
             'RefNumber': 'TransactionNo',
-
             'InvoiceLineItemRefFullName': 'ItemId',
             'InvoiceLineDesc': 'ItemDescription',
             'InvoiceLineQuantity': 'Quantity',
             'InvoiceLineRate': 'Rate',
-            'InvoiceLineAmount': 'Total'
+            'InvoiceLineAmount': 'Total',
+            'DueDate':'DueDate'
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
@@ -2265,6 +2270,11 @@ def process_qb_transactions(
         how='left'
     )
     invoiceLines.rename(columns=config['rename'], inplace=True)
+    invoiceLines["OpenTotal"] = np.where(
+        invoiceLines["IsPaid"].astype(str).str.lower().eq("true"),
+        0,
+        invoiceLines["Total"]
+    )
 
     # --- Credit Card Credit ---
     config = {
@@ -2313,11 +2323,11 @@ def process_qb_transactions(
             'ItemLineAmount': 'Total',
             'TxnID': 'TransactionId',
             'RefNumber': 'TransactionNo',
-
             'ItemLineItemRefFullName': 'ItemId',
             'ItemLineDesc': 'ItemDescription',
             'ItemLineQuantity': 'Quantity',
-            'ItemLineCost': 'Rate'
+            'ItemLineCost': 'Rate',
+            'DueDate':'DueDate'
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
@@ -2328,7 +2338,11 @@ def process_qb_transactions(
         how='left'
     )
     billsLines.rename(columns=config['rename'], inplace=True)
-
+    billsLines["OpenTotal"] = np.where(
+        billsLines["IsPaid"].astype(str).str.lower().eq("true"),
+        0,
+        billsLines["Total"]
+    )
     # --- Check Lines ---
     config = {
         "file": "CheckItemLine.csv",
@@ -2337,7 +2351,6 @@ def process_qb_transactions(
             'TxnDate': 'TransactionDate',
             'TxnID': 'TransactionId',
             'RefNumber': 'TransactionNo',
-
             'ItemLineItemRefFullName': 'ItemId',
             'ItemLineDesc': 'ItemDescription',
             'ItemLineQuantity': 'Quantity',
@@ -2386,7 +2399,6 @@ def process_qb_transactions(
             'ItemLineAmount': 'Total',
             'TxnID': 'TransactionId',
             'RefNumber': 'TransactionNo',
-
             'ItemLineItemRefFullName': 'ItemId',
             'ItemLineDesc': 'ItemDescription',
             'ItemLineQuantity': 'Quantity',
@@ -2455,7 +2467,6 @@ def process_qb_transactions(
             'TxnDate': 'TransactionDate',
             'TxnID': 'TransactionId',
             'RefNumber': 'TransactionNo',
-
             'SalesReceiptLineItemRefFullName': 'ItemId',
             'SalesReceiptLineDesc': 'ItemDescription',
             'SalesReceiptLineQuantity': 'Quantity',
@@ -2673,7 +2684,7 @@ def process_qb_transactions(
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on = 'ItemId', how = 'left')
-    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
@@ -5662,6 +5673,36 @@ def read_file_from_s3(
     return df
 
 
+def read_iif_from_s3(
+    bucket_name, 
+    object_key, 
+    s3_client, 
+    encoding='Windows-1252'
+):
+
+    iif_obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+    file_size = iif_obj['ContentLength']   
+    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
+
+    def stream_with_progress(bytes_io):
+        while True:
+            chunk = bytes_io.read(1024 * 1024)
+            if not chunk:
+                break
+            progress.update(len(chunk))
+            yield chunk
+        progress.close()
+
+    body = iif_obj['Body']
+    stream = stream_with_progress(body)
+    iif_string = b''.join(stream).decode(encoding)  
+    iif_buffer = io.StringIO(iif_string)
+    columns = [f'Column{i}' for i in range(1, 101)]
+    df = pd.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
+
+    return df
+
+
 def safe_read_file_from_s3(
         bucket_name, 
         object_key, 
@@ -5683,7 +5724,6 @@ def safe_read_file_from_s3(
         if missing_cols:
             for col in missing_cols:
                 df[col] = None
-            df = df[expected_columns]
     
         return df
 
@@ -5767,35 +5807,6 @@ def convert_to_int_or_keep(
     except (ValueError, TypeError):
         return x
 
-
-def read_iif_from_s3(
-    bucket_name, 
-    object_key, 
-    s3_client, 
-    encoding='Windows-1252'
-):
-
-    iif_obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-    file_size = iif_obj['ContentLength']   
-    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
-
-    def stream_with_progress(bytes_io):
-        while True:
-            chunk = bytes_io.read(1024 * 1024)
-            if not chunk:
-                break
-            progress.update(len(chunk))
-            yield chunk
-        progress.close()
-
-    body = iif_obj['Body']
-    stream = stream_with_progress(body)
-    iif_string = b''.join(stream).decode(encoding)  
-    iif_buffer = io.StringIO(iif_string)
-    columns = [f'Column{i}' for i in range(1, 101)]
-    df = pd.read_csv(iif_buffer, delimiter='\t', names=columns, encoding=encoding)
-
-    return df
 
 
 def find_useful_columns(
@@ -6718,3 +6729,36 @@ def impute_missing_header_lines(
 
     print(f"Successfully appended {len(df_imputed)} estimated lines to the lines table.")
     return df_final
+
+def read_from_redshift(
+    redshift_client,
+    redshift_cluster_identifier,
+    redshift_db_name,
+    redshift_master_username,
+    redshift_master_password,
+    sql_query,
+):
+    response = redshift_client.describe_clusters(
+        ClusterIdentifier=redshift_cluster_identifier
+    )
+    endpoint = response["Clusters"][0]["Endpoint"]
+    host = endpoint["Address"]
+    port = endpoint.get("Port", 5439)
+    conn = psycopg2.connect(
+        dbname=redshift_db_name,
+        user=redshift_master_username,
+        password=redshift_master_password,
+        host=host,
+        port=port,
+        sslmode="require",
+        connect_timeout=30,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
+    try:
+        df = pd.read_sql_query(sql_query, conn)
+        return df
+    finally:
+        conn.close()
