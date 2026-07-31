@@ -954,7 +954,7 @@ def process_qbo_transactions(
     txnsLines.ItemId=txnsLines.ItemId.fillna('').astype('str')
     item.ItemId=item.ItemId.fillna('').astype('str')
     txnsLines=txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
-    txnsLines=txnsLines[['TransactionId', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txnsLines = txnsLines[['TransactionId', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company']=companyName
     txnsLines=txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     txns=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txns, df_name='txns', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
