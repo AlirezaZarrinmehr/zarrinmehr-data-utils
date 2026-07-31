@@ -247,8 +247,7 @@ valid_ca_states = {
 def flatten_line_items(
     df,
     col,
-    parent_id_col,
-    parent_id_name
+    header_to_line_columns={"source_h_col": "output_h_col"}
 ):
     def safe_parse(value, row_index):
         try:
@@ -296,23 +295,27 @@ def flatten_line_items(
     if col not in df.columns:
         log_message(f'[INFO] Column "{col}" not found. Skipping flatten.')
         return pd.DataFrame()
-    if parent_id_col not in df.columns:
-        log_message(f'[WARNING] Parent ID column "{parent_id_col}" not found.')
-        return pd.DataFrame()
+
+    source_header_cols = list(header_to_line_columns.keys())
+    for source_h_col in source_header_cols:
+        if source_h_col not in df.columns:
+            log_message(f'[WARNING] Header column "{source_h_col}" not found.')
+            return pd.DataFrame()
     df=df.copy()
     df[col]=[
         safe_parse(value, row_index)
         for row_index, value in df[col].items()
     ]
-    df=df[[parent_id_col, col]].explode(col, ignore_index=True)
+    df=df[source_header_cols + [col]].explode(col, ignore_index=True)
     df=df[df[col].notna()].reset_index(drop=True)
     if df.empty:
         return pd.DataFrame()
-    parent_ids=df[parent_id_col].reset_index(drop=True)
+    header_values=df[source_header_cols].reset_index(drop=True)
     line_df=pd.json_normalize(df[col]).reset_index(drop=True)
     if line_df.empty:
         return pd.DataFrame()
-    line_df.insert(0, parent_id_name, parent_ids)
+    for source_h_col, output_h_col in reversed(list(header_to_line_columns.items())):
+        line_df.insert(0, output_h_col, header_values[source_h_col])
     return line_df
 
 
@@ -321,33 +324,32 @@ def merge_flattened_pivot(
     nested_col,
     name_col,
     value_col,
-    parent_id_col="Id",
-    parent_id_name="Id",
+    source_h_col="Id",
+    output_h_col="Id",
     suffix=""
 ):
     df=df.copy()
-    if parent_id_col not in df.columns:
-        log_message(f'[WARNING] Parent ID column "{parent_id_col}" not found. Skipping.')
+    if source_h_col not in df.columns:
+        log_message(f'[WARNING] Header column "{source_h_col}" not found. Skipping.')
         return df
     if nested_col not in df.columns:
         log_message(f'[INFO] Column "{nested_col}" not found. Skipping.')
         return df
-    original_id_dtype=df[parent_id_col].dtype
-    df[parent_id_col]=pd.to_numeric(
-        df[parent_id_col],
+    original_id_dtype=df[source_h_col].dtype
+    df[source_h_col]=pd.to_numeric(
+        df[source_h_col],
         errors="coerce"
     )
     flattened=flatten_line_items(
         df=df,
         col=nested_col,
-        parent_id_col=parent_id_col,
-        parent_id_name=parent_id_name
+        header_to_line_columns={source_h_col: output_h_col}
     )
     if flattened.empty:
         log_message(f'[INFO] No data found in "{nested_col}". Skipping.')
         return df
     missing_cols=[
-        c for c in [parent_id_name, name_col, value_col]
+        c for c in [output_h_col, name_col, value_col]
         if c not in flattened.columns
     ]
     if missing_cols:
@@ -355,11 +357,11 @@ def merge_flattened_pivot(
             f'[WARNING] Missing columns {missing_cols} in "{nested_col}". Skipping.'
         )
         return df
-    flattened[parent_id_name]=pd.to_numeric(
-        flattened[parent_id_name],
+    flattened[output_h_col]=pd.to_numeric(
+        flattened[output_h_col],
         errors="coerce"
     )
-    flattened=flattened.dropna(subset=[parent_id_name, name_col])
+    flattened=flattened.dropna(subset=[output_h_col, name_col])
     if flattened.empty:
         log_message(f'[INFO] No valid rows found in "{nested_col}" after cleaning.')
         return df
@@ -373,7 +375,7 @@ def merge_flattened_pivot(
     flattened=(
         flattened
         .pivot_table(
-            index=parent_id_name,
+            index=output_h_col,
             columns="pivot_col",
             values=value_col,
             aggfunc=lambda x: ", ".join(x.dropna().astype(str).unique())
@@ -383,14 +385,14 @@ def merge_flattened_pivot(
     flattened.columns.name=None
     df=df.merge(
         flattened,
-        left_on=parent_id_col,
-        right_on=parent_id_name,
+        left_on=source_h_col,
+        right_on=output_h_col,
         how="left"
     )
-    if parent_id_name != parent_id_col and parent_id_name in df.columns:
-        df=df.drop(columns=[parent_id_name])
+    if output_h_col != source_h_col and output_h_col in df.columns:
+        df=df.drop(columns=[output_h_col])
     try:
-        df[parent_id_col]=df[parent_id_col].astype(original_id_dtype)
+        df[source_h_col]=df[source_h_col].astype(original_id_dtype)
     except Exception:
         pass
     return df
@@ -402,16 +404,16 @@ def add_flattened_qbo_fields(df):
             "nested_col": "LinkedTxn",
             "name_col": "TxnType",
             "value_col": "TxnId",
-            "parent_id_col": "Id",
-            "parent_id_name": "Id",
+            "source_h_col": "Id",
+            "output_h_col": "Id",
             "suffix": "Id",
         },
         {
             "nested_col": "CustomField",
             "name_col": "Name",
             "value_col": "StringValue",
-            "parent_id_col": "Id",
-            "parent_id_name": "Id",
+            "source_h_col": "Id",
+            "output_h_col": "Id",
             "suffix": "",
         },
     ]
@@ -421,8 +423,8 @@ def add_flattened_qbo_fields(df):
             nested_col=field["nested_col"],
             name_col=field["name_col"],
             value_col=field["value_col"],
-            parent_id_col=field["parent_id_col"],
-            parent_id_name=field["parent_id_name"],
+            source_h_col=field["source_h_col"],
+            output_h_col=field["output_h_col"],
             suffix=field["suffix"]
         )
     return df
@@ -454,11 +456,12 @@ def process_qbo_table(
     all_lines = []
     if line_configs:
         for line_config in line_configs:
+            header_to_line_columns = {f"{table_type}Id": f"{table_type}Id"}
+            header_to_line_columns.update(line_config.get("header_to_line_columns", {}))
             temp_lines = flatten_line_items(
                 df=df,
                 col=line_config["nested_col"],
-                parent_id_col=f"{table_type}Id",
-                parent_id_name=f"{table_type}Id"
+                header_to_line_columns=header_to_line_columns
             )
             if temp_lines.empty:
                 continue
@@ -471,8 +474,7 @@ def process_qbo_table(
                 group_lines = flatten_line_items(
                     df=temp_lines,
                     col=group_lines_config.get("nested_col", "GroupLineDetail.Line"),
-                    parent_id_col=f"{table_type}Id",
-                    parent_id_name=f"{table_type}Id"
+                    header_to_line_columns=header_to_line_columns
                 )
 
                 drop_detail_types = group_lines_config.get(
@@ -588,6 +590,17 @@ def process_qbo_transactions(
                 "Amount": "Total",
             },
             "multiply_total": -1,
+            "header_to_line_columns": {
+                "DueDate": "DueDate",
+                "TransactionStatus": "Status",
+            },
+            "assign": {
+                "OpenTotal": lambda lines: np.where(
+                    lines["Status"].astype(str).str.upper().eq("PAID"),
+                    0,
+                    lines["Total"]
+                ),
+            },
         },
     })
     bills['BillAddress'] = bills[['VendorAddr.Line2', 'VendorAddr.Line3', 'VendorAddr.Line4', 'VendorAddr.Line5']].fillna('').apply(
@@ -755,6 +768,17 @@ def process_qbo_transactions(
                 "SalesItemLineDetail.Qty": "Quantity",
                 "SalesItemLineDetail.UnitPrice": "Rate",
                 "Amount": "Total",
+            },
+            "header_to_line_columns": {
+                "DueDate": "DueDate",
+                "TransactionStatus": "Status",
+            },
+            "assign": {
+                "OpenTotal": lambda lines: np.where(
+                    lines["Status"].astype(str).str.upper().eq("PAID"),
+                    0,
+                    lines["Total"]
+                ),
             },
         },
     })
