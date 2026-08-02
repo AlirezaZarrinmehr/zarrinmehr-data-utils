@@ -6822,8 +6822,8 @@ def discover_join_keys(
 ):
 
     print("🧹 [1/4] Cleaning and casting columns...")
-    clean_df1 = pd.DataFrame({col: clean_to_str(df1[col]) for col in df1.columns})
-    clean_df2 = pd.DataFrame({col: clean_to_str(df2[col]) for col in df2.columns})
+    clean_df1 = pd.DataFrame({col: clean_key(df1[col]) for col in df1.columns})
+    clean_df2 = pd.DataFrame({col: clean_key(df2[col]) for col in df2.columns})
     print("🔍 [2/4] Filtering low-cardinality/categorical columns...")
     valid_cols1 = [c for c in clean_df1.columns if clean_df1[c].nunique(dropna=True) > max_categories]
     valid_cols2 = [c for c in clean_df2.columns if clean_df2[c].nunique(dropna=True) > max_categories]
