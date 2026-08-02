@@ -64,7 +64,8 @@ modules = [
     ("esptool", "esptool"),
     ("recordlinkage", "recordlinkage"),
     ("gc", "gc"),
-    ("nltk", "nltk")
+    ("nltk", "nltk"),
+    ("itertools", "itertools")
 ]
 for mod, pip_name in modules:
     for attempt in range(2):
