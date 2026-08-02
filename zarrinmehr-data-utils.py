@@ -107,7 +107,10 @@ modules = [
     ("urllib.parse", "urlparse", None),
     ("urllib.parse", "parse_qs", None),
     ("collections", "Counter", None),
-    ("pandas.api.types", "is_numeric_dtype", None)
+    ("pandas.api.types", "is_numeric_dtype", None),
+    ("typing", "List", "typing"),
+    ("typing", "Dict", "typing"),
+    ("typing", "Tuple", "typing"),
 ]
 
 for fr_mod, im_mod, pip_name in modules:
@@ -6786,3 +6789,108 @@ def read_from_redshift(
         return df
     finally:
         conn.close()
+
+
+def clean_key(series):
+    def _convert_val(val):
+        if pd.isna(val):
+            return np.nan
+        if isinstance(val, (float, np.floating)):
+            if val.is_integer():
+                val_str = str(int(val))
+            else:
+                val_str = str(val)
+        elif isinstance(val, str):
+            val_clean = val.strip()
+            if val_clean.endswith('.0') and val_clean[:-2].isdigit():
+                val_str = val_clean[:-2]
+            else:
+                val_str = val_clean
+        else:
+            val_str = str(val)
+        return val_str.strip().upper()
+    return series.apply(_convert_val)
+
+
+def discover_join_keys(
+    df1, 
+    df2, 
+    min_overlap_pct=0.10,
+    max_categories=10,
+    max_composite_depth=5,
+    top_candidates_per_depth=8,
+):
+
+    print("🧹 [1/4] Cleaning and casting columns...")
+    clean_df1 = pd.DataFrame({col: clean_to_str(df1[col]) for col in df1.columns})
+    clean_df2 = pd.DataFrame({col: clean_to_str(df2[col]) for col in df2.columns})
+    print("🔍 [2/4] Filtering low-cardinality/categorical columns...")
+    valid_cols1 = [c for c in clean_df1.columns if clean_df1[c].nunique(dropna=True) > max_categories]
+    valid_cols2 = [c for c in clean_df2.columns if clean_df2[c].nunique(dropna=True) > max_categories]
+    results = []
+    def get_tuple_set(df: pd.DataFrame, cols: Tuple[str, ...]) -> set:
+        sub_df = df[list(cols)].dropna()
+        if sub_df.empty:
+            return set()
+        tuples = set(zip(*[sub_df[c] for c in cols]))
+        return tuples - {("",), ("nan",), ("None",), ("NaN",)}
+    qualifying_combos_df1 = []
+    qualifying_combos_df2 = []
+    print(f"🔄 [3/4] Evaluating candidate keys (Depth 1 to {max_composite_depth})...")
+    for depth in range(1, max_composite_depth + 1):
+        print(f"\n--- 📐 Testing {depth}-Column Composite Keys ---")
+        if depth == 1:
+            combos_df1 = [(c,) for c in valid_cols1]
+            combos_df2 = [(c,) for c in valid_cols2]
+        else:
+            # Build combinations from top single-column candidates to keep search space fast
+            if not qualifying_combos_df1 or not qualifying_combos_df2:
+                print(f"⏩ Skipping depth {depth} (no candidates survived previous depth).")
+                break
+            # Restrict candidate pool to top N columns to prevent 5-depth RAM/CPU explosion
+            base_cols_df1 = sorted(list(set(col for combo in qualifying_combos_df1[:top_candidates_per_depth] for col in combo)))
+            base_cols_df2 = sorted(list(set(col for combo in qualifying_combos_df2[:top_candidates_per_depth] for col in combo)))
+            combos_df1 = list(itertools.combinations(base_cols_df1, depth))
+            combos_df2 = list(itertools.combinations(base_cols_df2, depth))
+        if not combos_df1 or not combos_df2:
+            print(f"⏩ No viable combinations for depth {depth}.")
+            break
+        print(f"   Pre-caching {len(combos_df1)} combinations from DF1 and {len(combos_df2)} from DF2...")
+        sets1 = {combo: get_tuple_set(clean_df1, combo) for combo in combos_df1}
+        sets2 = {combo: get_tuple_set(clean_df2, combo) for combo in combos_df2}
+        # Filter out empty tuple sets
+        sets1 = {k: v for k, v in sets1.items() if v}
+        sets2 = {k: v for k, v in sets2.items() if v}
+        total_pairs = len(sets1) * len(sets2)
+        if total_pairs == 0:
+            continue
+        depth_found = 0
+        with tqdm(total=total_pairs, desc=f"Depth {depth} Progress") as pbar:
+            for combo1, s1 in sets1.items():
+                for combo2, s2 in sets2.items():
+                    intersection = len(s1.intersection(s2))
+                    union = len(s1.union(s2))
+                    if intersection > 0 and union > 0:
+                        jaccard = intersection / union
+                        if jaccard >= min_overlap_pct:
+                            depth_found += 1
+                            qualifying_combos_df1.append(combo1)
+                            qualifying_combos_df2.append(combo2)
+                            results.append({
+                                'Key Type': f'{depth}-Column Composite' if depth > 1 else 'Single-Column',
+                                'DF1 Columns': " + ".join(combo1),
+                                'DF2 Columns': " + ".join(combo2),
+                                'Overlap Count': intersection,
+                                'Jaccard Similarity': round(jaccard, 4),
+                                'DF1 Key Uniqueness (%)': round(len(s1) / len(clean_df1) * 100, 2),
+                                'DF2 Key Uniqueness (%)': round(len(s2) / len(clean_df2) * 100, 2),
+                            })
+                    pbar.update(1)
+        print(f"   ✨ Found {depth_found} candidate keys at depth {depth}.")
+    res_df = pd.DataFrame(results)
+    if res_df.empty:
+        print("\n⚠️ No matching candidate keys found meeting the threshold.")
+        return pd.DataFrame()
+
+    print("\n✅ Key discovery complete!")
+    return res_df.sort_values(by=['Jaccard Similarity', 'Overlap Count'], ascending=[False, False])
