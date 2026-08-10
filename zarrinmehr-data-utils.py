@@ -958,6 +958,28 @@ def process_qbo_transactions(
     txnsLines.ItemId=txnsLines.ItemId.fillna('').astype('str')
     item.ItemId=item.ItemId.fillna('').astype('str')
     txnsLines=txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
+    #-------------------------------------
+    txnsLines=txnsLines.merge(
+        txns[['TransactionId', 'TransactionDate', 'CurrencyRef.value']].drop_duplicates(subset='TransactionId'),
+        on='TransactionId',
+        how='left'
+    )
+    txnsLines=txnsLines.merge(
+        CadUsdAvg,
+        left_on=[
+            pd.to_datetime(txnsLines['TransactionDate'], errors='coerce').dt.year,
+            pd.to_datetime(txnsLines['TransactionDate'], errors='coerce').dt.month
+        ],
+        right_on=['Year', 'Month'],
+        how='left'
+    )
+    txnsLines['CAD/USD']=txnsLines['CAD/USD'].interpolate(method='linear', limit_direction='both')
+    txnsLines['Rate']=pd.to_numeric(txnsLines['Rate'], errors='coerce')
+    txnsLines['Total']=pd.to_numeric(txnsLines['Total'], errors='coerce')
+    mask = txnsLines['CurrencyRef.value'].eq('CAD')
+    txnsLines.loc[mask, 'Rate'] = txnsLines.loc[mask, 'Rate'] * txnsLines.loc[mask, 'CAD/USD']
+    txnsLines.loc[mask, 'Total'] = txnsLines.loc[mask, 'Total'] * txnsLines.loc[mask, 'CAD/USD']
+    #-------------------------------------  
     txnsLines = txnsLines[['TransactionId', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company']=companyName
     txnsLines=txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
