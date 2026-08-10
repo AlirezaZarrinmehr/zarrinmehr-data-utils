@@ -522,7 +522,8 @@ def process_qbo_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name
+    s3_bucket_name,
+    exchange_rates
 ):
 
     generalJournal, generalJournalLines = process_qbo_table(
@@ -965,7 +966,7 @@ def process_qbo_transactions(
         how='left'
     )
     txnsLines=txnsLines.merge(
-        CadUsdAvg,
+        exchange_rates,
         left_on=[
             pd.to_datetime(txnsLines['TransactionDate'], errors='coerce').dt.year,
             pd.to_datetime(txnsLines['TransactionDate'], errors='coerce').dt.month
