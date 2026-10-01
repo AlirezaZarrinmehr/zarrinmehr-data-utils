@@ -6258,6 +6258,10 @@ def get_parquet_schema_from_s3(s3_client, bucket, key):
     buffer = io.BytesIO(response['Body'].read())
     schema = pq.ParquetFile(buffer).schema_arrow
     type_map = {
+        'list': 'SUPER',
+        'struct': 'SUPER',
+        'map': 'SUPER',
+        'array': 'SUPER',
         'boolean': 'BOOLEAN',
         'bool': 'BOOLEAN',
         'float64': 'DOUBLE PRECISION',
