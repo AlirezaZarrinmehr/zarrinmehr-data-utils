@@ -65,7 +65,8 @@ modules = [
     ("recordlinkage", "recordlinkage"),
     ("gc", "gc"),
     ("nltk", "nltk"),
-    ("itertools", "itertools")
+    ("itertools", "itertools"),
+    ("urllib", None)
 ]
 
 for mod, pip_name in modules:
@@ -106,8 +107,6 @@ modules = [
     ("itertools", "islice", "itertools"),
     ("intuitlib.client", "AuthClient", "intuit-oauth"),
     ("intuitlib.enums", "Scopes", "intuit-oauth"),
-    ("urllib.parse", "urlparse", None),
-    ("urllib.parse", "parse_qs", None),
     ("collections", "Counter", None),
     ("pandas.api.types", "is_numeric_dtype", None),
     ("typing", "List", "typing"),
@@ -3592,8 +3591,8 @@ def load_and_refresh_qbo_token(
         print("🔗 Go to this URL to authorize:")
         print(auth_url)
         redirect_response = input("\nPaste the FULL redirect URL here:\n")
-        parsed = urlparse(redirect_response)
-        params = parse_qs(parsed.query)
+        parsed = urllib.parse.urlparse(redirect_response)
+        params = urllib.parse.parse_qs(parsed.query)
         auth_code = params.get("code", [None])[0]
         realm = params.get("realmId", [None])[0]
         state = params.get("state", [None])[0]
@@ -7109,7 +7108,10 @@ def upload_to_redshift(
                 existing_tables = [row[0] for row in cur.fetchall()]
                 if is_parquet:
                     column_defs = get_parquet_schema_from_s3(s3_client, bucket, sample_file_key)
-                    copy_options = "FORMAT AS PARQUET"
+                    copy_options = """
+                    FORMAT AS PARQUET
+                    FILLRECORD
+                    """
                 else:
                     column_defs = get_csv_schema_from_s3(s3_client, bucket, sample_file_key)
                     copy_options = """
@@ -7122,7 +7124,6 @@ def upload_to_redshift(
                 if not column_defs:
                     log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
                     continue
-                create_table = True
                 if table_name in existing_tables:
                     existing_schema = get_table_schema_from_redshift(cur, table_name)
                     if existing_schema == column_defs:
@@ -7130,13 +7131,9 @@ def upload_to_redshift(
                         cur.execute(f'TRUNCATE TABLE "{table_name}";')
                         conn.commit()
                         log_message(f'[SUCCESS] Existing rows deleted from "{table_name}"!')
-                        create_table = False
                     else:
-                        log_message(f'[INFO] Table "{table_name}" exists but schema does not match. Dropping it...')
-                        cur.execute(f'DROP TABLE "{table_name}";')
-                        conn.commit()
-                        log_message(f'[SUCCESS] Table "{table_name}" dropped!')
-                if create_table:
+                        log_message(f'[INFO] Table "{table_name}" exists but schema does not match. Adapting...')
+                else:
                     create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
                     log_message(f'[INFO] Creating table "{table_name}"...')
                     cur.execute(create_table_query)
@@ -7154,10 +7151,37 @@ def upload_to_redshift(
                     conn.commit()
                     log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
                 except Exception as e:
-                    log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                    safe_rollback()
-                    raise
-
+                    if "15007" in str(e) or "Unmatched number of columns" in str(e):
+                        safe_rollback()
+                        err_str = str(e)
+                        match = re.search(r'File name:\s*(https?://[^\s]+)', err_str)
+                        if match:
+                            full_url = urllib.parse.unquote(match.group(1))
+                            parts = full_url.split(f'/{bucket}/')
+                            try:
+                                offending_file_key = parts[1]
+                            except Exception as e:
+                                log_message(f'[ERROR] Error uploading {s3_path}: {e}')
+                                safe_rollback()
+                                raise               
+                        log_message(f'[WARNING] Schema mismatch in file {offending_file_key}. Adapting table "{table_name}"...')
+                        file_defs = get_parquet_schema_from_s3(s3_client, bucket, offending_file_key) if is_parquet else get_csv_schema_from_s3(s3_client, bucket, offending_file_key)
+                        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+                        existing_cols = {row[0].lower() for row in cur.fetchall()}
+                        for col_def in file_defs:
+                            col_name = col_def.split('"')[1]
+                            if col_name.lower() not in existing_cols:
+                                log_message(f'[INFO] Adding missing column "{col_name}"...')
+                                cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {col_def};')
+                                conn.commit()
+                        log_message(f'[INFO] Retrying {s3_path}...')
+                        cur.execute(copy_query)
+                        conn.commit()
+                        log_message(f'[SUCCESS] Uploaded {s3_path} after schema adjustment!')
+                    else:
+                        log_message(f'[ERROR] Error uploading {s3_path}: {e}')
+                        safe_rollback()
+                        raise
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
