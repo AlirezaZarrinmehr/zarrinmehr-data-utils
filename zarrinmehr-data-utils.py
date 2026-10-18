@@ -67,6 +67,7 @@ modules = [
     ("nltk", "nltk"),
     ("itertools", "itertools")
 ]
+
 for mod, pip_name in modules:
     for attempt in range(2):
         try:
@@ -112,6 +113,7 @@ modules = [
     ("typing", "List", "typing"),
     ("typing", "Dict", "typing"),
     ("typing", "Tuple", "typing"),
+    ("concurrent.futures", "ThreadPoolExecutor", "concurrent.futures"),
 ]
 
 for fr_mod, im_mod, pip_name in modules:
@@ -134,7 +136,8 @@ modules = [
     ("pyarrow.parquet", "pq", "pyarrow"),
     ("numpy", "np", "numpy"),
     ("selenium.webdriver.support.expected_conditions", "EC", "selenium"),
-    ("selenium.webdriver", "webdriver", "selenium")
+    ("selenium.webdriver", "webdriver", "selenium"),
+    ("pyarrow", "pa", "pyarrow"),
 ]
 
 for mod, alias, pip_name in modules:
@@ -3654,6 +3657,22 @@ def _stream_qodbc(sql_query, conn, chunksize):
         cursor.close()
 
 
+def _stream_odbc(sql_query, conn, chunksize):
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql_query)
+        columns = [str(col[0]) for col in cursor.description]
+        with tqdm(desc="Fetching data from ODBC", unit="chunk") as pbar:
+            while True:
+                rows = cursor.fetchmany(chunksize)
+                if not rows:
+                    break
+                yield [dict(zip(columns, row)) for row in rows], columns
+                pbar.update(1)
+    finally:
+        cursor.close()
+
+
 def _stream_suiteql(
     sql_query,
     realm,
@@ -3824,6 +3843,51 @@ class PartialDataLoadError(Exception):
         self.partial_data = partial_data
 
 
+def _delete_s3_prefix(s3_client, bucket_name, prefix):
+    prefix = prefix.rstrip("/") + "/"
+    if prefix == "/":
+        raise ValueError("Refusing to delete an empty S3 prefix.")
+    paginator = s3_client.get_paginator("list_objects_v2")
+    delete_batch = []
+    deleted_count = 0
+    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            delete_batch.append({"Key": obj["Key"]})
+            if len(delete_batch) == 1000:
+                s3_client.delete_objects(
+                    Bucket=bucket_name,
+                    Delete={"Objects": delete_batch},
+                )
+                deleted_count += len(delete_batch)
+                delete_batch = []
+    if delete_batch:
+        s3_client.delete_objects(
+            Bucket=bucket_name,
+            Delete={"Objects": delete_batch},
+        )
+        deleted_count += len(delete_batch)
+    return deleted_count
+
+
+def _stream_to_s3(
+    records,
+    columns,
+    bucket_name,
+    object_key,
+    s3_client
+):
+    if not records:
+        return False
+    # columnar_data = {col: [row.get(col) for row in records] for col in columns}
+    columnar_data = {col: [str(row.get(col)) if row.get(col) is not None else "" for row in records] for col in columns}
+    table = pa.Table.from_pydict(columnar_data)
+    buffer = io.BytesIO()
+    pq.write_table(table, buffer, compression='SNAPPY')
+    buffer.seek(0)
+    s3_client.upload_fileobj(buffer, bucket_name, object_key)
+    return True
+
+
 def load_data_via_query(
         sql_query,
         source_type,
@@ -3847,55 +3911,49 @@ def load_data_via_query(
         timeout_seconds=900
 ):
     log_message(f'[INFO] Running {sql_query} via {source_type}')
-    conn = active_conn
-    should_close_conn = False
-    if source_type in ["mssql", "qodbc"] and not conn:
-        if not connection_string:
-            raise ValueError(f'Either active_conn or connection_string must be provided for the "{source_type}" source type')
-        conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
+    if not active_conn:
+        if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
+            if source_type == "qodbc":
+                kill_qb_processes()
+                timer_and_alert(20)
+            active_conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
 
     try:
-        if source_type == "mssql":
-            data_generator = _stream_mssql(
-                sql_query,
-                conn,
-                chunksize
-            )
-        elif source_type == "qodbc":
-            data_generator = _stream_qodbc(
-                sql_query,
-                conn,
-                chunksize
+        if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
+            data_generator = _stream_odbc(
+                sql_query=sql_query,
+                conn=active_conn,
+                chunksize=chunksize,
             )
         elif source_type == "bigquery":
             data_generator = _stream_bigquery(
-                sql_query,
-                project_id,
-                credentials,
-                chunksize,
-                timeout_seconds
+                sql_query=sql_query,
+                project_id=project_id,
+                credentials=credentials,
+                chunksize=chunksize,
+                timeout_seconds=timeout_seconds
             )
         elif source_type == "suiteql":
             data_generator = _stream_suiteql(
-                sql_query,
-                realm,
-                consumer_key,
-                consumer_secret,
-                token_key,
-                token_secret,
-                chunksize,
-                timeout_seconds
+                sql_query=sql_query,
+                realm=realm,
+                consumer_key=consumer_key,
+                consumer_secret=consumer_secret,
+                token_key=token_key,
+                token_secret=token_secret,
+                chunksize=chunksize,
+                timeout_seconds=timeout_seconds,
             )
         elif source_type == "qboapi":
             data_generator = _stream_qboapi(
-                sql_query,
-                qbo_token_path,
-                client_id,
-                client_secret,
-                redirect_uri,
-                environment,
-                chunksize,
-                timeout_seconds
+                sql_query=sql_query,
+                qbo_token_path=qbo_token_path,
+                client_id=client_id,
+                client_secret=client_secret,
+                redirect_uri=redirect_uri,
+                environment=environment,
+                chunksize=chunksize,
+                timeout_seconds=timeout_seconds,
             )
         else:
             raise ValueError(f"Unknown source_type: {source_type}")
@@ -3929,10 +3987,13 @@ def load_data_via_query(
         return pd.DataFrame(all_chunks)
 
     finally:
-        if should_close_conn and conn:
-            conn.close()
+        if active_conn:
+            try:
+                active_conn.close()
+            except Exception:
+                pass
 
-
+            
 def execute_with_retry(
     query,
     params,
@@ -3987,7 +4048,7 @@ def build_incremental_query(
 ):
     id_order_by = f", {id_column}" if id_column else ""
     is_custom_query = base_target.strip().lower().startswith("select")
-    query_base = base_target if is_custom_query else f"SELECT * FROM {base_target}"
+    query_base = base_target
     existing_order_clause = ""
     if is_custom_query and "order by" in query_base.lower():
         order_index = query_base.lower().rfind("order by")
@@ -3998,15 +4059,47 @@ def build_incremental_query(
         order_clause = existing_order_clause
     else:
         if last_modified_column:
-            order_clause = f"ORDER BY {last_modified_column}{id_order_by}"
+            order_clause = f"ORDER BY \"{last_modified_column}\"{id_order_by}"
         elif id_column:
-            order_clause = f"ORDER BY {id_column}"
+            order_clause = f"ORDER BY \"{id_column}\""
         else:
             order_clause = ""
 
-    where_keyword = "AND" if (is_custom_query and "where" in query_base.lower()) else "WHERE"
+    depth = 0
+    outer_sql = "".join(
+        " " if (depth := depth + (ch == "(") - (ch == ")")) > 0 or ch == ")" else ch
+        for ch in base_target
+    )
+    where_keyword = "AND" if (is_custom_query and "where" in outer_sql.lower()) else "WHERE"
 
-    if source_type == "suiteql":
+    if source_type == "qodbc":
+        where_clause = (
+            f"{where_keyword} {last_modified_column} >= {{ts '{lastupdate_str}'}}"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        if not is_custom_query:
+            query_base = f"SELECT * FROM {base_target}"
+
+    elif source_type == "mssql":
+        where_clause = (
+            f"{where_keyword} \"{last_modified_column}\" >= {{ts '{lastupdate_str}'}}"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        if not is_custom_query:
+            query_base = f"SELECT * FROM {base_target}"
+
+    elif source_type == "bigquery":
+        where_clause = (
+            f"{where_keyword} {last_modified_column} >= {{ts '{lastupdate_str}'}}"
+            if (lastupdate_str and last_modified_column)
+            else ""
+        )
+        if not is_custom_query:
+            query_base = f"SELECT * FROM {base_target}"
+
+    elif source_type == "netsuite_odbc":
         where_clause = (
             f"{where_keyword} {last_modified_column} >= TO_DATE('{lastupdate_str}', 'YYYY-MM-DD HH24:MI:SS')"
             if (lastupdate_str and last_modified_column)
@@ -4015,14 +4108,40 @@ def build_incremental_query(
         if not is_custom_query and last_modified_column:
             query_base = f"SELECT *, TO_CHAR({last_modified_column}, 'YYYY-MM-DD HH24:MI:SS') as {last_modified_column} FROM {base_target}"
 
-    elif source_type == "qodbc":
+    elif source_type == "suiteql":
+        suiteql_lmd_utc_expr = f"""
+            (
+                {last_modified_column}
+                -
+                (
+                    CASE
+                        WHEN SUBSTR(TZ_OFFSET(SESSIONTIMEZONE), 1, 1) = '-'
+                        THEN -1
+                        ELSE 1
+                    END
+                    *
+                    (
+                        TO_NUMBER(SUBSTR(TZ_OFFSET(SESSIONTIMEZONE), 2, 2)) / 24
+                        +
+                        TO_NUMBER(SUBSTR(TZ_OFFSET(SESSIONTIMEZONE), 5, 2)) / 1440
+                    )
+                )
+            )
+        """
         where_clause = (
-            f"{where_keyword} {last_modified_column} >= {{ts '{lastupdate_str}'}}"
+            f"{where_keyword} {suiteql_lmd_utc_expr} >= TO_DATE('{lastupdate_str}', 'YYYY-MM-DD HH24:MI:SS')"
             if (lastupdate_str and last_modified_column)
             else ""
         )
-        if not is_custom_query:
-            query_base = f"SELECT TOP 30000 * FROM {base_target}"
+        if not is_custom_query and last_modified_column:
+            query_base = f"""
+                SELECT *,
+                    TO_CHAR(
+                        {suiteql_lmd_utc_expr},
+                        'YYYY-MM-DD HH24:MI:SS'
+                    ) as {last_modified_column}
+                FROM {base_target}
+            """
 
     elif source_type == "qboapi":
         where_clause = (
@@ -4030,8 +4149,10 @@ def build_incremental_query(
             if (lastupdate_str and last_modified_column)
             else ""
         )
+        if not is_custom_query:
+            query_base = f"SELECT * FROM {base_target}"
     else:
-        raise ValueError("source_type must be 'suiteql', 'qboapi', or 'qodbc'")
+        raise ValueError(f'Unsupported source: "{source_type}"')
 
     return f"""
         {query_base}
@@ -4360,6 +4481,473 @@ def process_data_to_s3(
             active_conn.close()
         except:
             pass
+
+
+def stream_source_to_bronze(
+    tables,
+    s3_client,
+    bucket_name,
+    source_type,
+    connection_string=None,
+    project_id=None,
+    credentials=None,
+    max_retries=3,
+    CreateS3Bucket=False,
+    aws_region=None,
+    chunksize=1000,
+    file_path=None,
+    encoding='utf-8',
+    consumer_key=None,
+    consumer_secret=None,
+    token_key=None,
+    token_secret=None,
+    realm=None,
+    client_id=None,
+    client_secret=None,
+    redirect_uri=None,
+    environment=None,
+    qbo_token_path=None,
+    timeout_seconds=900
+):
+    if CreateS3Bucket:
+        try:
+            buckets = s3_client.list_buckets()["Buckets"]
+            bucket_names = [bucket['Name'] for bucket in buckets]
+            if bucket_name not in bucket_names:
+                if aws_region == 'us-east-1':
+                    s3_client.create_bucket(Bucket=bucket_name)
+                else:
+                    s3_client.create_bucket(
+                        Bucket=bucket_name, 
+                        CreateBucketConfiguration={'LocationConstraint': aws_region}
+                    )
+                print(f'[SUCCESS] Bucket "{bucket_name}" created!')
+            else:
+                print(f'[INFO] Bucket "{bucket_name}" already exists.')
+        except Exception as e:
+            print(f'[ERROR] Failed to verify or create bucket "{bucket_name}". Error: {str(e)}.')
+            raise e
+    active_conn = None
+    if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
+        if source_type == "qodbc":
+            kill_qb_processes()
+            timer_and_alert(20)
+        active_conn = pyodbc.connect(connection_string, autocommit=True, timeout=timeout_seconds)
+    try:
+        for table, table_info in tables.items():
+            try:
+                if isinstance(table_info, dict):
+                    id_column = table_info.get("id_column")
+                    id_column = (", ".join(f'"{col}"' for col in id_column) if isinstance(id_column, list) else f'"{id_column}"') if id_column else None
+                    last_modified_column = table_info.get("last_modified_column")
+                    defined_query = table_info.get("query")
+                else:
+                    id_column = None
+                    last_modified_column = None
+                    defined_query = table_info
+                is_safe_incremental = bool(last_modified_column)
+                table_prefix = f"{table}"
+                lastupdate = None
+                if is_safe_incremental:
+                    latest_key_value = None
+                    prefix = table_prefix.rstrip("/") + "/"
+                    paginator = s3_client.get_paginator("list_objects_v2")
+                    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                        for obj in page.get("Contents", []):
+                            key = obj["Key"]
+                            if "_lm=" not in key or not key.endswith(".parquet"):
+                                continue
+                            key_value = key.rsplit("_lm=", 1)[1].rsplit(".parquet", 1)[0]
+                            if latest_key_value is None or key_value > latest_key_value:
+                                latest_key_value = key_value
+                    if latest_key_value and "T" in latest_key_value:
+                        date_part, time_part = latest_key_value.split("T", 1)
+                        has_utc_suffix = time_part.endswith("Z")
+                        time_part = time_part[:-1] if has_utc_suffix else time_part
+                        time_part = time_part.replace("-", ":")
+                        if source_type == "qboapi":
+                            lastupdate = f"{date_part}T{time_part}{'Z' if has_utc_suffix else ''}"
+                        else:
+                            lastupdate = f"{date_part} {time_part}"
+                    elif latest_key_value:
+                        lastupdate = latest_key_value
+                    if lastupdate:
+                        log_message(f'[INFO] Table "{table}" starting from watermark {lastupdate}.')
+                    else:
+                        log_message(f'[INFO] Table "{table}" has no chunk watermark. Running baseline stream.')
+                    inc_query = build_incremental_query(
+                        source_type=source_type,
+                        base_target=defined_query if defined_query else table,
+                        last_modified_column=last_modified_column,
+                        lastupdate_str=lastupdate,
+                        id_column=id_column,
+                    )
+                else:
+                    deleted_count = _delete_s3_prefix(
+                        s3_client=s3_client,
+                        bucket_name=bucket_name,
+                        prefix=table_prefix,
+                    )
+                    log_message(
+                        f'[INFO] Table "{table}" has no last_modified_column. '
+                        f"Removed {deleted_count} existing S3 objects before full refresh."
+                    )
+                    inc_query = defined_query if defined_query else f"SELECT * FROM {table}"
+                log_message(f'[DEBUG] Query for "{table}": {inc_query}')
+                if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
+                    data_generator = _stream_odbc(
+                        sql_query=inc_query,
+                        conn=active_conn,
+                        chunksize=chunksize,
+                    )
+                elif source_type == "bigquery":
+                    data_generator = _stream_bigquery(
+                        sql_query=inc_query,
+                        project_id=project_id,
+                        credentials=credentials,
+                        chunksize=chunksize,
+                        timeout_seconds=timeout_seconds
+                    )
+                elif source_type == "suiteql":
+                    data_generator = _stream_suiteql(
+                        sql_query=inc_query,
+                        realm=realm,
+                        consumer_key=consumer_key,
+                        consumer_secret=consumer_secret,
+                        token_key=token_key,
+                        token_secret=token_secret,
+                        chunksize=chunksize,
+                        timeout_seconds=timeout_seconds,
+                    )
+                elif source_type == "qboapi":
+                    data_generator = _stream_qboapi(
+                        sql_query=inc_query,
+                        qbo_token_path=qbo_token_path,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        redirect_uri=redirect_uri,
+                        environment=environment,
+                        chunksize=chunksize,
+                        timeout_seconds=timeout_seconds,
+                    )
+                else:
+                    raise NotImplementedError(
+                        f"Stream extraction strategy for '{source_type}' is not configured."
+                    )
+                uploaded_chunks = 0
+                for idx, (records, columns) in enumerate(data_generator):
+                    if not records:
+                        continue
+                    if is_safe_incremental:
+                        chunk_dates = [
+                            row.get(last_modified_column)
+                            for row in records
+                            if row.get(last_modified_column) is not None
+                        ]
+                        chunk_max_date = pd.to_datetime(chunk_dates, errors="coerce").max()
+                        if pd.isna(chunk_max_date):
+                            raise ValueError(f'Table "{table}" chunk {idx} has no valid "{last_modified_column}" values.')
+                        chunk_watermark = chunk_max_date.strftime("%Y-%m-%dT%H-%M-%S")
+                        object_key = f"{table_prefix}/chunk_{idx:04d}_lm={chunk_watermark}.parquet"
+                    else:
+                        object_key = f"{table_prefix}/chunk_{idx:04d}.parquet"
+                    success = _stream_to_s3(
+                        records=records,
+                        columns=columns,
+                        bucket_name=bucket_name,
+                        object_key=object_key,
+                        s3_client=s3_client,
+                    )
+                    if success:
+                        uploaded_chunks += 1
+                if uploaded_chunks == 0:
+                    log_message(f'[INFO] Produced no records to upload.')
+                else:
+                    log_message(f'[SUCCESS] Streamed {uploaded_chunks} chunks.')
+                gc.collect()
+            except Exception as e:
+                log_message(f'[ERROR] Failed to extract: {str(e)}')
+                gc.collect()
+                continue
+    finally:
+        if active_conn:
+            try:
+                active_conn.close()
+            except Exception:
+                pass
+
+
+def stream_bronze_to_silver(
+    tables,
+    s3_client,
+    bronze_bucket_name,
+    silver_bucket_name,
+    CreateS3Bucket=False,
+    aws_region=None,
+):
+    if CreateS3Bucket:
+        try:
+            buckets = s3_client.list_buckets()["Buckets"]
+            bucket_names = [bucket["Name"] for bucket in buckets]
+            if silver_bucket_name not in bucket_names:
+                if aws_region == "us-east-1":
+                    s3_client.create_bucket(Bucket=silver_bucket_name)
+                else:
+                    s3_client.create_bucket(
+                        Bucket=silver_bucket_name,
+                        CreateBucketConfiguration={"LocationConstraint": aws_region},
+                    )
+                print(f'[SUCCESS] Bucket "{silver_bucket_name}" created!')
+            else:
+                print(f'[INFO] Bucket "{silver_bucket_name}" already exists.')
+        except Exception as e:
+            print(
+                f'[ERROR] Failed to verify or create bucket "{silver_bucket_name}". Error: {str(e)}.'
+            )
+            raise e
+    try:
+        for table, table_info in tables.items():
+            if isinstance(table_info, dict):
+                id_column = table_info.get("id_column")
+                id_column = (
+                    id_column if isinstance(id_column, list) else [id_column]
+                )
+                last_modified_column = table_info.get("last_modified_column")
+                exclusions = table_info.get("exclusions")
+            else:
+                id_column = None
+                last_modified_column = None
+                exclusions = None
+            is_safe_incremental = bool(
+                last_modified_column and id_column and id_column != [None]
+            )
+            table_prefix = f"{table}"
+            bronze_objects = []
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(
+                Bucket=bronze_bucket_name,
+                Prefix=table_prefix.rstrip("/") + "/",
+            ):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if not key.endswith(".parquet"):
+                        continue
+                    lm = ""
+                    if "/lm=" in key:
+                        lm = key.split("/lm=", 1)[1].split("/", 1)[0]
+                    elif "_lm=" in key:
+                        lm = key.rsplit("_lm=", 1)[1].rsplit(".parquet", 1)[0]
+                    chunk_match = re.search(r"chunk_(\d+)", key)
+                    chunk_no = int(chunk_match.group(1)) if chunk_match else -1
+                    bronze_objects.append((lm, chunk_no, key))
+            # --- Full Copy Strategy (Non-Incremental) ---
+            if not is_safe_incremental:
+                deleted_count = _delete_s3_prefix(
+                    s3_client=s3_client,
+                    bucket_name=silver_bucket_name,
+                    prefix=table_prefix,
+                )
+                log_message(
+                    f'[INFO] Table "{table}" silver full copy started. '
+                    f"Bronze files={len(bronze_objects)}, removed old silver={deleted_count}."
+                )
+                copied_files = 0
+                with tqdm(
+                    total=len(bronze_objects),
+                    desc=f"Copying {table}",
+                    unit="file",
+                ) as pbar:
+                    for _, _, key in bronze_objects:
+                        s3_client.copy_object(
+                            Bucket=silver_bucket_name,
+                            Key=key,
+                            CopySource={
+                                "Bucket": bronze_bucket_name,
+                                "Key": key,
+                            },
+                        )
+                        copied_files += 1
+                        pbar.update(1)
+                log_message(
+                    f'[SUCCESS] Table "{table}" silver copy complete. Copied files={copied_files}.'
+                )
+                continue
+            # --- Incremental Deduplication Strategy ---
+            bronze_objects.sort(reverse=True)
+            bronze_keys = {key for _, _, key in bronze_objects}
+            silver_keys = set()
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(
+                Bucket=silver_bucket_name,
+                Prefix=table_prefix.rstrip("/") + "/",
+            ):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if key.endswith(".parquet"):
+                        silver_keys.add(key)
+            stale_keys = sorted(silver_keys - bronze_keys)
+            for i in range(0, len(stale_keys), 1000):
+                batch = [{"Key": key} for key in stale_keys[i : i + 1000]]
+                s3_client.delete_objects(
+                    Bucket=silver_bucket_name, Delete={"Objects": batch}
+                )
+            silver_keys.difference_update(stale_keys)
+            log_message(
+                f'[INFO] Table "{table}" silver dedupe started. '
+                f"Bronze files={len(bronze_objects)}, silver files={len(silver_keys)}, "
+                f"removed stale silver={len(stale_keys)}."
+            )
+            seen_ids = set()
+            written_rows = 0
+            skipped_rows = 0
+            copied_files = 0
+            rewritten_files = 0
+            skipped_existing_files = 0
+            removed_files = 0
+            omitted_files = 0
+            with tqdm(
+                total=len(bronze_objects),
+                desc=f"Cleaning {table}",
+                unit="file",
+            ) as pbar:
+                for _, _, key in bronze_objects:
+                    s3_obj = s3_client.get_object(
+                        Bucket=bronze_bucket_name, Key=key
+                    )
+                    file_bytes = s3_obj["Body"].read()
+                    buffer = io.BytesIO(file_bytes)
+                    parquet_file = pq.ParquetFile(buffer)
+                    excl_cols = exclusions.get("columns", []) if exclusions else []
+                    needed_columns = list(
+                        dict.fromkeys(id_column + [last_modified_column] + excl_cols)
+                    )
+                    missing = [
+                        col
+                        for col in needed_columns
+                        if col not in parquet_file.schema_arrow.names
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f'Table "{table}" file "{key}" missing columns: {missing}'
+                        )
+                    meta_df = parquet_file.read(
+                        columns=needed_columns
+                    ).to_pandas()
+                    # Handle Empty Files
+                    if meta_df.empty:
+                        if key in silver_keys:
+                            skipped_existing_files += 1
+                        else:
+                            s3_client.copy_object(
+                                Bucket=silver_bucket_name,
+                                Key=key,
+                                CopySource={
+                                    "Bucket": bronze_bucket_name,
+                                    "Key": key,
+                                },
+                            )
+                            silver_keys.add(key)
+                            copied_files += 1
+                        pbar.update(1)
+                        continue
+                    total_rows = len(meta_df)
+                    meta_df["_row_pos"] = range(total_rows)
+                    if exclusions and exclusions.get("columns") and exclusions.get("values"):
+                        excl_cols = exclusions.get("columns", [])
+                        excl_vals_set = set(
+                            tuple(x) if isinstance(x, (list, tuple)) else (x,)
+                            for x in exclusions.get("values", [])
+                        )
+                        vals_tuples = list(zip(*[meta_df[c].to_numpy() for c in excl_cols]))
+                        is_excluded = [t in excl_vals_set for t in vals_tuples]
+                        meta_df = meta_df[~pd.Series(is_excluded, index=meta_df.index)]
+                    lmd_series = meta_df[last_modified_column]
+                    if not pd.api.types.is_datetime64_any_dtype(lmd_series):
+                        meta_df["_lmd_sort"] = pd.to_datetime(
+                            lmd_series, errors="coerce", format="ISO8601"
+                        )
+                    else:
+                        meta_df["_lmd_sort"] = lmd_series
+                    meta_df = meta_df.sort_values(
+                        by=["_lmd_sort", "_row_pos"],
+                        ascending=[False, False],
+                        na_position="last",
+                        kind="mergesort",
+                    )
+                    chunk_latest = meta_df.drop_duplicates(
+                        subset=id_column, keep="first"
+                    )
+                    if len(id_column) == 1:
+                        ids = chunk_latest[id_column[0]].to_numpy()
+                    else:
+                        ids = list(
+                            zip(
+                                *[
+                                    chunk_latest[col].to_numpy()
+                                    for col in id_column
+                                ]
+                            )
+                        )
+                    keep_mask = [pk not in seen_ids for pk in ids]
+                    keep_positions = sorted(
+                        chunk_latest.loc[keep_mask, "_row_pos"].tolist()
+                    )
+                    seen_ids.update(ids)
+                    skipped_rows += total_rows - len(keep_positions)
+                    # Case 1: All rows superseded or excluded (Delete)
+                    if not keep_positions:
+                        if key in silver_keys:
+                            s3_client.delete_object(
+                                Bucket=silver_bucket_name, Key=key
+                            )
+                            silver_keys.discard(key)
+                            removed_files += 1
+                        else:
+                            omitted_files += 1
+                        pbar.update(1)
+                        continue
+                    # Case 2: 100% of original rows kept (As Is)
+                    if len(keep_positions) == total_rows:
+                        if key in silver_keys:
+                            skipped_existing_files += 1
+                        else:
+                            s3_client.copy_object(
+                                Bucket=silver_bucket_name,
+                                Key=key,
+                                CopySource={
+                                    "Bucket": bronze_bucket_name,
+                                    "Key": key,
+                                },
+                            )
+                            silver_keys.add(key)
+                            copied_files += 1
+                            written_rows += total_rows
+                        pbar.update(1)
+                        continue
+                    # Case 3: Partial rows kept (Changed due to deduplication or exclusion)
+                    buffer.seek(0)
+                    full_table = pq.read_table(buffer)
+                    silver_table = full_table.take(keep_positions)
+                    out_buf = io.BytesIO()
+                    pq.write_table(silver_table, out_buf)
+                    s3_client.put_object(
+                        Bucket=silver_bucket_name,
+                        Key=key,
+                        Body=out_buf.getvalue(),
+                    )
+                    silver_keys.add(key)
+                    rewritten_files += 1
+                    written_rows += len(silver_table)
+                    pbar.update(1)
+            log_message(
+                f'[SUCCESS] Table "{table}" silver dedupe complete. '
+                f"Written rows={written_rows}, removed duplicate rows={skipped_rows}, "
+                f"copied files={copied_files}, rewritten files={rewritten_files}, "
+                f"skipped existing files={skipped_existing_files}, "
+                f"removed files={removed_files}, omitted files={omitted_files}."
+            )
+    finally:
+        gc.collect()
 
 
 def upload_to_s3(
@@ -5669,19 +6257,60 @@ def generate_table_select_queries(
 
 
 def read_file_from_s3(
-    bucket_name, 
-    object_key, 
-    s3_client, 
-    encoding='utf-8', 
+    bucket_name,
+    object_key,
+    s3_client,
+    encoding = 'utf-8',
     file_type = 'csv',
-    low_memory = True, 
-    dtype_str=False
+    low_memory = True,
+    dtype_str=False,
+    show_progress=True,
+    max_workers=16,
 ):
+
+    if object_key.endswith("/"):
+        paginator = s3_client.get_paginator("list_objects_v2")
+        keys = []
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=object_key):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if not key.endswith("/"):
+                    keys.append(key)
+
+        if not keys:
+            return pd.DataFrame()
+
+        def fetch_child_key(key):
+            return read_file_from_s3(
+                bucket_name=bucket_name,
+                object_key=key,
+                s3_client=s3_client,
+                encoding=encoding,
+                file_type=file_type,
+                low_memory=low_memory,
+                dtype_str=dtype_str,
+                show_progress=False,  # Keep child progress bars hidden
+            )
+
+        # Download and read all files concurrently across threads
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(
+                tqdm(
+                    executor.map(fetch_child_key, keys),
+                    total=len(keys),
+                    desc=f"Downloading {object_key}",
+                    unit="file",
+                    disable=not show_progress,
+                )
+            )
+
+        dfs = [df for df in results if not df.empty]
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
     def stream_with_progress():
         obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
         file_size = obj['ContentLength']
-        progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}')
+        progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Downloading {object_key}', disable=not show_progress)
         body = obj['Body']
         try:
             while True:
@@ -5692,7 +6321,9 @@ def read_file_from_s3(
                 yield chunk
         finally:
             progress.close()
+
     stream = stream_with_progress()
+
     if file_type == 'csv':
         csv_bytes = io.BytesIO(b''.join(stream))
         csv_buffer = io.TextIOWrapper(csv_bytes, encoding=encoding)
@@ -5700,11 +6331,12 @@ def read_file_from_s3(
         try:
             if dtype_str:
                 df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory, dtype=str, na_values=[''], keep_default_na=False)
-            else:    
+            else:
                 df = pd.read_csv(csv_buffer, sep=',', quotechar='"', quoting=csv.QUOTE_ALL, low_memory=low_memory)        
         except:
             log_message(f'[WARNING] S3 file "{object_key}" is empty. Returning empty DataFrame.')
             return pd.DataFrame()
+
     elif file_type == 'parquet':
         parquet_buffer = io.BytesIO(b''.join(stream))
         if parquet_buffer.getbuffer().nbytes == 0:
@@ -5713,6 +6345,7 @@ def read_file_from_s3(
         df = pd.read_parquet(parquet_buffer)
         if dtype_str:
             df = df.astype(str)
+
     elif file_type == 'xlsx':
         xlsx_buffer = io.BytesIO(b''.join(stream))
         if xlsx_buffer.getbuffer().nbytes == 0:
@@ -5720,7 +6353,7 @@ def read_file_from_s3(
             return pd.DataFrame()
         df = pd.read_excel(xlsx_buffer, engine='openpyxl')
     else:
-        raise ValueError(f"Unsupported file_type: {file_type}. Use 'csv', 'parquet', or 'xlsx'.")
+        raise ValueError(f"Unsupported file_type: {file_type}.")
     return df
 
 
@@ -6433,11 +7066,16 @@ def upload_to_redshift(
     for bucket in s3_bucket_names:
         log_message(f'[INFO] Scanning S3 bucket: "{bucket}"')
         try:
-            response = s3_client.list_objects_v2(Bucket=bucket, Prefix="")
-            if "Contents" not in response:
-                log_message(f'[INFO] No files found in bucket "{bucket}". Skipping...')
-                continue
-            data_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].lower().endswith(('.csv', '.parquet'))]
+            data_files = set()
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(
+                Bucket=bucket,
+                Prefix="",
+            ):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if key.lower().endswith((".csv", ".parquet")):
+                        data_files.add(key)
             if not data_files:
                 log_message(f'[INFO] No valid CSV or Parquet files found in bucket "{bucket}". Skipping...')
                 continue
