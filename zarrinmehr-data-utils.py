@@ -7145,43 +7145,50 @@ def upload_to_redshift(
                 IAM_ROLE '{redshift_iam_role_arn}'
                 {copy_options};
                 """
-                try:
-                    log_message(f'[INFO] Streaming {s3_path}...')
-                    cur.execute(copy_query)
-                    conn.commit()
-                    log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
-                except Exception as e:
-                    if "15007" in str(e) or "Unmatched number of columns" in str(e):
-                        safe_rollback()
-                        err_str = str(e)
-                        match = re.search(r'File name:\s*(https?://[^\s]+)', err_str)
-                        if match:
-                            full_url = urllib.parse.unquote(match.group(1))
-                            parts = full_url.split(f'/{bucket}/')
-                            try:
-                                offending_file_key = parts[1]
-                            except Exception as e:
-                                log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                                safe_rollback()
-                                raise               
-                        log_message(f'[WARNING] Schema mismatch in file {offending_file_key}. Adapting table "{table_name}"...')
-                        file_defs = get_parquet_schema_from_s3(s3_client, bucket, offending_file_key) if is_parquet else get_csv_schema_from_s3(s3_client, bucket, offending_file_key)
-                        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
-                        existing_cols = {row[0].lower() for row in cur.fetchall()}
-                        for col_def in file_defs:
-                            col_name = col_def.split('"')[1]
-                            if col_name.lower() not in existing_cols:
-                                log_message(f'[INFO] Adding missing column "{col_name}"...')
-                                cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {col_def};')
-                                conn.commit()
-                        log_message(f'[INFO] Retrying {s3_path}...')
+                while True:
+                    try:
+                        log_message(f'[INFO] Streaming {s3_path}...')
                         cur.execute(copy_query)
                         conn.commit()
-                        log_message(f'[SUCCESS] Uploaded {s3_path} after schema adjustment!')
-                    else:
-                        log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                        safe_rollback()
-                        raise
+                        log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
+                        break
+                    except Exception as e:
+                        if "15007" in str(e) or "Unmatched number of columns" in str(e):
+                            safe_rollback()
+                            err_str = str(e)
+                            match = re.search(r'File name:\s*(https?://[^\s]+)', err_str)
+                            if match:
+                                full_url = urllib.parse.unquote(match.group(1))
+                                parts = full_url.split(f'/{bucket}/')
+                                try:
+                                    offending_file_key = parts[1]
+                                except Exception as e:
+                                    log_message(f'[ERROR] Error uploading {s3_path}: {e}')
+                                    safe_rollback()
+                                    raise
+                            else:
+                                log_message(f'[ERROR] Could not identify the offending file for {s3_path}: {e}')
+                                raise
+                            log_message(f'[WARNING] Schema mismatch in file {offending_file_key}. Adapting table "{table_name}"...')
+                            file_defs = get_parquet_schema_from_s3(s3_client, bucket, offending_file_key) if is_parquet else get_csv_schema_from_s3(s3_client, bucket, offending_file_key)
+                            cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+                            existing_cols = {row[0].lower() for row in cur.fetchall()}
+                            added_columns = 0
+                            for col_def in file_defs:
+                                col_name = col_def.split('"')[1]
+                                if col_name.lower() not in existing_cols:
+                                    log_message(f'[INFO] Adding missing column "{col_name}"...')
+                                    cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {col_def};')
+                                    conn.commit()
+                                    added_columns += 1
+                            if added_columns == 0:
+                                log_message(f'[ERROR] No missing columns could be added for {s3_path}. Stopping retries: {e}')
+                                raise
+                            log_message(f'[INFO] Retrying {s3_path}...')
+                        else:
+                            log_message(f'[ERROR] Error uploading {s3_path}: {e}')
+                            safe_rollback()
+                            raise
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
