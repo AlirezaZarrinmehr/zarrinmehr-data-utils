@@ -6996,12 +6996,12 @@ def upload_to_redshift(
     redshift_master_username,
     redshift_master_password,
     redshift_users,
+    redshift_roles,
     role_name,
     redshift_node_type,
     redshift_cluster_type,
     redshift_number_of_nodes,
-    createRedshiftCluster=False,
-    max_allowed_length=870
+    createRedshiftCluster=False
 ):
     try:
         redshift_iam_role_arn = create_iam_role(iam_client, role_name, trust_policy)
@@ -7192,6 +7192,27 @@ def upload_to_redshift(
         except Exception as e:
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
+    for redshift_role, role_info in redshift_roles.items():
+        try:
+            create_role_query = f'CREATE ROLE "{redshift_role}";'
+            cur.execute(create_role_query)
+            conn.commit()
+            log_message(f'[SUCCESS] Role "{redshift_role}" created successfully.')
+        except DuplicateObject:
+            safe_rollback()
+            log_message(f'[INFO] Role "{redshift_role}" already exists. Skipping creation.')
+        grant_usage_query = f'GRANT USAGE ON SCHEMA public TO ROLE "{redshift_role}";'
+        cur.execute(grant_usage_query)
+        conn.commit()
+        for table in role_info['access']:
+            try:
+                grant_select_query = f'GRANT SELECT ON TABLE public."{table}" TO ROLE "{redshift_role}";'
+                cur.execute(grant_select_query)
+                conn.commit()
+                log_message(f'[SUCCESS] Granted SELECT on {table} to role "{redshift_role}".')
+            except UndefinedTable:
+                safe_rollback()
+                log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
     for redshift_user in redshift_users:
         try:
             create_user_query = f"""CREATE USER "{redshift_user['username']}" WITH PASSWORD '{redshift_user['password']}';"""
@@ -7201,18 +7222,11 @@ def upload_to_redshift(
         except DuplicateObject:
             safe_rollback()
             log_message(f'[INFO] User {redshift_user["username"]} already exists. Skipping creation.')
-        grant_usage_query = f"""GRANT USAGE ON SCHEMA public TO "{redshift_user['username']}";"""
-        cur.execute(grant_usage_query)
-        conn.commit()
-        for table in redshift_user['access']:
-            try:
-                grant_select_query = f"""GRANT SELECT ON TABLE public."{table}" TO "{redshift_user['username']}";"""
-                cur.execute(grant_select_query)
-                conn.commit()
-                log_message(f'[SUCCESS] Granted SELECT on {table} to {redshift_user["username"]}.')
-            except UndefinedTable:
-                safe_rollback()
-                log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
+        for redshift_role in redshift_user['roles']:
+            grant_role_query = f'GRANT ROLE "{redshift_role}" TO "{redshift_user["username"]}";'
+            cur.execute(grant_role_query)
+            conn.commit()
+            log_message(f'[SUCCESS] Granted role "{redshift_role}" to {redshift_user["username"]}.')
         log_message(f'[INFO] Permissions granted successfully for {redshift_user["username"]}.')
     cur.close()
     conn.close()
