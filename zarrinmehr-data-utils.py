@@ -3495,7 +3495,7 @@ def extract_column_values(data, column):
 
 def build_tables(
     secrets,
-    connection_string,
+    connection_string=None,
     file_path="Temp.csv"
 ):
     tables_mode = secrets.get("tables_mode", "manual")
@@ -4485,17 +4485,14 @@ def process_data_to_s3(
 def stream_source_to_bronze(
     tables,
     s3_client,
-    bucket_name,
+    bronze_bucket_name,
     source_type,
     connection_string=None,
     project_id=None,
     credentials=None,
-    max_retries=3,
     CreateS3Bucket=False,
     aws_region=None,
     chunksize=1000,
-    file_path=None,
-    encoding='utf-8',
     consumer_key=None,
     consumer_secret=None,
     token_key=None,
@@ -4512,19 +4509,19 @@ def stream_source_to_bronze(
         try:
             buckets = s3_client.list_buckets()["Buckets"]
             bucket_names = [bucket['Name'] for bucket in buckets]
-            if bucket_name not in bucket_names:
+            if bronze_bucket_name not in bucket_names:
                 if aws_region == 'us-east-1':
-                    s3_client.create_bucket(Bucket=bucket_name)
+                    s3_client.create_bucket(Bucket=bronze_bucket_name)
                 else:
                     s3_client.create_bucket(
-                        Bucket=bucket_name, 
+                        Bucket=bronze_bucket_name, 
                         CreateBucketConfiguration={'LocationConstraint': aws_region}
                     )
-                print(f'[SUCCESS] Bucket "{bucket_name}" created!')
+                print(f'[SUCCESS] Bucket "{bronze_bucket_name}" created!')
             else:
-                print(f'[INFO] Bucket "{bucket_name}" already exists.')
+                print(f'[INFO] Bucket "{bronze_bucket_name}" already exists.')
         except Exception as e:
-            print(f'[ERROR] Failed to verify or create bucket "{bucket_name}". Error: {str(e)}.')
+            print(f'[ERROR] Failed to verify or create bucket "{bronze_bucket_name}". Error: {str(e)}.')
             raise e
     active_conn = None
     if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
@@ -4551,7 +4548,7 @@ def stream_source_to_bronze(
                     latest_key_value = None
                     prefix = table_prefix.rstrip("/") + "/"
                     paginator = s3_client.get_paginator("list_objects_v2")
-                    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                    for page in paginator.paginate(Bucket=bronze_bucket_name, Prefix=prefix):
                         for obj in page.get("Contents", []):
                             key = obj["Key"]
                             if "_lm=" not in key or not key.endswith(".parquet"):
@@ -4584,7 +4581,7 @@ def stream_source_to_bronze(
                 else:
                     deleted_count = _delete_s3_prefix(
                         s3_client=s3_client,
-                        bucket_name=bucket_name,
+                        bucket_name=bronze_bucket_name,
                         prefix=table_prefix,
                     )
                     log_message(
@@ -4653,7 +4650,7 @@ def stream_source_to_bronze(
                     success = _stream_to_s3(
                         records=records,
                         columns=columns,
-                        bucket_name=bucket_name,
+                        bucket_name=bronze_bucket_name,
                         object_key=object_key,
                         s3_client=s3_client,
                     )
