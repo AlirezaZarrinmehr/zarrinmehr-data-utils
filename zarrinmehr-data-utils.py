@@ -1409,7 +1409,7 @@ def process_ns_transactions(
     generalJournalLines['quantity'] = -1
     generalJournalLines['rateamount'] = generalJournalLines['foreignamount']
     generalJournalLines['item'] = generalJournalLines['memo_h']
-    job = read_file_from_s3(s3_client = s3_client,bucket_name = s3_bucket_name, object_key = 'job.csv')
+    job = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'job/', file_type = 'parquet')
     generalJournalLines = generalJournalLines.rename(columns = {'entity':'jobId'}).merge(job.drop_duplicates(subset = ['id'])[['id', 'customer']].rename(columns = {'id':'jobId', 'customer':'entity'}), on = 'jobId', how = 'left')
     txns = pd.concat([generalJournalLines, txns], ignore_index=True )
     txnsLines = pd.concat([generalJournalLines, txnsLines], ignore_index=True )
@@ -1454,7 +1454,7 @@ def process_ns_transactions(
         'custbody_stc_total_after_discount':'Total'
     }, inplace = True)
     txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
-    InvOrdLink = read_file_from_s3(s3_client = s3_client,bucket_name = s3_bucket_name, object_key = 'nextTransactionLineLink.csv')
+    InvOrdLink = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'nextTransactionLineLink/', file_type = 'parquet')
     InvOrdLink = InvOrdLink[InvOrdLink['nexttype']=='CustInvc'][['nextdoc','previousdoc']].copy()
     InvOrdLink.rename( columns = { 'nextdoc':'TransactionId', 'previousdoc':'OrderId' }, inplace = True )
     InvOrdLink.drop_duplicates(inplace = True)
@@ -3623,39 +3623,6 @@ def load_and_refresh_qbo_token(
     return access_token, realm
 
 
-def _stream_mssql(sql_query, conn, chunksize):
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql_query)
-        columns = [str(column[0]) for column in cursor.description]
-        with tqdm(desc="Fetching data from MS SQL", unit="chunk") as pbar:
-            while True:
-                rows = cursor.fetchmany(chunksize)
-                if not rows:
-                    break
-                yield [dict(zip(columns, row)) for row in rows], columns
-                pbar.update(1)
-    finally:
-        cursor.close()
-
-
-def _stream_qodbc(sql_query, conn, chunksize):
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql_query)
-        columns = [str(col[0]) for col in cursor.description]
-        with tqdm(desc="Fetching data from QODBC", unit="chunk") as pbar:
-            while True:
-                rows = cursor.fetchmany(chunksize)
-                if not rows:
-                    break
-                yield [dict(zip(columns, r)) for r in rows], columns
-                pbar.update(1)
-                time.sleep(0.01)
-    finally:
-        cursor.close()
-
-
 def _stream_odbc(sql_query, conn, chunksize):
     cursor = conn.cursor()
     try:
@@ -3836,6 +3803,51 @@ def _stream_bigquery(sql_query, project_id, credentials, chunksize, timeout_seco
             pbar.update(1)
 
 
+def _stream_redshift(
+    sql_query,
+    redshift_client,
+    redshift_cluster_identifier,
+    redshift_db_name,
+    redshift_master_username,
+    redshift_master_password,
+    chunksize,
+):
+    response = redshift_client.describe_clusters(
+        ClusterIdentifier=redshift_cluster_identifier
+    )
+    endpoint = response["Clusters"][0]["Endpoint"]
+
+    conn = psycopg2.connect(
+        dbname=redshift_db_name,
+        user=redshift_master_username,
+        password=redshift_master_password,
+        host=endpoint["Address"],
+        port=endpoint.get("Port", 5439),
+        sslmode="require",
+        connect_timeout=30,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql_query)
+            columns = [str(col[0]) for col in cursor.description]
+
+            with tqdm(desc="Fetching data from Redshift", unit="chunk") as pbar:
+                while True:
+                    rows = cursor.fetchmany(chunksize)
+                    if not rows:
+                        break
+
+                    yield [dict(zip(columns, row)) for row in rows], columns
+                    pbar.update(1)
+    finally:
+        conn.close()
+
+
 class PartialDataLoadError(Exception):
     def __init__(self, message, partial_data):
         super().__init__(message)
@@ -3907,6 +3919,11 @@ def load_data_via_query(
         redirect_uri=None,
         environment=None,
         qbo_token_path=None,
+        redshift_client=None,
+        redshift_cluster_identifier=None,
+        redshift_db_name=None,
+        redshift_master_username=None,
+        redshift_master_password=None,
         timeout_seconds=900
 ):
     log_message(f'[INFO] Running {sql_query} via {source_type}')
@@ -3953,6 +3970,16 @@ def load_data_via_query(
                 environment=environment,
                 chunksize=chunksize,
                 timeout_seconds=timeout_seconds,
+            )
+        elif source_type == "redshift":
+            data_generator = _stream_redshift(
+                sql_query=sql_query,
+                redshift_client=redshift_client,
+                redshift_cluster_identifier=redshift_cluster_identifier,
+                redshift_db_name=redshift_db_name,
+                redshift_master_username=redshift_master_username,
+                redshift_master_password=redshift_master_password,
+                chunksize=chunksize,
             )
         else:
             raise ValueError(f"Unknown source_type: {source_type}")
@@ -7464,39 +7491,6 @@ def impute_missing_header_lines(
 
     print(f"Successfully appended {len(df_imputed)} estimated lines to the lines table.")
     return df_final
-
-def read_from_redshift(
-    redshift_client,
-    redshift_cluster_identifier,
-    redshift_db_name,
-    redshift_master_username,
-    redshift_master_password,
-    sql_query,
-):
-    response = redshift_client.describe_clusters(
-        ClusterIdentifier=redshift_cluster_identifier
-    )
-    endpoint = response["Clusters"][0]["Endpoint"]
-    host = endpoint["Address"]
-    port = endpoint.get("Port", 5439)
-    conn = psycopg2.connect(
-        dbname=redshift_db_name,
-        user=redshift_master_username,
-        password=redshift_master_password,
-        host=host,
-        port=port,
-        sslmode="require",
-        connect_timeout=30,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
-    )
-    try:
-        df = pd.read_sql_query(sql_query, conn)
-        return df
-    finally:
-        conn.close()
 
 
 def clean_key(series):
