@@ -7146,6 +7146,7 @@ def upload_to_redshift(
                     DELIMITER ','
                     QUOTE '"'
                     TRUNCATECOLUMNS
+                    FILLRECORD
                     """
                 if not column_defs:
                     log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
