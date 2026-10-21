@@ -957,7 +957,7 @@ def process_qbo_transactions(
     txnsLines['AccountId']=txnsLines['AccountId'].fillna('').astype(str)
     account['Id']=account['Id'].fillna('').astype(str)
     txnsLines=txnsLines.merge(account[['Id', 'Name', 'AccountType']].drop_duplicates(subset=['Id']).rename(columns={'Id':'AccountId', 'Name':'Account'}), on='AccountId', how='left')
-    txnsLines=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txnsLines, df_name='txnsLines', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines=clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df=txnsLines, df_name='txnsLines', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txnsLines.ItemId=txnsLines.ItemId.fillna('').astype('str')
     item.ItemId=item.ItemId.fillna('').astype('str')
     txnsLines=txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how='left')
@@ -986,8 +986,8 @@ def process_qbo_transactions(
     txnsLines = txnsLines[['TransactionId', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company']=companyName
     txnsLines=txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    txns=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txns, df_name='txns', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txns=clean_df(s3_client=s3_client, s3_bucket_name=s3_bucket_name, df=txns, df_name='txns', id_column=['TransactionId'], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns=clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df=txns, df_name='txns', id_column=[], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns=clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df=txns, df_name='txns', id_column=['TransactionId'], additional_date_columns=[], zip_code_columns=[], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
 
     txns['subTotal']=txns['Total']
 
@@ -1015,6 +1015,7 @@ def process_qbo_orders(
     end_date,
     s3_client,
     s3_bucket_name,
+    gold_bucket_name,
     orderCloseDates,
     DBIA,
     itemsCategoriesV3,
@@ -1090,7 +1091,7 @@ def process_qbo_orders(
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines['OrderId'].isna()].copy()
     ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
-    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
@@ -1123,7 +1124,7 @@ def process_qbo_orders(
         if col not in orders.columns:
             orders[col] = np.nan
     orders = orders[['OrderId', 'OrderNo', 'OrderStatus', 'OrderDate', 'CloseDate', 'SalesRepID', 'CustSO', 'CustId', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = ['OrderId'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = ['OrderId'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders['OrderId'].str.upper().duplicated()]
     orders['OrderId'] = orders['OrderId'].fillna('').astype('str')
     ordersLines['OrderId'] = ordersLines['OrderId'].fillna('').astype('str')
@@ -1146,7 +1147,7 @@ def process_qbo_orders(
         item_df, 
         companyName, 
         s3_client, 
-        s3_bucket_name, 
+        gold_bucket_name, 
         DBIA, 
         itemsCategoriesV3,
         ordersLines
@@ -1509,7 +1510,7 @@ def process_ns_transactions(
     txns = txns[['CustId', 'OrderId', 'TransactionId', 'TransactionStatus', 'TransactionNo', 'TransactionType', 'TransactionDate', 'SalesRepID', 'SalesRepID2', 'CustPo', 'CustNo', 'CustName', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'BillName', 'BillAddress', 'BillCity', 'BillState', 'BillZip', 'subTotal', 'Total']].copy()
     txns['Company'] = companyName
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns.TransactionId = txns.TransactionId.apply(convert_to_int_or_keep).astype('str')
     txnsLines.TransactionId = txnsLines.TransactionId.apply(convert_to_int_or_keep).astype('str')
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
@@ -1533,7 +1534,7 @@ def process_ns_orders(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     txnsType,
     txnsType2,
     txnsType3,
@@ -1645,7 +1646,7 @@ def process_ns_orders(
             item_df, 
             companyName, 
             s3_client, 
-            s3_bucket_name, 
+            gold_bucket_name, 
             DBIA, 
             itemsCategoriesV3,
             ordersLines
@@ -1666,7 +1667,7 @@ def process_ns_orders(
         orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType4+'2', txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'Memo', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'subTotal', 'Total']].copy()
         orders['Company'] = companyName
         orders = orders[['Company'] + orders.columns[:-1].tolist()]
-        orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         orders.drop(columns = ['Total'], inplace = True)
         orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
         ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].apply(convert_to_int_or_keep).astype('str')
@@ -1831,14 +1832,14 @@ def process_gp_transactions(
     txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipAddress': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillAddress': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
     txns['Company'] = companyName
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['Total_ord'], mismatched_txns['Total_lin'], atol=0.1)]
     log_message(f'[INFO] {mismatched_txns.shape[0]} txns total do not match txnsline total')
     txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
     txnsLines['Company'] = companyName
-    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
@@ -1854,7 +1855,7 @@ def process_gp_orders(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     txnsType,
     txnsType2,
     txnsType3,
@@ -1883,8 +1884,8 @@ def process_gp_orders(
         (dfHeader[txnsType7].isin(txnsType17))
     ].copy()
 
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [txnsType], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [txnsType], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders['ShipAddress'] = orders[['ADDRESS1', 'ADDRESS2', 'ADDRESS3']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']),
         axis=1
@@ -1946,7 +1947,7 @@ def process_gp_orders(
     orders = orders.merge(totals, on=f'{txnsType2}Id', how='left')
     orders['Company'] = companyName
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna(0).apply(convert_to_int_or_keep).astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna(0).apply(convert_to_int_or_keep).astype('str')
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype(str)
@@ -1963,7 +1964,7 @@ def process_gp_orders(
         item_df, 
         companyName, 
         s3_client, 
-        s3_bucket_name, 
+        gold_bucket_name, 
         DBIA, 
         itemsCategoriesV3,
         ordersLines
@@ -1981,7 +1982,7 @@ def process_gp_orders(
     #-------------------------------------
 
     ordersLines['Company'] = companyName
-    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     ordersLines = ordersLines[['Company'] + ordersLines.columns[:-1].tolist()]
     ordersLines = ordersLines[ordersLines[f'{txnsType2}Id'].isin(orders[f'{txnsType2}Id'])]
     #-----------------------------------------------------------------------------------------------------------
@@ -2733,15 +2734,15 @@ def process_qb_transactions(
         (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce')<=end_date)
     ].copy()  
     txnsLines = txnsLines.merge(account[['FullName', 'AccountType']].drop_duplicates(subset = ['FullName']).rename(columns = {'FullName': 'Account'}), on = 'Account', how = 'left')
-    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on = 'ItemId', how = 'left')
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-    txns = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
 
     txns['subTotal'] = txns['Total']
     txns['TransactionStatus'] = txns['IsPaid'].fillna('').astype('str').replace({'True': 'INVOICED/PAID IN FULL', 'False': 'NOT INVOICED/PAID IN FULL', '': 'NOT INVOICED/PAID IN FULL'})
@@ -2770,6 +2771,7 @@ def process_qb_orders(
     end_date,
     s3_client,
     s3_bucket_name_bronze,
+    gold_bucket_name,
     txnsType,
     txnsType2,
     txnsType3,
@@ -2871,7 +2873,7 @@ def process_qb_orders(
     SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
 
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     orders[f'{txnsType2}Status'] = 'Open'
@@ -2885,7 +2887,7 @@ def process_qb_orders(
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
@@ -2927,7 +2929,7 @@ def process_qb_orders(
     )
 
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
@@ -2945,7 +2947,7 @@ def process_qb_orders(
         item_df, 
         companyName, 
         s3_client, 
-        s3_bucket_name_bronze, 
+        gold_bucket_name, 
         DBIA, 
         itemsCategoriesV3,
         ordersLines
@@ -3058,7 +3060,7 @@ def process_s50_transactions(
         }, inplace = True)    
         txnsLines['TransactionNo'] = txnsLines['TransactionNo'].astype('str')
         txnsLines['TransactionNo'] = txnsLines['TransactionNo'].apply(convert_to_int_or_keep)
-        txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float') * -1
         txnsLines['Quantity'] = txnsLines['Quantity'].astype('str').str.replace(',', '').astype('float')
         txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
@@ -3105,8 +3107,8 @@ def process_s50_transactions(
         }, inplace = True)
         txns_df['TransactionNo'] = txns_df['TransactionNo'].astype('str')
         txns_df['TransactionNo'] = txns_df['TransactionNo'].apply(convert_to_int_or_keep)
-        txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-        txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txns_df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        txns_df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns_df, df_name = 'txns_df', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         txns_df['Total'] = txns_df['Total'].astype('str').str.replace(',', '').astype('float')
         txns_df['TransactionStatus'] = txns_df['TransactionStatus'].astype('str').replace({'1': 'Closed', '0': 'Open'})
         txns_df.SalesRepID = txns_df.SalesRepID.fillna('').str.split(':').str[-1]
@@ -3172,7 +3174,7 @@ def process_s50_orders(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     txnsType,
     txnsType2,
     txnsType3,
@@ -3211,8 +3213,8 @@ def process_s50_orders(
         'MainAmount':'Total',
     }, inplace = True)    
     txns_df[f'{txnsType2}No'] = txns_df[f'{txnsType2}No'].astype('str').apply(convert_to_int_or_keep)
-    txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    txns_df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns_df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns_df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns_df, df_name = 'txns_df', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     
     if txnsType == 'Purchase Orders':
         txns_df['Total'] = txns_df['Total'].astype('str').str.replace(',', '').astype('float')*-1
@@ -3247,7 +3249,7 @@ def process_s50_orders(
     txnsLines = txnsLines[~txnsLines[f'{txnsType2}No'].isna()].copy()
     txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].astype('str')
     txnsLines[f'{txnsType2}No'] = txnsLines[f'{txnsType2}No'].apply(convert_to_int_or_keep)
-    txnsLines = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     
     if txnsType == 'Purchase Orders':
         txnsLines['Total'] = txnsLines['Total'].astype('str').str.replace(',', '').astype('float')
@@ -3285,7 +3287,7 @@ def process_s50_orders(
         item_df, 
         companyName, 
         s3_client, 
-        s3_bucket_name, 
+        gold_bucket_name, 
         DBIA, 
         itemsCategoriesV3,
         ordersLines
@@ -3309,7 +3311,7 @@ def process_s50_orders(
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Type', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
     orders['Company'] = companyName
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
-    orders = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].astype('str')
@@ -5940,7 +5942,7 @@ def enrich_and_classify_customers(
     df,
     companyName,
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     DBIA=False,
     dfCategories=None,
     txnsLines=None,
@@ -5999,19 +6001,19 @@ def enrich_and_classify_customers(
         for col in df_cols:
             mask = dfNew[col].isna()
             dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = gold_bucket_name, object_key = dst_object_key)
         txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
         txnsLines.drop(columns = [erpId], inplace = True)
         return txnsLines, dfCategories, dfNew
     else:
-        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
             df[col] = df[col].astype('str').fillna('')
         dfCategories = read_file_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
         dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
         dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
         dfCategories['Found'] = False
-        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+        dfCategories = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
         dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
         dfCategories = dfCategories[dfCategories[searchCol].notna()]
         df[idCol] = df[idCol].astype('str').str.upper()
@@ -6060,7 +6062,7 @@ def enrich_and_classify_customers(
         df = df[['Company'] + df.columns[:-1].tolist()].copy()
         if dropLookUpIn:
             df.drop(columns = 'LookUpIn', inplace=True)
-        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = gold_bucket_name, object_key = dst_object_key)
         log_message(f'[INFO] Found: {dfCategories.Found.sum()}...')
         return df
 
@@ -6069,7 +6071,7 @@ def enrich_and_classify_items(
     df,
     companyName,
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     DBIA=False,
     dfCategories=None,
     txnsLines=None,
@@ -6128,19 +6130,19 @@ def enrich_and_classify_items(
         for col in df_cols:
             mask = dfNew[col].isna()
             dfNew.loc[mask, col] = dfNew.loc[mask, erpId]
-        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        upload_to_s3(s3_client = s3_client, data = dfNew, bucket_name = gold_bucket_name, object_key = dst_object_key)
         txnsLines = txnsLines.merge(dfCategories[key_cols + ['index', 'CommonName']].drop_duplicates(subset = key_cols), on = key_cols, how='left').rename(columns = {idCol: erpId, 'index': idCol}).copy()
         txnsLines.drop(columns = [erpId], inplace = True)
         return txnsLines, dfCategories, dfNew
     else:
-        df = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+        df = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = df, df_name = 'df', id_column = [idCol], additional_date_columns = [], zip_code_columns = zip_code_columns, state_columns = state_columns, keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
         for col in lookUpCols:
             df[col] = df[col].astype('str').fillna('')
         dfCategories = read_file_from_s3(s3_client = s3_client, bucket_name = 'manual-db', object_key = cat_object_key)
         dfCategories_2 = dfCategories.loc[ (dfCategories['Company'] != companyName) & (dfCategories['Company'].notna()) ]
         dfCategories = dfCategories.loc[ (dfCategories['Company'] == companyName) | (dfCategories['Company'].isna()) ]
         dfCategories['Found'] = False
-        dfCategories = clean_df(s3_client = s3_client, s3_bucket_name = s3_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+        dfCategories = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = dfCategories, df_name = 'dfCategories', id_column = [searchCol], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
         dfCategories = dfCategories.sort_values(by=searchCol, key=lambda x: x.str.len(), ascending=False)
         dfCategories = dfCategories[dfCategories[searchCol].notna()]
         df[idCol] = df[idCol].astype('str').str.upper()
@@ -6189,7 +6191,7 @@ def enrich_and_classify_items(
         df = df[['Company'] + df.columns[:-1].tolist()].copy()
         if dropLookUpIn:
             df.drop(columns = 'LookUpIn', inplace=True)
-        upload_to_s3(s3_client = s3_client, data = df, bucket_name = s3_bucket_name + '-c', object_key = dst_object_key)
+        upload_to_s3(s3_client = s3_client, data = df, bucket_name = gold_bucket_name, object_key = dst_object_key)
         log_message(f'[INFO] Found: {dfCategories.Found.sum()}...')
         return df
 
@@ -6525,7 +6527,7 @@ def find_useful_columns(
 
 def clean_df(
     s3_client,
-    s3_bucket_name,
+    gold_bucket_name,
     df,
     df_name,
     id_column=[],
@@ -6573,15 +6575,13 @@ def clean_df(
             df = df[~invalid_mask].copy()
             log_message(f'[INFO] invalid {id_column} found and removed: {len(invalid_id)}')
             if len(invalid_id)>0 and upload_enabled:
-                # upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{id_column}.csv", CreateS3Bucket=True)
-                upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
+                upload_to_s3(s3_client = s3_client,  data = invalid_id, bucket_name = gold_bucket_name, object_key = f"{df_name}_invalid_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
         duplicated_mask = df[id_column].duplicated()
         duplicated_id = df[duplicated_mask]
         df = df[~duplicated_mask].copy()
         log_message(f'[INFO] duplicated {id_column} found and removed: {len(duplicated_id)}')
         if len(duplicated_id)>0 and upload_enabled:
-            # upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{id_column}.csv", CreateS3Bucket=True)
-            upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
+            upload_to_s3(s3_client = s3_client,  data = duplicated_id, bucket_name = gold_bucket_name, object_key = f"{df_name}_duplicated_{re.sub(r'[^a-zA-Z0-9]', '_', '_'.join(id_column))}.csv", CreateS3Bucket=True)
     if zip_code_columns:
         invalid_zip_codes = pd.DataFrame()
         valid_us_zip_regex = r"^\d{5}(\d{4})?$"
@@ -6597,7 +6597,7 @@ def clean_df(
                                     x)
         log_message(f'[INFO] invalid_zip_codes found: {len(invalid_zip_codes)}')
         if len(invalid_zip_codes)>0 and upload_enabled:
-            upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
+            upload_to_s3(s3_client = s3_client, data = invalid_zip_codes, bucket_name = gold_bucket_name, object_key = f"{df_name}_invalid_zip_codes.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in zip_code_columns:
                 invalid_zip_codes[col] = np.nan
@@ -6611,7 +6611,7 @@ def clean_df(
             df = df[~invalid_mask].copy()
         log_message(f'[INFO] invalid_states found: {len(invalid_states)}')
         if len(invalid_states)>0 and upload_enabled:
-            upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = s3_bucket_name + '-c', object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
+            upload_to_s3(s3_client = s3_client,  data = invalid_states, bucket_name = gold_bucket_name, object_key = f"{df_name}_invalid_states.csv", CreateS3Bucket=True)
         if keep_invalid_as_null:
             for col in state_columns:
                 invalid_states[col] = np.nan
