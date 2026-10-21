@@ -1390,7 +1390,8 @@ def process_ns_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name,
+    silver_bucket_name,
+    gold_bucket_name,
     EntityAddress,
     employee,
     subsidiaryId
@@ -1410,7 +1411,7 @@ def process_ns_transactions(
     generalJournalLines['quantity'] = -1
     generalJournalLines['rateamount'] = generalJournalLines['foreignamount']
     generalJournalLines['item'] = generalJournalLines['memo_h']
-    job = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'job/', file_type = 'parquet')
+    job = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'job/', file_type = 'parquet')
     generalJournalLines = generalJournalLines.rename(columns = {'entity':'jobId'}).merge(job.drop_duplicates(subset = ['id'])[['id', 'customer']].rename(columns = {'id':'jobId', 'customer':'entity'}), on = 'jobId', how = 'left')
     txns = pd.concat([generalJournalLines, txns], ignore_index=True )
     txnsLines = pd.concat([generalJournalLines, txnsLines], ignore_index=True )
@@ -1455,7 +1456,7 @@ def process_ns_transactions(
         'custbody_stc_total_after_discount':'Total'
     }, inplace = True)
     txns['TransactionId'] = txns['TransactionId'].apply(convert_to_int_or_keep).astype('str')
-    InvOrdLink = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'nextTransactionLineLink/', file_type = 'parquet')
+    InvOrdLink = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'nextTransactionLineLink/', file_type = 'parquet')
     InvOrdLink = InvOrdLink[InvOrdLink['nexttype']=='CustInvc'][['nextdoc','previousdoc']].copy()
     InvOrdLink.rename( columns = { 'nextdoc':'TransactionId', 'previousdoc':'OrderId' }, inplace = True )
     InvOrdLink.drop_duplicates(inplace = True)
@@ -1726,12 +1727,13 @@ def process_gp_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name
+    silver_bucket_name,
+    gold_bucket_name
 ):
-    generalLedgerLineOpen = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
-    generalLedgerLineHistory = read_file_from_s3(s3_client = s3_client, bucket_name = s3_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
+    generalLedgerLineOpen = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
+    generalLedgerLineHistory = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
     generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index=True)
-    sourceDocumentMaster = read_file_from_s3(s3_client = s3_client, bucket_name=s3_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
+    sourceDocumentMaster = read_file_from_s3(s3_client = s3_client, bucket_name=silver_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
     account['ACTINDX'] = account['ACTINDX'].astype('str').str.strip()
     item['ItemId'] = item['ItemId'].astype('str').str.strip()
     customer['CustId'] = customer['CustId'].astype('str').str.strip()
@@ -2035,7 +2037,7 @@ def process_qb_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name_bronze
+    silver_bucket_name
 ):
     customersORvendors = customer.copy()
 
@@ -2048,7 +2050,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey', 'TimeModified'])
-    transactions = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    transactions = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     transactions = transactions.sort_values(['FQTxnLinkKey', 'TimeModified']).drop_duplicates(subset=['FQTxnLinkKey'], keep='last').copy()
     transactions.rename(columns=config['rename'], inplace=True)
 
@@ -2057,7 +2059,7 @@ def process_qb_transactions(
         "file": "JournalEntry.csv"
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    generalJournal = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    generalJournal = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
 
     config = {
         "file": "JournalEntryLine.csv",
@@ -2075,7 +2077,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    generalJournalLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    generalJournalLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     generalJournalLines = generalJournal.merge(generalJournalLines, on='TxnID', suffixes=('_h', ''))
     generalJournalLines = generalJournalLines.reset_index(drop=True).reset_index()
     generalJournalLines['TransactionId'] = 'GENERAL JOURNAL' + ' :: ' + generalJournalLines['index'].astype(str)
@@ -2104,7 +2106,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['VendorAddressAddr2', 'VendorAddressAddr3', 'VendorAddressAddr4'])
-    bills = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    bills = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     bills['BillAddress'] = bills[['VendorAddressAddr2', 'VendorAddressAddr3', 'VendorAddressAddr4']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2129,7 +2131,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    billExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    billExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     billExpenseLines.rename(columns=config['rename'], inplace=True)
     billExpenseLines['Total'] = billExpenseLines['Total'] * config['multiply_total']
     billExpenseLines["OpenTotal"] = np.where(
@@ -2155,7 +2157,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5'])
-    checks = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    checks = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     checks['BillAddress'] = checks[['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2178,7 +2180,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    checkExpenseLine = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    checkExpenseLine = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     checkExpenseLine.drop(columns=config['drop'], inplace=True)
     checkExpenseLine.rename(columns=config['rename'], inplace=True)
     checkExpenseLine['Total'] = checkExpenseLine['Total'] * config['multiply_total']
@@ -2203,7 +2205,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    receivePayment = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    receivePayment = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     receivePayment.rename(columns=config['rename'], inplace=True)
     receivePayment['TransactionType'] = config['transaction_type']
 
@@ -2220,7 +2222,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['DepositToAccountRefFullName', 'TotalAmount'])
-    receivePaymentLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    receivePaymentLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     receivePaymentLines.loc[
         receivePaymentLines['AppliedToTxnDiscountAccountRefFullName'].isna(),
         'AppliedToTxnDiscountAccountRefFullName'
@@ -2238,7 +2240,7 @@ def process_qb_transactions(
         "file": "Deposit.csv"
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    deposit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    deposit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
 
     config = {
         "file": "DepositLine.csv",
@@ -2256,7 +2258,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    depositLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    depositLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     depositLines = deposit.merge(depositLines, on='TxnID', suffixes=('_h', ''))
     depositLines = depositLines.reset_index(drop=True).reset_index()
     depositLines['TransactionId'] = 'DEPOSIT' + ' :: ' + depositLines['index'].astype(str)
@@ -2290,7 +2292,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5', 'ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
-    invoice = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    invoice = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     invoice['BillAddress'] = invoice[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2317,7 +2319,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    invoiceLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    invoiceLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     invoiceLines = invoiceLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on=['FQTxnLinkKey'],
@@ -2343,7 +2345,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditCardCredit.rename(columns=config['rename'], inplace=True)
     creditCardCredit['TransactionType'] = config['transaction_type']
 
@@ -2364,7 +2366,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditCardCreditLines.drop(columns=config['drop'], inplace=True)
     creditCardCreditLines.rename(columns=config['rename'], inplace=True)
     creditCardCreditLines['Total'] = creditCardCreditLines['Total'] * config['multiply_total']
@@ -2385,7 +2387,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    billsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    billsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     billsLines = billsLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on='FQTxnLinkKey',
@@ -2412,7 +2414,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    checksLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    checksLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     checksLines.drop(columns=config['drop'], inplace=True)
     checksLines = checksLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
@@ -2441,7 +2443,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    vendorCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    vendorCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     vendorCredit.rename(columns=config['rename'], inplace=True)
     vendorCredit['TransactionType'] = config['transaction_type']
 
@@ -2460,7 +2462,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    vendorCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    vendorCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     vendorCreditLines = vendorCreditLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on='FQTxnLinkKey',
@@ -2485,7 +2487,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    vendorCreditExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    vendorCreditExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     vendorCreditExpenseLines.rename(columns=config['rename'], inplace=True)
     vendorCreditExpenseLines['Total'] = vendorCreditExpenseLines['Total'] * config['multiply_total']
 
@@ -2507,7 +2509,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5'])
-    salesReceipts = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    salesReceipts = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     salesReceipts['BillAddress'] = salesReceipts[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2529,7 +2531,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    salesReceiptsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    salesReceiptsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     salesReceiptsLines = salesReceiptsLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account', 'Total']],
         on=['FQTxnLinkKey'],
@@ -2555,7 +2557,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5'])
-    billPaymentCheck = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    billPaymentCheck = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     billPaymentCheck['BillAddress'] = billPaymentCheck[['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2576,7 +2578,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    billPaymentCheckLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    billPaymentCheckLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     billPaymentCheckLines.rename(columns=config['rename'], inplace=True)
     billPaymentCheckLines['Total'] = billPaymentCheckLines['Total'] * config['multiply_total']
     billPaymentCheckLines['ItemDescription'] = billPaymentCheckLines['ItemId']
@@ -2601,7 +2603,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCharge = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCharge = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditCardCharge.rename(columns=config['rename'], inplace=True)
     creditCardCharge['TransactionType'] = config['transaction_type']
 
@@ -2621,7 +2623,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardChargeLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditCardChargeLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditCardChargeLines.drop(columns=config['drop'], inplace=True)
     creditCardChargeLines.rename(columns=config['rename'], inplace=True)
 
@@ -2648,7 +2650,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5', 'ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
-    creditMemo = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditMemo = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditMemo['BillAddress'] = creditMemo[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2676,7 +2678,7 @@ def process_qb_transactions(
         "multiply_total": -1
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    creditMemoLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    creditMemoLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     creditMemoLines = creditMemoLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on=['FQTxnLinkKey'],
@@ -2691,7 +2693,7 @@ def process_qb_transactions(
         "file": "SalesRep.csv"
     }
     expected_columns = get_expected_columns(config, extra=['ListID', 'SalesRepEntityRefFullName'])
-    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
     txns = pd.concat([
@@ -2734,15 +2736,15 @@ def process_qb_transactions(
         (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce')<=end_date)
     ].copy()  
     txnsLines = txnsLines.merge(account[['FullName', 'AccountType']].drop_duplicates(subset = ['FullName']).rename(columns = {'FullName': 'Account'}), on = 'Account', how = 'left')
-    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on = 'ItemId', how = 'left')
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
 
     txns['subTotal'] = txns['Total']
     txns['TransactionStatus'] = txns['IsPaid'].fillna('').astype('str').replace({'True': 'INVOICED/PAID IN FULL', 'False': 'NOT INVOICED/PAID IN FULL', '': 'NOT INVOICED/PAID IN FULL'})
@@ -2770,7 +2772,7 @@ def process_qb_orders(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name_bronze,
+    silver_bucket_name,
     gold_bucket_name,
     txnsType,
     txnsType2,
@@ -2818,7 +2820,7 @@ def process_qb_orders(
         }
     }
     expected_columns = get_expected_columns(config, extra=['LinkedTxnTxnType'])
-    SalesOrderLinkedTxn = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    SalesOrderLinkedTxn = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[SalesOrderLinkedTxn['LinkedTxnTxnType'] == object_key_b].copy()
     SalesOrderLinkedTxn.rename(columns=config['rename'], inplace=True)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[[f'{txnsType2}No', 'TransactionNo']].copy()
@@ -2843,7 +2845,7 @@ def process_qb_orders(
         }
     }
     expected_columns = get_expected_columns(config, extra=['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5', 'IsManuallyClosed', object_key_3, object_key_4])
-    orders = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    orders = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     orders['ShipAddress'] = orders[['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2863,17 +2865,17 @@ def process_qb_orders(
         }
     }
     expected_columns = get_expected_columns(config)
-    ordersLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    ordersLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     ordersLines.rename(columns=config['rename'], inplace=True)
     # --- Sales Rep ---
     config = {
         "file": "SalesRep.csv"
     }
     expected_columns = get_expected_columns(config, extra=['ListID', 'SalesRepEntityRefFullName'])
-    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=s3_bucket_name_bronze, object_key=config['file'], expected_columns=expected_columns)
+    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
-    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
 
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     orders[f'{txnsType2}Status'] = 'Open'
@@ -2887,7 +2889,7 @@ def process_qb_orders(
     ordersLines['ItemDescription'] = ordersLines['ItemDescription'].fillna('').astype('str').str.replace(r'\\n', ' ', regex=True)
     ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
-    ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
     ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
@@ -2929,7 +2931,7 @@ def process_qb_orders(
     )
 
     orders = orders[[f'{txnsType2}Id', f'{txnsType2}No', f'{txnsType2}Status', f'{txnsType2}Date', 'CloseDate', txnsType4, txnsType5, f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name', 'ShipName', 'ShipAddress', 'ShipCity', 'ShipState', 'ShipZip', 'Total']].copy()
-    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name_bronze, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [f'{txnsType2}Id'], additional_date_columns = [], zip_code_columns = ['ShipZip'], state_columns = ['ShipState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
@@ -3019,7 +3021,7 @@ def process_s50_transactions(
     start_date,
     end_date,
     s3_client,
-    s3_bucket_name
+    gold_bucket_name
 ):
     for txnsType in [
         ('Purchase'),
