@@ -113,6 +113,8 @@ modules = [
     ("typing", "Dict", "typing"),
     ("typing", "Tuple", "typing"),
     ("concurrent.futures", "ThreadPoolExecutor", "concurrent.futures"),
+    ("concurrent.futures", "wait", "concurrent.futures"),
+    ("concurrent.futures", "FIRST_COMPLETED", "concurrent.futures"),
 ]
 
 for fr_mod, im_mod, pip_name in modules:
@@ -4711,7 +4713,10 @@ def stream_bronze_to_silver(
     silver_bucket_name,
     CreateS3Bucket=False,
     aws_region=None,
+    max_workers=16,
 ):
+    if not isinstance(max_workers, int) or max_workers < 1:
+        raise ValueError('max_workers must be a positive integer.')
     if CreateS3Bucket:
         try:
             buckets = s3_client.list_buckets()["Buckets"]
@@ -4779,22 +4784,36 @@ def stream_bronze_to_silver(
                     f"Bronze files={len(bronze_objects)}, removed old silver={deleted_count}."
                 )
                 copied_files = 0
-                with tqdm(
+                def copy_one(object_key):
+                    s3_client.copy_object(
+                        Bucket=silver_bucket_name,
+                        Key=object_key,
+                        CopySource={
+                            "Bucket": bronze_bucket_name,
+                            "Key": object_key,
+                        },
+                    )
+                keys = (key for _, _, key in bronze_objects)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor, tqdm(
                     total=len(bronze_objects),
                     desc=f"Copying {table}",
                     unit="file",
                 ) as pbar:
-                    for _, _, key in bronze_objects:
-                        s3_client.copy_object(
-                            Bucket=silver_bucket_name,
-                            Key=key,
-                            CopySource={
-                                "Bucket": bronze_bucket_name,
-                                "Key": key,
-                            },
+                    pending = {
+                        executor.submit(copy_one, key)
+                        for key in islice(keys, max_workers)
+                    }
+                    while pending:
+                        completed, pending = wait(
+                            pending, return_when=FIRST_COMPLETED
                         )
-                        copied_files += 1
-                        pbar.update(1)
+                        for future in completed:
+                            future.result()
+                            copied_files += 1
+                            pbar.update(1)
+                            key = next(keys, None)
+                            if key is not None:
+                                pending.add(executor.submit(copy_one, key))
                 log_message(
                     f'[SUCCESS] Table "{table}" silver copy complete. Copied files={copied_files}.'
                 )
@@ -7153,13 +7172,11 @@ def upload_to_redshift(
                     continue
                 if table_name in existing_tables:
                     existing_schema = get_table_schema_from_redshift(cur, table_name)
-                    if existing_schema == column_defs:
-                        log_message(f'[INFO] Table "{table_name}" exists and schema matches. Deleting existing rows...')
-                        cur.execute(f'TRUNCATE TABLE "{table_name}";')
-                        conn.commit()
-                        log_message(f'[SUCCESS] Existing rows deleted from "{table_name}"!')
-                    else:
-                        log_message(f'[INFO] Table "{table_name}" exists but schema does not match. Adapting...')
+                    if existing_schema != column_defs:
+                        log_message(f'[WARNING] Table "{table_name}" schema differs from the source.')
+                    log_message(f'[INFO] Clearing existing rows from "{table_name}"...')
+                    cur.execute(f'TRUNCATE TABLE "{table_name}";')
+                    conn.commit()
                 else:
                     create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
                     log_message(f'[INFO] Creating table "{table_name}"...')
