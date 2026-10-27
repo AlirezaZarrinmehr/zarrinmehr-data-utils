@@ -2,10 +2,17 @@ import importlib
 import subprocess
 from datetime import datetime
 
+
 def install_package(pip_name):
     try:
         log_message(f"[INFO] Missing library. Installing: {pip_name}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+        except subprocess.CalledProcessError:
+            if pip_name == "psycopg2":
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "--only-binary=:all:", "psycopg2-binary"])
+            else:
+                raise
         return True
     except Exception as e:
         log_message(f"[ERROR] Failed to install {pip_name}: {e}")
@@ -232,6 +239,7 @@ valid_us_states = {
     "WYOMING": "WY",
     "PUERTO RICO": "PR",
 }
+
 valid_ca_states = {
     "ALBERTA": "AB",
     "BRITISH COLUMBIA": "BC",
@@ -3895,11 +3903,29 @@ def _stream_to_s3(
 ):
     if not records:
         return False
-    # columnar_data = {col: [row.get(col) for row in records] for col in columns}
-    columnar_data = {col: [str(row.get(col)) if row.get(col) is not None else "" for row in records] for col in columns}
-    table = pa.Table.from_pydict(columnar_data)
-    buffer = io.BytesIO()
-    pq.write_table(table, buffer, compression='SNAPPY')
+    if object_key.lower().endswith(".csv"):
+        buffer = io.BytesIO()
+        with io.StringIO(newline="") as text:
+            writer = csv.writer(text, lineterminator="\n")
+            writer.writerow(columns)
+            writer.writerows(
+                [
+                    str(row.get(col))
+                    if row.get(col) is not None else ""
+                    for col in columns
+                ]
+                for row in records
+            )
+            buffer.write(text.getvalue().encode("utf-8"))
+    elif object_key.lower().endswith(".parquet"):
+        buffer = io.BytesIO()
+        columnar_data = {col: [str(row.get(col)) if row.get(col) is not None else "" for row in records] for col in columns}
+        table = pa.Table.from_pydict(columnar_data)
+        pq.write_table(table, buffer, compression='SNAPPY')
+    else:
+        raise ValueError(
+            "object_key must end with .csv or .parquet"
+        )
     buffer.seek(0)
     s3_client.upload_fileobj(buffer, bucket_name, object_key)
     return True
@@ -4556,6 +4582,13 @@ def stream_source_to_bronze(
         except Exception as e:
             print(f'[ERROR] Failed to verify or create bucket "{bronze_bucket_name}". Error: {str(e)}.')
             raise e
+    try:
+        import pyarrow
+        import pyarrow.parquet
+        output_extension = "parquet"
+    except ImportError:
+        output_extension = "csv"
+
     active_conn = None
     if source_type in ["qodbc", "mssql", "netsuite_odbc"]:
         if source_type == "qodbc":
@@ -4584,9 +4617,9 @@ def stream_source_to_bronze(
                     for page in paginator.paginate(Bucket=bronze_bucket_name, Prefix=prefix):
                         for obj in page.get("Contents", []):
                             key = obj["Key"]
-                            if "_lm=" not in key or not key.endswith(".parquet"):
+                            if "_lm=" not in key or not key.endswith(".{output_extension}"):
                                 continue
-                            key_value = key.rsplit("_lm=", 1)[1].rsplit(".parquet", 1)[0]
+                            key_value = key.rsplit("_lm=", 1)[1].rsplit(".{output_extension}", 1)[0]
                             if latest_key_value is None or key_value > latest_key_value:
                                 latest_key_value = key_value
                     if latest_key_value and "T" in latest_key_value:
@@ -4677,9 +4710,9 @@ def stream_source_to_bronze(
                         if pd.isna(chunk_max_date):
                             raise ValueError(f'Table "{table}" chunk {idx} has no valid "{last_modified_column}" values.')
                         chunk_watermark = chunk_max_date.strftime("%Y-%m-%dT%H-%M-%S")
-                        object_key = f"{table_prefix}/chunk_{idx:04d}_lm={chunk_watermark}.parquet"
+                        object_key = f"{table_prefix}/chunk_{idx:04d}_lm={chunk_watermark}.{output_extension}"
                     else:
-                        object_key = f"{table_prefix}/chunk_{idx:04d}.parquet"
+                        object_key = f"{table_prefix}/chunk_{idx:04d}.{output_extension}"
                     success = _stream_to_s3(
                         records=records,
                         columns=columns,
@@ -4692,7 +4725,7 @@ def stream_source_to_bronze(
                 if uploaded_chunks == 0:
                     log_message(f'[INFO] Produced no records to upload.')
                 else:
-                    log_message(f'[SUCCESS] Streamed {uploaded_chunks} chunks.')
+                    log_message(f'[SUCCESS] Streamed {uploaded_chunks} {output_extension.lower()} chunks.')
                 gc.collect()
             except Exception as e:
                 log_message(f'[ERROR] Failed to extract: {str(e)}')
@@ -4738,6 +4771,13 @@ def stream_bronze_to_silver(
             )
             raise e
     try:
+        import pyarrow
+        import pyarrow.parquet
+        output_extension = "parquet"
+    except ImportError:
+        output_extension = "csv"
+
+    try:
         for table, table_info in tables.items():
             if isinstance(table_info, dict):
                 id_column = table_info.get("id_column")
@@ -4762,13 +4802,13 @@ def stream_bronze_to_silver(
             ):
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
-                    if not key.endswith(".parquet"):
+                    if not key.endswith(f".{output_extension}"):
                         continue
                     lm = ""
                     if "/lm=" in key:
                         lm = key.split("/lm=", 1)[1].split("/", 1)[0]
                     elif "_lm=" in key:
-                        lm = key.rsplit("_lm=", 1)[1].rsplit(".parquet", 1)[0]
+                        lm = key.rsplit("_lm=", 1)[1].rsplit(f".{output_extension}", 1)[0]
                     chunk_match = re.search(r"chunk_(\d+)", key)
                     chunk_no = int(chunk_match.group(1)) if chunk_match else -1
                     bronze_objects.append((lm, chunk_no, key))
@@ -4829,7 +4869,7 @@ def stream_bronze_to_silver(
             ):
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
-                    if key.endswith(".parquet"):
+                    if key.endswith(f".{output_extension}"):
                         silver_keys.add(key)
             stale_keys = sorted(silver_keys - bronze_keys)
             for i in range(0, len(stale_keys), 1000):
