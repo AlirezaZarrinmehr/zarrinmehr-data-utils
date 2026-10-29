@@ -4617,7 +4617,7 @@ def stream_source_to_bronze(
                     for page in paginator.paginate(Bucket=bronze_bucket_name, Prefix=prefix):
                         for obj in page.get("Contents", []):
                             key = obj["Key"]
-                            if "_lm=" not in key or not key.endswith(".{output_extension}"):
+                            if "_lm=" not in key or not key.endswith(f".{output_extension}"):
                                 continue
                             key_value = key.rsplit("_lm=", 1)[1].rsplit(".{output_extension}", 1)[0]
                             if latest_key_value is None or key_value > latest_key_value:
