@@ -4746,291 +4746,410 @@ def stream_bronze_to_silver(
     silver_bucket_name,
     CreateS3Bucket=False,
     aws_region=None,
-    max_workers=16,
 ):
-    if not isinstance(max_workers, int) or max_workers < 1:
-        raise ValueError('max_workers must be a positive integer.')
-    if CreateS3Bucket:
+
+    log = globals().get("log_message", print)
+    if bronze_bucket_name == silver_bucket_name:
+        raise ValueError("Bronze and silver buckets must be different.")
+
+    pa = pq = None
+
+    def require_arrow():
+        nonlocal pa, pq
+        if pa is None:
+            try:
+                import pyarrow as arrow
+                import pyarrow.parquet as parquet
+            except ImportError as error:
+                raise ImportError(
+                    "The bronze prefix contains Parquet files. Process those "
+                    "on a system with PyArrow; CSV prefixes do not need PyArrow."
+                ) from error
+            pa, pq = arrow, parquet
+
+    def list_objects(bucket, prefix):
+        paginator = s3_client.get_paginator("list_objects_v2")
+        return [
+            dict(obj)
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
+            for obj in page.get("Contents", [])
+        ]
+
+    def open_bronze(obj, byte_range=None):
+        arguments = {"Bucket": bronze_bucket_name, "Key": obj["Key"]}
+        if obj.get("ETag"):
+            arguments["IfMatch"] = obj["ETag"]
+        if byte_range is not None:
+            arguments["Range"] = byte_range
+        return s3_client.get_object(**arguments)["Body"]
+
+    def read_bytes(obj):
+        body = open_bronze(obj)
         try:
-            buckets = s3_client.list_buckets()["Buckets"]
-            bucket_names = [bucket["Name"] for bucket in buckets]
-            if silver_bucket_name not in bucket_names:
-                if aws_region == "us-east-1":
-                    s3_client.create_bucket(Bucket=silver_bucket_name)
-                else:
-                    s3_client.create_bucket(
-                        Bucket=silver_bucket_name,
-                        CreateBucketConfiguration={"LocationConstraint": aws_region},
-                    )
-                print(f'[SUCCESS] Bucket "{silver_bucket_name}" created!')
-            else:
-                print(f'[INFO] Bucket "{silver_bucket_name}" already exists.')
-        except Exception as e:
-            print(
-                f'[ERROR] Failed to verify or create bucket "{silver_bucket_name}". Error: {str(e)}.'
+            return body.read()
+        finally:
+            body.close()
+
+    def validate_names(names, key):
+        if len(names) != len(set(names)):
+            raise ValueError(f'File "{key}" has duplicate column names; alignment is ambiguous.')
+        if any(not name for name in names):
+            raise ValueError(f'File "{key}" has an empty column name.')
+
+    def read_schema(obj):
+        if obj["format"] == "csv":
+            with io.TextIOWrapper(open_bronze(obj), encoding="utf-8-sig", newline="") as stream:
+                names = next(csv.reader(stream), [])
+            schema = None
+        else:
+            require_arrow()
+            # Only fetch the Parquet footer during the schema pass.
+            size = obj["Size"]
+            if size < 12:
+                raise ValueError(f'Invalid Parquet file "{obj["Key"]}".')
+
+            def read_range(start, end):
+                body = open_bronze(obj, f"bytes={start}-{end}")
+                try:
+                    data = body.read()
+                finally:
+                    body.close()
+                if len(data) != end - start + 1:
+                    raise ValueError(f'Incomplete Parquet footer read for "{obj["Key"]}".')
+                return data
+
+            tail = read_range(size - 8, size - 1)
+            footer_size = int.from_bytes(tail[:4], "little")
+            if tail[4:] != b"PAR1" or not 0 < footer_size <= size - 12:
+                raise ValueError(f'Invalid or encrypted Parquet footer in "{obj["Key"]}".')
+            footer = read_range(size - footer_size - 8, size - 9)
+            schema = pq.ParquetFile(io.BytesIO(b"PAR1" + footer + tail)).schema_arrow
+            names = list(schema.names)
+        validate_names(names, obj["Key"])
+        obj["columns"] = names
+        obj["schema"] = schema
+
+    def read_csv_chunk(obj):
+        with io.TextIOWrapper(open_bronze(obj), encoding="utf-8-sig", newline="") as stream:
+            reader = csv.reader(stream)
+            names = next(reader, [])
+            if names != obj["columns"]:
+                raise ValueError(f'Bronze header changed while processing "{obj["Key"]}".')
+            rows = []
+            for row in reader:
+                if not row:
+                    continue
+                if len(row) > len(names):
+                    raise ValueError(f'CSV "{obj["Key"]}" has a row with more fields than its header.')
+                rows.append(row + [""] * (len(names) - len(row)))
+        return rows
+
+    def reference_key(obj):
+        modified = obj.get("LastModified")
+        if isinstance(modified, datetime):
+            if modified.tzinfo is None:
+                modified = modified.replace(tzinfo=timezone.utc)
+            uploaded_at = modified.timestamp()
+        else:
+            uploaded_at = 0
+        return uploaded_at, obj["lm"], obj["chunk_no"], obj["Key"]
+
+    def delete_keys(keys):
+        keys = list(keys)
+        for offset in range(0, len(keys), 1000):
+            result = s3_client.delete_objects(
+                Bucket=silver_bucket_name,
+                Delete={"Objects": [{"Key": key} for key in keys[offset:offset + 1000]]},
             )
-            raise e
-    try:
-        import pyarrow
-        import pyarrow.parquet
-        output_extension = "parquet"
-    except ImportError:
-        output_extension = "csv"
+            if result.get("Errors"):
+                raise RuntimeError(f"Could not delete silver objects: {result['Errors']}")
+        return len(keys)
+
+    def copy_original(obj):
+        arguments = {
+            "Bucket": silver_bucket_name,
+            "Key": obj["Key"],
+            "CopySource": {"Bucket": bronze_bucket_name, "Key": obj["Key"]},
+        }
+        if obj.get("ETag"):
+            arguments["CopySourceIfMatch"] = obj["ETag"]
+        s3_client.copy_object(**arguments)
+
+    invalid_timestamp = datetime.min.replace(tzinfo=timezone.utc)
+
+    def timestamp_sort_value(value):
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, date):
+            parsed = datetime.combine(value, time.min)
+        else:
+            text = str(value).strip() if value is not None else ""
+            if not text:
+                return invalid_timestamp
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                parsed = datetime.fromisoformat(text)
+            except ValueError:
+                return invalid_timestamp
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     try:
-        for table, table_info in tables.items():
-            if isinstance(table_info, dict):
-                id_column = table_info.get("id_column")
-                id_column = (
-                    id_column if isinstance(id_column, list) else [id_column]
-                )
-                last_modified_column = table_info.get("last_modified_column")
-                exclusions = table_info.get("exclusions")
+        if CreateS3Bucket:
+            existing_buckets = {item["Name"] for item in s3_client.list_buckets()["Buckets"]}
+            if silver_bucket_name not in existing_buckets:
+                arguments = {"Bucket": silver_bucket_name}
+                if aws_region != "us-east-1":
+                    arguments["CreateBucketConfiguration"] = {"LocationConstraint": aws_region}
+                s3_client.create_bucket(**arguments)
+                log(f'[SUCCESS] Bucket "{silver_bucket_name}" created!')
             else:
-                id_column = None
-                last_modified_column = None
-                exclusions = None
+                log(f'[INFO] Bucket "{silver_bucket_name}" already exists.')
+
+        for table, table_info in tables.items():
+            info = table_info if isinstance(table_info, dict) else {}
+            id_column = info.get("id_column")
+            id_columns = id_column if isinstance(id_column, list) else [id_column]
+            last_modified_column = info.get("last_modified_column")
+            exclusions = info.get("exclusions") or {}
             is_safe_incremental = bool(
-                last_modified_column and id_column and id_column != [None]
+                last_modified_column and id_columns and id_columns != [None]
             )
-            table_prefix = f"{table}"
+            prefix = str(table).rstrip("/") + "/"
             bronze_objects = []
-            paginator = s3_client.get_paginator("list_objects_v2")
-            for page in paginator.paginate(
-                Bucket=bronze_bucket_name,
-                Prefix=table_prefix.rstrip("/") + "/",
-            ):
-                for obj in page.get("Contents", []):
-                    key = obj["Key"]
-                    if not key.endswith(f".{output_extension}"):
-                        continue
-                    lm = ""
-                    if "/lm=" in key:
-                        lm = key.split("/lm=", 1)[1].split("/", 1)[0]
-                    elif "_lm=" in key:
-                        lm = key.rsplit("_lm=", 1)[1].rsplit(f".{output_extension}", 1)[0]
-                    chunk_match = re.search(r"chunk_(\d+)", key)
-                    chunk_no = int(chunk_match.group(1)) if chunk_match else -1
-                    bronze_objects.append((lm, chunk_no, key))
-            # --- Full Copy Strategy (Non-Incremental) ---
-            if not is_safe_incremental:
-                deleted_count = _delete_s3_prefix(
-                    s3_client=s3_client,
-                    bucket_name=silver_bucket_name,
-                    prefix=table_prefix,
+            for obj in list_objects(bronze_bucket_name, prefix):
+                key = obj["Key"]
+                extension = key.rsplit(".", 1)[-1].lower()
+                if extension not in {"csv", "parquet"}:
+                    continue
+                lm = ""
+                if "/lm=" in key:
+                    lm = key.split("/lm=", 1)[1].split("/", 1)[0]
+                elif "_lm=" in key:
+                    lm = key.rsplit("_lm=", 1)[1].rsplit(".", 1)[0]
+                chunk_match = re.search(r"chunk_(\d+)", key)
+                obj.update(
+                    format=extension,
+                    lm=lm,
+                    chunk_no=int(chunk_match.group(1)) if chunk_match else -1,
                 )
-                log_message(
-                    f'[INFO] Table "{table}" silver full copy started. '
-                    f"Bronze files={len(bronze_objects)}, removed old silver={deleted_count}."
-                )
-                copied_files = 0
-                def copy_one(object_key):
-                    s3_client.copy_object(
-                        Bucket=silver_bucket_name,
-                        Key=object_key,
-                        CopySource={
-                            "Bucket": bronze_bucket_name,
-                            "Key": object_key,
-                        },
+                bronze_objects.append(obj)
+            if not bronze_objects:
+                log(f'[WARNING] Table "{table}": no bronze CSV/Parquet chunks found. Silver was not changed.')
+                continue
+            formats = {obj["format"] for obj in bronze_objects}
+            if len(formats) != 1:
+                raise ValueError(f'Table "{table}" mixes CSV and Parquet. Use one format per table prefix.')
+            file_format = next(iter(formats))
+
+            # Schema pass: complete the column union before writing any output.
+            newest_first = sorted(bronze_objects, key=reference_key, reverse=True)
+            canonical_columns = []
+            canonical_types = {}
+            known_columns = set()
+            with tqdm(total=len(newest_first), desc=f"Reading schemas {table}", unit="file") as pbar:
+                for obj in newest_first:
+                    read_schema(obj)
+                    for name in obj["columns"]:
+                        if name not in known_columns:
+                            canonical_columns.append(name)
+                            known_columns.add(name)
+                    if file_format == "parquet":
+                        for field in obj["schema"]:
+                            current = canonical_types.get(field.name)
+                            if current is None or pa.types.is_null(current):
+                                canonical_types[field.name] = field.type
+                            elif not pa.types.is_null(field.type) and current != field.type:
+                                raise ValueError(
+                                    f'Table "{table}" column "{field.name}" has conflicting '
+                                    f'Parquet types: {current} versus {field.type} in "{obj["Key"]}". '
+                                    "Column-order alignment does not change non-null data types."
+                                )
+                    pbar.update(1)
+            if not canonical_columns:
+                raise ValueError(f'Table "{table}" has no column headers in its bronze chunks.')
+            canonical_schema = None
+            if file_format == "parquet":
+                for name, dtype in list(canonical_types.items()):
+                    if pa.types.is_null(dtype):
+                        canonical_types[name] = pa.string()
+                canonical_schema = pa.schema([
+                    pa.field(name, canonical_types[name], nullable=True)
+                    for name in canonical_columns
+                ])
+
+            def already_aligned(obj):
+                if obj["columns"] != canonical_columns:
+                    return False
+                if file_format == "parquet":
+                    return all(field.type == canonical_types[field.name] for field in obj["schema"])
+                return True
+
+            def write_aligned(obj, payload, keep_positions=None):
+                with io.BytesIO() as out_buffer:
+                    if file_format == "csv":
+                        source_index = {name: index for index, name in enumerate(obj["columns"])}
+                        positions = range(len(payload)) if keep_positions is None else keep_positions
+                        with io.StringIO(newline="") as text:
+                            writer = csv.writer(text, lineterminator="\n")
+                            writer.writerow(canonical_columns)
+                            for position in positions:
+                                row = payload[position]
+                                writer.writerow([
+                                    row[source_index[name]] if name in source_index else ""
+                                    for name in canonical_columns
+                                ])
+                            out_buffer.write(text.getvalue().encode("utf-8"))
+                        row_count = len(payload) if keep_positions is None else len(keep_positions)
+                    else:
+                        arrow_table = payload.read()
+                        if keep_positions is not None:
+                            arrow_table = arrow_table.take(pa.array(keep_positions, type=pa.int64()))
+                        arrays = []
+                        for name in canonical_columns:
+                            dtype = canonical_types[name]
+                            if name not in obj["columns"]:
+                                column = pa.nulls(arrow_table.num_rows, type=dtype)
+                            else:
+                                column = arrow_table.column(name)
+                                if pa.types.is_null(column.type):
+                                    column = pa.nulls(arrow_table.num_rows, type=dtype)
+                            arrays.append(column)
+                        aligned_table = pa.Table.from_arrays(arrays, schema=canonical_schema)
+                        pq.write_table(aligned_table, out_buffer, compression="SNAPPY")
+                        row_count = aligned_table.num_rows
+                    s3_client.put_object(
+                        Bucket=silver_bucket_name, Key=obj["Key"], Body=out_buffer.getvalue()
                     )
-                keys = (key for _, _, key in bronze_objects)
-                with ThreadPoolExecutor(max_workers=max_workers) as executor, tqdm(
-                    total=len(bronze_objects),
-                    desc=f"Copying {table}",
-                    unit="file",
+                return row_count
+
+            def read_payload(obj):
+                if file_format == "csv":
+                    return read_csv_chunk(obj)
+                return pq.ParquetFile(io.BytesIO(read_bytes(obj)))
+
+            log(
+                f'[INFO] Table "{table}" reference="{newest_first[0]["Key"]}"; '
+                f"canonical columns={len(canonical_columns)}, chunks={len(bronze_objects)}."
+            )
+
+            if not is_safe_incremental:
+                deleted_count = delete_keys(obj["Key"] for obj in list_objects(silver_bucket_name, prefix))
+                log(f'[INFO] Table "{table}" full refresh started; removed old silver={deleted_count}.')
+
+                counts = {"copied": 0, "rewritten": 0}
+                with tqdm(
+                    total=len(newest_first), desc=f"Aligning {table}", unit="file"
                 ) as pbar:
-                    pending = {
-                        executor.submit(copy_one, key)
-                        for key in islice(keys, max_workers)
-                    }
-                    while pending:
-                        completed, pending = wait(
-                            pending, return_when=FIRST_COMPLETED
-                        )
-                        for future in completed:
-                            future.result()
-                            copied_files += 1
-                            pbar.update(1)
-                            key = next(keys, None)
-                            if key is not None:
-                                pending.add(executor.submit(copy_one, key))
-                log_message(
-                    f'[SUCCESS] Table "{table}" silver copy complete. Copied files={copied_files}.'
+                    for obj in newest_first:
+                        if already_aligned(obj):
+                            copy_original(obj)
+                            counts["copied"] += 1
+                        else:
+                            write_aligned(obj, read_payload(obj))
+                            counts["rewritten"] += 1
+                        pbar.update(1)
+                log(
+                    f'[SUCCESS] Table "{table}" silver alignment complete. '
+                    f'Copied files={counts["copied"]}, rewritten files={counts["rewritten"]}, '
+                    f"columns per file={len(canonical_columns)}."
                 )
                 continue
-            # --- Incremental Deduplication Strategy ---
-            bronze_objects.sort(reverse=True)
-            bronze_keys = {key for _, _, key in bronze_objects}
-            silver_keys = set()
-            paginator = s3_client.get_paginator("list_objects_v2")
-            for page in paginator.paginate(
-                Bucket=silver_bucket_name,
-                Prefix=table_prefix.rstrip("/") + "/",
-            ):
-                for obj in page.get("Contents", []):
-                    key = obj["Key"]
-                    if key.endswith(f".{output_extension}"):
-                        silver_keys.add(key)
-            stale_keys = sorted(silver_keys - bronze_keys)
-            for i in range(0, len(stale_keys), 1000):
-                batch = [{"Key": key} for key in stale_keys[i : i + 1000]]
-                s3_client.delete_objects(
-                    Bucket=silver_bucket_name, Delete={"Objects": batch}
-                )
+
+            # Preserve the existing incremental winner-selection strategy.
+            required_columns = list(dict.fromkeys(id_columns + [last_modified_column]))
+            for obj in bronze_objects:
+                missing = [name for name in required_columns if name not in obj["columns"]]
+                if missing:
+                    raise ValueError(
+                        f'Table "{table}" file "{obj["Key"]}" is missing deduplication columns: {missing}. '
+                        "These cannot be synthesized without losing record identity/version information."
+                    )
+            exclusion_columns = exclusions.get("columns", []) or []
+            exclusion_values = {
+                tuple(value) if isinstance(value, (list, tuple)) else (value,)
+                for value in (exclusions.get("values", []) or [])
+            }
+            bronze_keys = {obj["Key"] for obj in bronze_objects}
+            silver_keys = {
+                obj["Key"] for obj in list_objects(silver_bucket_name, prefix)
+                if obj["Key"].lower().endswith((".parquet", ".csv"))
+            }
+            stale_keys = silver_keys - bronze_keys
+            delete_keys(stale_keys)
             silver_keys.difference_update(stale_keys)
-            log_message(
-                f'[INFO] Table "{table}" silver dedupe started. '
-                f"Bronze files={len(bronze_objects)}, silver files={len(silver_keys)}, "
-                f"removed stale silver={len(stale_keys)}."
-            )
             seen_ids = set()
-            written_rows = 0
-            skipped_rows = 0
-            copied_files = 0
-            rewritten_files = 0
-            skipped_existing_files = 0
-            removed_files = 0
-            omitted_files = 0
-            with tqdm(
-                total=len(bronze_objects),
-                desc=f"Cleaning {table}",
-                unit="file",
-            ) as pbar:
-                for _, _, key in bronze_objects:
-                    s3_obj = s3_client.get_object(
-                        Bucket=bronze_bucket_name, Key=key
-                    )
-                    file_bytes = s3_obj["Body"].read()
-                    buffer = io.BytesIO(file_bytes)
-                    parquet_file = pq.ParquetFile(buffer)
-                    excl_cols = exclusions.get("columns", []) if exclusions else []
-                    needed_columns = list(
-                        dict.fromkeys(id_column + [last_modified_column] + excl_cols)
-                    )
-                    missing = [
-                        col
-                        for col in needed_columns
-                        if col not in parquet_file.schema_arrow.names
-                    ]
-                    if missing:
-                        raise ValueError(
-                            f'Table "{table}" file "{key}" missing columns: {missing}'
-                        )
-                    meta_df = parquet_file.read(
-                        columns=needed_columns
-                    ).to_pandas()
-                    # Handle Empty Files
-                    if meta_df.empty:
-                        if key in silver_keys:
-                            skipped_existing_files += 1
-                        else:
-                            s3_client.copy_object(
-                                Bucket=silver_bucket_name,
-                                Key=key,
-                                CopySource={
-                                    "Bucket": bronze_bucket_name,
-                                    "Key": key,
-                                },
-                            )
-                            silver_keys.add(key)
-                            copied_files += 1
-                        pbar.update(1)
-                        continue
-                    total_rows = len(meta_df)
-                    meta_df["_row_pos"] = range(total_rows)
-                    if exclusions and exclusions.get("columns") and exclusions.get("values"):
-                        excl_cols = exclusions.get("columns", [])
-                        excl_vals_set = set(
-                            tuple(x) if isinstance(x, (list, tuple)) else (x,)
-                            for x in exclusions.get("values", [])
-                        )
-                        vals_tuples = list(zip(*[meta_df[c].to_numpy() for c in excl_cols]))
-                        is_excluded = [t in excl_vals_set for t in vals_tuples]
-                        meta_df = meta_df[~pd.Series(is_excluded, index=meta_df.index)]
-                    lmd_series = meta_df[last_modified_column]
-                    if not pd.api.types.is_datetime64_any_dtype(lmd_series):
-                        meta_df["_lmd_sort"] = pd.to_datetime(
-                            lmd_series, errors="coerce", format="ISO8601"
-                        )
+            written_rows = skipped_rows = copied_files = rewritten_files = 0
+            removed_files = omitted_files = 0
+            dedupe_objects = sorted(
+                bronze_objects, key=lambda obj: (obj["lm"], obj["chunk_no"], obj["Key"]), reverse=True
+            )
+            with tqdm(total=len(dedupe_objects), desc=f"Cleaning and aligning {table}", unit="file") as pbar:
+                for obj in dedupe_objects:
+                    payload = read_payload(obj)
+                    if file_format == "csv":
+                        total_rows = len(payload)
+                        source_index = {name: index for index, name in enumerate(obj["columns"])}
+                        metadata = [
+                            {name: row[source_index[name]] if name in source_index else None
+                             for name in dict.fromkeys(required_columns + exclusion_columns)}
+                            for row in payload
+                        ]
                     else:
-                        meta_df["_lmd_sort"] = lmd_series
-                    meta_df = meta_df.sort_values(
-                        by=["_lmd_sort", "_row_pos"],
-                        ascending=[False, False],
-                        na_position="last",
-                        kind="mergesort",
-                    )
-                    chunk_latest = meta_df.drop_duplicates(
-                        subset=id_column, keep="first"
-                    )
-                    if len(id_column) == 1:
-                        ids = chunk_latest[id_column[0]].to_numpy()
-                    else:
-                        ids = list(
-                            zip(
-                                *[
-                                    chunk_latest[col].to_numpy()
-                                    for col in id_column
-                                ]
-                            )
-                        )
-                    keep_mask = [pk not in seen_ids for pk in ids]
-                    keep_positions = sorted(
-                        chunk_latest.loc[keep_mask, "_row_pos"].tolist()
-                    )
-                    seen_ids.update(ids)
+                        total_rows = payload.metadata.num_rows
+                        needed = [
+                            name for name in dict.fromkeys(required_columns + exclusion_columns)
+                            if name in obj["columns"]
+                        ]
+                        metadata = payload.read(columns=needed).to_pylist()
+
+                    candidates = []
+                    for position, row in enumerate(metadata):
+                        if exclusion_columns and exclusion_values:
+                            values = tuple(row.get(name) for name in exclusion_columns)
+                            if values in exclusion_values:
+                                continue
+                        pk = tuple(row.get(name) for name in id_columns)
+                        candidates.append((timestamp_sort_value(row.get(last_modified_column)), position, pk))
+                    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                    local_ids = set()
+                    keep_positions = []
+                    for _, position, pk in candidates:
+                        if pk in local_ids:
+                            continue
+                        local_ids.add(pk)
+                        if pk not in seen_ids:
+                            keep_positions.append(position)
+                    seen_ids.update(local_ids)
+                    keep_positions.sort()
                     skipped_rows += total_rows - len(keep_positions)
-                    # Case 1: All rows superseded or excluded (Delete)
-                    if not keep_positions:
+                    key = obj["Key"]
+
+                    if total_rows and not keep_positions:
                         if key in silver_keys:
-                            s3_client.delete_object(
-                                Bucket=silver_bucket_name, Key=key
-                            )
+                            delete_keys([key])
                             silver_keys.discard(key)
                             removed_files += 1
                         else:
                             omitted_files += 1
-                        pbar.update(1)
-                        continue
-                    # Case 2: 100% of original rows kept (As Is)
-                    if len(keep_positions) == total_rows:
-                        if key in silver_keys:
-                            skipped_existing_files += 1
-                        else:
-                            s3_client.copy_object(
-                                Bucket=silver_bucket_name,
-                                Key=key,
-                                CopySource={
-                                    "Bucket": bronze_bucket_name,
-                                    "Key": key,
-                                },
-                            )
-                            silver_keys.add(key)
-                            copied_files += 1
-                            written_rows += total_rows
-                        pbar.update(1)
-                        continue
-                    # Case 3: Partial rows kept (Changed due to deduplication or exclusion)
-                    buffer.seek(0)
-                    full_table = pq.read_table(buffer)
-                    silver_table = full_table.take(keep_positions)
-                    out_buf = io.BytesIO()
-                    pq.write_table(silver_table, out_buf)
-                    s3_client.put_object(
-                        Bucket=silver_bucket_name,
-                        Key=key,
-                        Body=out_buf.getvalue(),
-                    )
-                    silver_keys.add(key)
-                    rewritten_files += 1
-                    written_rows += len(silver_table)
+                    elif len(keep_positions) == total_rows and already_aligned(obj):
+                        copy_original(obj)
+                        silver_keys.add(key)
+                        copied_files += 1
+                        written_rows += total_rows
+                    else:
+                        written_rows += write_aligned(obj, payload, keep_positions)
+                        silver_keys.add(key)
+                        rewritten_files += 1
                     pbar.update(1)
-            log_message(
-                f'[SUCCESS] Table "{table}" silver dedupe complete. '
-                f"Written rows={written_rows}, removed duplicate rows={skipped_rows}, "
+            log(
+                f'[SUCCESS] Table "{table}" silver dedupe/alignment complete. '
+                f"Written rows={written_rows}, skipped rows={skipped_rows}, "
                 f"copied files={copied_files}, rewritten files={rewritten_files}, "
-                f"skipped existing files={skipped_existing_files}, "
-                f"removed files={removed_files}, omitted files={omitted_files}."
+                f"removed files={removed_files}, omitted files={omitted_files}, "
+                f"removed stale files={len(stale_keys)}, columns per file={len(canonical_columns)}."
             )
     finally:
         gc.collect()
@@ -7088,6 +7207,35 @@ def upload_to_redshift(
     redshift_number_of_nodes,
     createRedshiftCluster=False
 ):
+
+    if not isinstance(s3_bucket_names, (list, tuple)):
+        raise TypeError('s3_bucket_names must be a list of bucket names or dictionaries.')
+    selected_by_bucket = {}
+    for entry in s3_bucket_names:
+        if isinstance(entry, str):
+            bucket_entries = {entry: None}
+        elif isinstance(entry, dict):
+            bucket_entries = entry
+        else:
+            raise TypeError('Each s3_bucket_names entry must be a bucket name or dictionary.')
+        for bucket, names in bucket_entries.items():
+            if not isinstance(bucket, str) or not bucket.strip():
+                raise ValueError('Bucket names must be nonempty strings.')
+            if bucket in selected_by_bucket:
+                raise ValueError(f'Bucket {bucket!r} appears more than once in s3_bucket_names.')
+            if names is None:
+                selected_by_bucket[bucket] = None
+                continue
+            if isinstance(names, str):
+                names = [names]
+            if not isinstance(names, (list, tuple, set, frozenset)):
+                raise TypeError(f'Table names for bucket {bucket!r} must be a list, string, or None.')
+            selected = set()
+            for name in names:
+                if not isinstance(name, str) or not name.rstrip('/'):
+                    raise ValueError(f'Table names for bucket {bucket!r} must be nonempty strings.')
+                selected.add(name.rstrip('/'))
+            selected_by_bucket[bucket] = selected
     try:
         redshift_iam_role_arn = create_iam_role(iam_client, role_name, trust_policy)
         attach_policies_to_role(iam_client, role_name, role_policies)
@@ -7147,7 +7295,10 @@ def upload_to_redshift(
         log_message('[INFO] Case sensitivity enabled for this session.')
     except Exception as e:
         raise Exception(f'[ERROR] Failed to connect to Redshift: {e}')
-    for bucket in s3_bucket_names:
+    for bucket, selected_tables in selected_by_bucket.items():
+        if selected_tables is not None and not selected_tables:
+            log_message(f'[INFO] No tables selected for bucket "{bucket}". Skipping...')
+            continue
         log_message(f'[INFO] Scanning S3 bucket: "{bucket}"')
         try:
             data_files = set()
@@ -7164,21 +7315,39 @@ def upload_to_redshift(
                 log_message(f'[INFO] No valid CSV or Parquet files found in bucket "{bucket}". Skipping...')
                 continue
             targets = {}
+            matched_tables = set()
             for file_key in data_files:
                 is_parquet = file_key.lower().endswith('.parquet')
                 if '/' in file_key:
                     parent_dir = file_key.rsplit('/', 1)[0]
+                    dataset_name = parent_dir
                     s3_path = f's3://{bucket}/{parent_dir}/'
                     table_name = f'{bucket}-{parent_dir.replace("/", "_")}'
                 else:
+                    dataset_name = file_key.rsplit('.', 1)[0]
                     s3_path = f's3://{bucket}/{file_key}'
-                    table_name = f'{bucket}-{file_key.rsplit(".", 1)[0]}'
+                    table_name = f'{bucket}-{dataset_name}'
+                if selected_tables is not None:
+                    matches = selected_tables.intersection((dataset_name, table_name))
+                    if not matches:
+                        continue
+                    matched_tables.update(matches)
                 if s3_path not in targets:
                     targets[s3_path] = {
                         'table_name': table_name,
                         'sample_file_key': file_key,
                         'is_parquet': is_parquet
                     }
+            if selected_tables is not None:
+                missing_tables = selected_tables - matched_tables
+                if missing_tables:
+                    log_message(
+                        f'[WARNING] Requested tables not found in bucket "{bucket}": '
+                        f'{sorted(missing_tables)!r}'
+                    )
+            if not targets:
+                log_message(f'[INFO] No matching datasets in bucket "{bucket}". Skipping...')
+                continue
             log_message(f'[INFO] Found {len(targets)} valid target dataset(s) in bucket "{bucket}". Uploading to Redshift...')
             for s3_path, info in targets.items():
                 table_name = info['table_name']
@@ -7210,70 +7379,40 @@ def upload_to_redshift(
                 if not column_defs:
                     log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
                     continue
+                quoted_table_name = '"' + table_name.replace('"', '""') + '"'
+                qualified_table_name = f'public.{quoted_table_name}'
+                create_table_query = (
+                    f'CREATE TABLE {qualified_table_name} ({", ".join(column_defs)});'
+                )
                 if table_name in existing_tables:
                     existing_schema = get_table_schema_from_redshift(cur, table_name)
                     if existing_schema != column_defs:
-                        log_message(f'[WARNING] Table "{table_name}" schema differs from the source.')
-                    log_message(f'[INFO] Clearing existing rows from "{table_name}"...')
-                    cur.execute(f'TRUNCATE TABLE "{table_name}";')
-                    conn.commit()
+                        log_message(
+                            f'[WARNING] Table "{table_name}" schema differs from the source. '
+                            'Dropping and recreating it...'
+                        )
+
+                        cur.execute(f'DROP TABLE {qualified_table_name};')
+                        cur.execute(create_table_query)
+                    else:
+                        log_message(f'[INFO] Clearing existing rows from "{table_name}"...')
+                        cur.execute(f'TRUNCATE TABLE {qualified_table_name};')
+                        conn.commit()
                 else:
-                    create_table_query = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
                     log_message(f'[INFO] Creating table "{table_name}"...')
                     cur.execute(create_table_query)
-                    conn.commit()
-                    log_message(f'[SUCCESS] Table "{table_name}" created!')
                 copy_query = f"""
-                COPY "{table_name}"
-                FROM '{s3_path}'
-                IAM_ROLE '{redshift_iam_role_arn}'
+                COPY {qualified_table_name}
+                FROM %s
+                IAM_ROLE %s
                 {copy_options};
                 """
-                while True:
-                    try:
-                        log_message(f'[INFO] Streaming {s3_path}...')
-                        cur.execute(copy_query)
-                        conn.commit()
-                        log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
-                        break
-                    except Exception as e:
-                        if "15007" in str(e) or "Unmatched number of columns" in str(e):
-                            safe_rollback()
-                            err_str = str(e)
-                            match = re.search(r'File name:\s*(https?://[^\s]+)', err_str)
-                            if match:
-                                full_url = urllib.parse.unquote(match.group(1))
-                                parts = full_url.split(f'/{bucket}/')
-                                try:
-                                    offending_file_key = parts[1]
-                                except Exception as e:
-                                    log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                                    safe_rollback()
-                                    raise
-                            else:
-                                log_message(f'[ERROR] Could not identify the offending file for {s3_path}: {e}')
-                                raise
-                            log_message(f'[WARNING] Schema mismatch in file {offending_file_key}. Adapting table "{table_name}"...')
-                            file_defs = get_parquet_schema_from_s3(s3_client, bucket, offending_file_key) if is_parquet else get_csv_schema_from_s3(s3_client, bucket, offending_file_key)
-                            cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
-                            existing_cols = {row[0].lower() for row in cur.fetchall()}
-                            added_columns = 0
-                            for col_def in file_defs:
-                                col_name = col_def.split('"')[1]
-                                if col_name.lower() not in existing_cols:
-                                    log_message(f'[INFO] Adding missing column "{col_name}"...')
-                                    cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {col_def};')
-                                    conn.commit()
-                                    added_columns += 1
-                            if added_columns == 0:
-                                log_message(f'[ERROR] No missing columns could be added for {s3_path}. Stopping retries: {e}')
-                                raise
-                            log_message(f'[INFO] Retrying {s3_path}...')
-                        else:
-                            log_message(f'[ERROR] Error uploading {s3_path}: {e}')
-                            safe_rollback()
-                            raise
+                log_message(f'[INFO] Streaming {s3_path}...')
+                cur.execute(copy_query, (s3_path, redshift_iam_role_arn))
+                conn.commit()
+                log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
         except Exception as e:
+            safe_rollback()
             log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
             raise
     for redshift_role, role_info in redshift_roles.items():
