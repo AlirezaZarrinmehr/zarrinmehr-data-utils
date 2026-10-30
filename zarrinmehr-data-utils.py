@@ -4619,7 +4619,7 @@ def stream_source_to_bronze(
                             key = obj["Key"]
                             if "_lm=" not in key or not key.endswith(f".{output_extension}"):
                                 continue
-                            key_value = key.rsplit("_lm=", 1)[1].rsplit(".{output_extension}", 1)[0]
+                            key_value = key.rsplit("_lm=", 1)[1].rsplit(f".{output_extension}", 1)[0]
                             if latest_key_value is None or key_value > latest_key_value:
                                 latest_key_value = key_value
                     if latest_key_value and "T" in latest_key_value:
