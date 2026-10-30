@@ -4845,13 +4845,7 @@ def stream_bronze_to_silver(
         return rows
 
     def reference_key(obj):
-        modified = obj.get("LastModified")
-        if isinstance(modified, datetime):
-            if modified.tzinfo is None:
-                modified = modified.replace(tzinfo=timezone.utc)
-            uploaded_at = modified.timestamp()
-        else:
-            uploaded_at = 0
+        uploaded_at = timestamp_sort_value(obj.get("LastModified"))
         return uploaded_at, obj["lm"], obj["chunk_no"], obj["Key"]
 
     def delete_keys(keys):
@@ -4875,7 +4869,7 @@ def stream_bronze_to_silver(
             arguments["CopySourceIfMatch"] = obj["ETag"]
         s3_client.copy_object(**arguments)
 
-    invalid_timestamp = datetime.min.replace(tzinfo=timezone.utc)
+    invalid_timestamp = (0, 0, 0, 0, 0, 0, 0)
 
     def timestamp_sort_value(value):
         if isinstance(value, datetime):
@@ -4886,15 +4880,15 @@ def stream_bronze_to_silver(
             text = str(value).strip() if value is not None else ""
             if not text:
                 return invalid_timestamp
-            if text.endswith("Z"):
-                text = text[:-1] + "+00:00"
             try:
                 parsed = datetime.fromisoformat(text)
             except ValueError:
                 return invalid_timestamp
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
+        # Upstream already puts all timestamps on the same clock.
+        return (
+            parsed.year, parsed.month, parsed.day,
+            parsed.hour, parsed.minute, parsed.second, parsed.microsecond,
+        )
 
     try:
         if CreateS3Bucket:
