@@ -4710,6 +4710,8 @@ def stream_source_to_bronze(
                         if pd.isna(chunk_max_date):
                             raise ValueError(f'Table "{table}" chunk {idx} has no valid "{last_modified_column}" values.')
                         chunk_watermark = chunk_max_date.strftime("%Y-%m-%dT%H-%M-%S")
+                        if latest_key_value and chunk_watermark == latest_key_value:
+                            continue
                         object_key = f"{table_prefix}/chunk_{idx:04d}_lm={chunk_watermark}.{output_extension}"
                     else:
                         object_key = f"{table_prefix}/chunk_{idx:04d}.{output_extension}"
