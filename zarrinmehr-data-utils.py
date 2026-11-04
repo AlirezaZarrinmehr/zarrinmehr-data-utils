@@ -7079,7 +7079,7 @@ def turn_on_case_sensitivity(
             ClusterParameterGroupName=parameter_group_name
         )
         log_message(f'[INFO] Modified cluster "{redshift_cluster_identifier}" with parameter group "{parameter_group_name}"')
-        response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
+        # response = redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     else:
         log_message(f'[INFO] Cluster "{redshift_cluster_identifier}" already has the parameter group "{parameter_group_name}" associated.')
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
@@ -7450,7 +7450,7 @@ def upload_to_redshift(
     cur.close()
     conn.close()
     wait_for_cluster_available(redshift_client, redshift_cluster_identifier)
-    redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
+    # redshift_client.reboot_cluster(ClusterIdentifier=redshift_cluster_identifier)
     log_message('[INFO] 🚀 Upload process completed.')
 
 
