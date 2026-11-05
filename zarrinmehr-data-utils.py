@@ -1728,109 +1728,355 @@ def process_ns_orders(
 
 def process_gp_transactions(
     companyName,
-    salesOrderInvoiceHeader,
-    salesOrderInvoiceLine,
-    account,
     CadUsdAvg,
     item,
     customer,
     start_date,
     end_date,
     s3_client,
-    silver_bucket_name,
-    gold_bucket_name
+    gold_bucket_name,
+    salesOrderInvoiceHeaderOpen,
+    salesOrderInvoiceHeaderHistory,
+    salesOrderInvoiceLineOpen,
+    salesOrderInvoiceLineHistory,
+    purchReceiptHeaderOpen,
+    purchReceiptHeaderHistory,
+    purchReceiptLineOpen,
+    purchReceiptLineHistory,
+    receivablesHeaderOpen,
+    receivablesHeaderHistory,
+    receivablesLineOpen,
+    receivablesLineHistory,
+    payablesHeaderOpen,
+    payablesHeaderHistory,
+    payablesLineOpen,
+    payablesLineHistory,
+    generalLedgerLineOpen,
+    generalLedgerLineHistory,
+    sourceDocumentMaster,
+    account,
 ):
-    generalLedgerLineOpen = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'GL20000 :: YEAR-TO-DATE TRANSACTION OPEN.csv')
-    generalLedgerLineHistory = read_file_from_s3(s3_client = s3_client, bucket_name = silver_bucket_name, object_key = 'GL30000 :: ACCOUNT TRANSACTION HISTORY.csv')
-    generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index=True)
-    sourceDocumentMaster = read_file_from_s3(s3_client = s3_client, bucket_name=silver_bucket_name, object_key='SY00900 :: SOURCE DOCUMENT MASTER.csv')
-    account['ACTINDX'] = account['ACTINDX'].astype('str').str.strip()
-    item['ItemId'] = item['ItemId'].astype('str').str.strip()
-    customer['CustId'] = customer['CustId'].astype('str').str.strip()
-    salesOrderInvoiceHeader['CUSTNMBR'] = salesOrderInvoiceHeader['CUSTNMBR'].astype('str').str.strip()
-    salesOrderInvoiceHeader['SOPNUMBE'] = salesOrderInvoiceHeader['SOPNUMBE'].astype('str').str.strip()
-    salesOrderInvoiceLine['SLSINDX'] = salesOrderInvoiceLine['SLSINDX'].astype('str').str.strip()
-    salesOrderInvoiceLine['SOPNUMBE'] = salesOrderInvoiceLine['SOPNUMBE'].astype('str').str.strip()
-    salesOrderInvoiceLine['ITEMNMBR'] = salesOrderInvoiceLine['ITEMNMBR'].astype('str').str.strip()
-    generalLedgerLine['ACTINDX'] = generalLedgerLine['ACTINDX'].astype('str').str.strip()
-    generalLedgerLine['ORDOCNUM'] = generalLedgerLine['ORDOCNUM'].astype('str').str.strip()
-    generalLedgerLine['JRNENTRY'] = generalLedgerLine['JRNENTRY'].astype('str').str.strip()
-    generalLedgerLine['TRXSORCE'] = generalLedgerLine['TRXSORCE'].astype('str').str.strip()
-    generalLedgerLine['SOURCDOC'] = generalLedgerLine['SOURCDOC'].astype('str').str.strip()
-    sourceDocumentMaster['SOURCDOC'] = sourceDocumentMaster['SOURCDOC'].astype('str').str.strip()
+
+    # --- SALES ORDER PROCESSING (SOP) ---
+    salesOrderInvoiceHeader = pd.concat([salesOrderInvoiceHeaderOpen, salesOrderInvoiceHeaderHistory], ignore_index = True)
+    salesOrderInvoiceLine = pd.concat([salesOrderInvoiceLineOpen, salesOrderInvoiceLineHistory], ignore_index = True)
+    sop_type_map = {'1': 'Quote', '2': 'Order', '3': 'Invoice', '4': 'Return', '5': 'Back Order', '6': 'Fulfillment Order'}
+    sop_status_map = {'1': 'New', '2': 'Ready to Print Pick Ticket', '3': 'Unconfirmed Pick', '4': 'Ready to Print Pack Slip', '5': 'Unconfirmed Pack', '6': 'Shipped', '7': 'Ready to Post', '8': 'In Process', '9': 'Complete'}
+    for col in salesOrderInvoiceHeader.columns:
+        salesOrderInvoiceHeader[col] = clean_key(salesOrderInvoiceHeader[col])
+    salesOrderInvoiceHeader['SOPTYPE'] = salesOrderInvoiceHeader['SOPTYPE'].map(sop_type_map)
+    salesOrderInvoiceHeader['SOPSTATUS'] = salesOrderInvoiceHeader['SOPSTATUS'].map(sop_status_map)
+    salesOrderInvoiceHeader['CREATDDT'] = pd.to_datetime(salesOrderInvoiceHeader['CREATDDT'])
+    for col in salesOrderInvoiceLine.columns:
+        salesOrderInvoiceLine[col] = clean_key(salesOrderInvoiceLine[col])
+    salesOrderInvoiceLine['SOPTYPE'] = salesOrderInvoiceLine['SOPTYPE'].map(sop_type_map)
+    salesOrderInvoiceLine['ACTLSHIP'] = pd.to_datetime(salesOrderInvoiceLine['ACTLSHIP'], errors = 'coerce').dt.date
+    InvoiceHeader = salesOrderInvoiceHeader[salesOrderInvoiceHeader['SOPTYPE'].isin(['Invoice', 'Return'])]
+    InvoiceLine = pd.merge(
+        salesOrderInvoiceLine,
+        InvoiceHeader,
+        on=["SOPTYPE", "SOPNUMBE"],
+        suffixes=('', '_InvoiceHeader')
+    )
+
+    # --- PURCHASING RECEIPT (POP RECEIPT) ---
+    purchReceiptHeader = pd.concat([purchReceiptHeaderOpen, purchReceiptHeaderHistory], ignore_index = True)
+    purchReceiptLine = pd.concat([purchReceiptLineOpen, purchReceiptLineHistory], ignore_index = True)
+    pop_type_map = {'1': 'Shipment', '2': 'Invoice', '3': 'Shipment/Invoice', '4': 'Return', '5': 'Return With Credit'}
+    for col in purchReceiptHeader.columns:
+        purchReceiptHeader[col] = clean_key(purchReceiptHeader[col])
+    purchReceiptHeader['POPTYPE'] = purchReceiptHeader['POPTYPE'].map(pop_type_map)
+    purchReceiptHeader['CREATDDT'] = pd.to_datetime(purchReceiptHeader['CREATDDT'])
+    for col in purchReceiptLine.columns:
+        purchReceiptLine[col] = clean_key(purchReceiptLine[col])
+    purchReceiptLine['ACTLSHIP'] = pd.to_datetime(purchReceiptLine['ACTLSHIP'], errors = 'coerce').dt.date
+    ReceiptHeader = purchReceiptHeader#[purchReceiptHeader['POPTYPE'].isin(['Invoice', 'Shipment/Invoice', 'Return', 'Return With Credit'])]
+    ReceiptLine = pd.merge(
+        purchReceiptLine,
+        ReceiptHeader,
+        on=["POPRCTNM"],
+        suffixes=('', '_ReceiptHeader')
+    )
+
+    # --- RECEIVABLES MANAGEMENT (RM) ---
+
+    receivablesHeader = pd.concat([receivablesHeaderOpen, receivablesHeaderHistory], ignore_index = True)
+    receivablesLine = pd.concat([receivablesLineOpen, receivablesLineHistory], ignore_index = True)
+    for col in receivablesHeader.columns:
+        receivablesHeader[col] = clean_key(receivablesHeader[col])
+    receivablesHeader['DOCDATE'] = pd.to_datetime(receivablesHeader['DOCDATE'], errors = 'coerce').dt.date
+    for col in receivablesLine.columns:
+        receivablesLine[col] = clean_key(receivablesLine[col])
+    receivablesLine = pd.merge(
+        receivablesHeader,
+        receivablesLine,
+        on=['DOCNUMBR', 'CUSTNMBR'],
+        suffixes=('', '_ReceivablesHeader')
+    )
+
+    # --- PAYABLES MANAGEMENT (PM) ---
+
+    payablesHeader = pd.concat([payablesHeaderOpen, payablesHeaderHistory], ignore_index = True)
+    payablesLine = pd.concat([payablesLineOpen, payablesLineHistory], ignore_index = True)
+    for col in payablesHeader.columns:
+        payablesHeader[col] = clean_key(payablesHeader[col])
+    payablesHeader['DOCDATE'] = pd.to_datetime(payablesHeader['DOCDATE'], errors = 'coerce').dt.date
+    for col in payablesLine.columns:
+        payablesLine[col] = clean_key(payablesLine[col])
+    payablesLine = pd.merge(
+        payablesHeader,
+        payablesLine,
+        on=['VCHRNMBR', 'VENDORID', 'DOCTYPE'],
+        suffixes=('', '_PayablesHeader')
+    )
+
+    # --- GENERAL LEDGER (GL) ---
+
+    generalLedgerLine = pd.concat([generalLedgerLineOpen, generalLedgerLineHistory], ignore_index = True)
+
+    for col in generalLedgerLine.columns:
+        generalLedgerLine[col] = clean_key(generalLedgerLine[col])
+
+    generalLedgerLine['TRXDATE'] = pd.to_datetime(generalLedgerLine['TRXDATE'], errors = 'coerce').dt.date
+    del (
+        salesOrderInvoiceHeaderOpen,
+        salesOrderInvoiceHeaderHistory,
+        salesOrderInvoiceLineOpen,
+        salesOrderInvoiceLineHistory,
+        purchReceiptHeaderOpen,
+        purchReceiptHeaderHistory,
+        purchReceiptLineOpen,
+        purchReceiptLineHistory,
+        receivablesHeaderOpen,
+        receivablesHeaderHistory,
+        receivablesLineOpen,
+        receivablesLineHistory,
+        payablesHeaderOpen,
+        payablesHeaderHistory,
+        payablesLineOpen,
+        payablesLineHistory,
+        generalLedgerLineOpen,
+        generalLedgerLineHistory
+    )
+    gc.collect()
+
+    account['ACTINDX'] = clean_key(account['ACTINDX'])
+    item['ItemId'] = clean_key(item['ItemId'])
+    sourceDocumentMaster['SOURCDOC'] = clean_key(sourceDocumentMaster['SOURCDOC'])
+    generalLedgerLine = pd.merge(
+        generalLedgerLine,
+        receivablesLine,
+        left_on=['ORCTRNUM' ,'ORTRXSRC', 'OrigSeqNum'],
+        right_on=['DOCNUMBR' ,'TRXSORCE', 'SEQNUMBR'],
+        suffixes=('', '_receivablesLine'),
+        how = 'left'
+    )
+    generalLedgerLine = pd.merge(
+        generalLedgerLine,
+        payablesLine,
+        left_on=['ORCTRNUM', 'ORTRXSRC', 'OrigSeqNum'],
+        right_on=['VCHRNMBR', 'TRXSORCE', 'DSTSQNUM'],
+        suffixes=('', '_payablesLine'),
+        how = 'left'
+    )
+    generalLedgerLine['DEBITAMT'] = pd.to_numeric(generalLedgerLine['DEBITAMT'], errors="coerce")
+    generalLedgerLine['CRDTAMNT'] = pd.to_numeric(generalLedgerLine['CRDTAMNT'], errors="coerce")
+    InvoiceLine['XTNDPRCE'] = pd.to_numeric(InvoiceLine['XTNDPRCE'], errors="coerce")
+    InvoiceLine.loc[InvoiceLine['SOPTYPE']=='Return', 'XTNDPRCE']=-InvoiceLine['XTNDPRCE']
+    generalLedgerLine = pd.merge(
+        generalLedgerLine,
+        InvoiceLine,
+        left_on=[
+            generalLedgerLine["ORCTRNUM"],
+            generalLedgerLine["DSTINDX"],
+            (generalLedgerLine["CRDTAMNT"].fillna(0) - generalLedgerLine["DEBITAMT"].fillna(0)).round()
+
+        ],
+        right_on=[
+            InvoiceLine["SOPNUMBE"],
+            InvoiceLine["SLSINDX"],
+            InvoiceLine["XTNDPRCE"].fillna(0).round()
+        ],
+        suffixes=('', '_InvoiceLine'),
+        how="left"
+    )
+    generalLedgerLine.drop(columns =['key_0', 'key_1', 'key_2'], inplace = True)
+    generalLedgerLine = pd.merge(
+        generalLedgerLine,
+        ReceiptLine,
+        left_on=[
+            generalLedgerLine["ORCTRNUM"],
+            generalLedgerLine["OrigSeqNum"],
+        ],
+        right_on=[
+            ReceiptLine["POPRCTNM"],
+            ReceiptLine["RCPTLNNM"],
+        ],
+        suffixes=('', '_ReceiptLine'),
+        how="left"
+    )
+    generalLedgerLine.drop(columns =['key_0', 'key_1'], inplace = True)
     generalLedgerLine = generalLedgerLine.merge(sourceDocumentMaster[['SOURCDOC', 'SDOCDSCR']], on = 'SOURCDOC', how = 'left')
-    generalLedgerLine['SDOCDSCR']=generalLedgerLine['SDOCDSCR'].map({'BBF':'Balance Brought Forward'})
+    generalLedgerLine['SDOCDSCR'] = generalLedgerLine['SDOCDSCR'].map({'BBF': 'Balance Brought Forward'}).fillna(generalLedgerLine['SDOCDSCR'])
+    config = {
+        "TransactionId": {
+            "default": lambda df: 'GJ' + ' :: ' + df['JRNENTRY'].fillna("").astype(str) + ' :: ' + df['TRXSORCE'].fillna("").astype(str),
+            "SOPNUMBE": lambda df: df["SOPTYPE"].fillna("").astype(str) + " :: " + df["SOPNUMBE"].fillna("").astype(str),
+            "POPRCTNM": lambda df: df["POPRCTNM"]
+        },
+        "TransactionNo": {
+            "default": lambda df: 'GJ' + ' :: ' + df['JRNENTRY'].fillna("").astype(str),
+            "SOPNUMBE": lambda df: df["ORCTRNUM"],
+            "POPRCTNM": lambda df: df["ORCTRNUM"]
+        },
+        "TransactionType": {
+            "default": "GENERAL JOURNAL",
+            "SOPNUMBE": lambda df: df["SOPTYPE"],
+            "POPRCTNM": lambda df: df["POPTYPE"]
+        },
+        "OrderId": {
+            "SOPNUMBE": lambda df: df["ORIGNUMB"],
+            "POPRCTNM": lambda df: df["PONUMBER_ReceiptLine"]
+        },
+        "TransactionDate": {
+            "default": lambda df: df["TRXDATE"]
+        },
+        "TransactionStatus": {
+            "default": "CLOSED",
+            "SOPNUMBE": lambda df: df["SOPSTATUS"],
+            "POPRCTNM": lambda df: df["Workflow_Status_ReceiptLine"]
+        },
+        "SalesRepID": {
+            "SOPNUMBE": lambda df: df["SLPRSNID_InvoiceLine"],
+            "POPRCTNM": lambda df: df["PTDUSRID_ReceiptLine"]
+        },
+        "CustId": {
+            "default": lambda df: df["ORMSTRID"],
+            "SOPNUMBE": lambda df: 'C' + ' :: ' + df["CUSTNMBR_InvoiceLine"].fillna("").astype(str).str.strip(),
+            "POPRCTNM": lambda df: 'V' + ' :: ' + df["VENDORID_ReceiptLine"].fillna("").astype(str).str.strip()
+        },
+        "CustPo": {
+            "SOPNUMBE": lambda df: df["CSTPONBR"]
+        },
+        "DueDate": {
+            "SOPNUMBE": lambda df: df["DUEDATE_InvoiceLine"],
+            "POPRCTNM": lambda df: df["DUEDATE_ReceiptLine"]
+        },
+        "CloseDate": {
+            "SOPNUMBE": lambda df: df["FUFILDAT"],
+            "POPRCTNM": lambda df: df["receiptdate"]
+        },
+        "ShipName": {
+            "SOPNUMBE": lambda df: df["ShipToName"]
+        },
+        "ShipCity": {
+            "SOPNUMBE": lambda df: df["CITY"]
+        },
+        "ShipState": {
+            "SOPNUMBE": lambda df: df["STATE"]
+        },
+        "ShipZip": {
+            "SOPNUMBE": lambda df: df["ZIPCODE"]
+        },
+        "HeaderTotal": {
+            "SOPNUMBE": lambda df: df["SUBTOTAL"],
+            "POPRCTNM": lambda df: df["SUBTOTAL_ReceiptLine"]
+        },
+        "ItemId": {
+            "default": "GENERAL JOURNAL",
+            "SOPNUMBE": lambda df: df["ITEMNMBR"],
+            "POPRCTNM": lambda df: df["ITEMNMBR_ReceiptLine"]
+        },
+        "ItemDescription": {
+            "default": lambda df: df["DSCRIPTN"].fillna("").astype(str) + " :: " + df["REFRENCE"].fillna("").astype(str),
+            "SOPNUMBE": lambda df: df["ITEMDESC"],
+            "POPRCTNM": lambda df: df["ITEMDESC_ReceiptLine"]
+        },
+        "ShipDate": {
+            "SOPNUMBE": lambda df: df["ACTLSHIP"],
+            "POPRCTNM": lambda df: df["ACTLSHIP_ReceiptLine"]
+        },
+        "Total": {
+            "default": lambda df: (
+                pd.to_numeric(df["CRDTAMNT"], errors="coerce").fillna(0)
+                - pd.to_numeric(df["DEBITAMT"], errors="coerce").fillna(0)
+            )
+        },
+        "OpenTotal": {
+            "SOPNUMBE": lambda df: pd.to_numeric(df["CURTRXAM"], errors="coerce").fillna(0),
+            "POPRCTNM": lambda df: pd.to_numeric(df["CURTRXAM_payablesLine"], errors="coerce").fillna(0)
+        },
+        "Quantity": {
+            "default": 1,
+            "SOPNUMBE": lambda df: df["QUANTITY"],
+            "POPRCTNM": lambda df: df["DECPLQTY_ReceiptLine"]
+        },
+        "Rate": {
+            "default": 1,
+            "SOPNUMBE": lambda df: (
+                pd.to_numeric(df["CRDTAMNT"], errors="coerce").fillna(0)
+                - pd.to_numeric(df["DEBITAMT"], errors="coerce").fillna(0)
+            ).div(
+                pd.to_numeric(
+                    df["QUANTITY"],
+                    errors="coerce"
+                ).replace(0, pd.NA)
+            ),
+            "POPRCTNM": lambda df: (
+                pd.to_numeric(df["CRDTAMNT"], errors="coerce").fillna(0)
+                - pd.to_numeric(df["DEBITAMT"], errors="coerce").fillna(0)
+            ).div(
+                pd.to_numeric(
+                    df["DECPLQTY"],
+                    errors="coerce"
+                ).replace(0, pd.NA)
+            )
+        }
+    }
+    def has_value(series):
+        return (
+            series.notna()
+            & series.astype("string").str.strip().ne("")
+        )
+    for target, rules in config.items():
+        generalLedgerLine[target] = pd.NA
+        for check_col, source in rules.items():
+            if check_col == "default":
+                mask = pd.Series(
+                    True,
+                    index=generalLedgerLine.index
+                )
+            else:
+                mask = has_value(generalLedgerLine[check_col])
+            value = (
+                source(generalLedgerLine)
+                if callable(source)
+                else source
+            )
+            if isinstance(value, pd.Series):
+                generalLedgerLine.loc[mask, target] = value.loc[mask]
+            else:
+                generalLedgerLine.loc[mask, target] = value
+    date_columns = [
+        "TransactionDate",
+        "DueDate",
+        "CloseDate",
+        "ShipDate"
+    ]
+    for column in date_columns:
+        generalLedgerLine[column] = pd.to_datetime(
+            generalLedgerLine[column],
+            errors="coerce"
+        )
     generalLedgerLine = generalLedgerLine.loc[
-        (pd.to_datetime(generalLedgerLine['TRXDATE'], errors='coerce')>=start_date)&\
-        (pd.to_datetime(generalLedgerLine['TRXDATE'], errors='coerce')<=end_date)
+        (pd.to_datetime(generalLedgerLine['TransactionDate'], errors='coerce')>=start_date)&\
+        (pd.to_datetime(generalLedgerLine['TransactionDate'], errors='coerce')<=end_date)
     ].copy()
-    generalLedgerLine.rename(columns = {'ORDOCNUM':'SOPNUMBE'}, inplace = True)
-    generalLedgerLine['CRDTAMNT'] = generalLedgerLine['CRDTAMNT'].astype('float')
-    generalLedgerLine['DEBITAMT'] = generalLedgerLine['DEBITAMT'].astype('float')
-    generalLedgerLine['Total'] = generalLedgerLine['CRDTAMNT'] - generalLedgerLine['DEBITAMT']
-    generalLedgerLine['TransactionId']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY'] + ' :: ' + generalLedgerLine['TRXSORCE']
-    generalLedgerLine['TransactionNo']='GJ' + ' :: ' + generalLedgerLine['JRNENTRY']
-    generalLedgerLine['TransactionStatus'] = 'CLOSED'
-    generalLedgerLine['TransactionType'] = 'GENERAL JOURNAL'
-    generalLedgerLine['TransactionDate'] = pd.to_datetime(generalLedgerLine['TRXDATE'])
-    generalLedgerLine['ItemId'] = 'GENERAL JOURNAL'
-    generalLedgerLine['ItemDescription']='GENERAL JOURNAL' + ' :: ' + generalLedgerLine['REFRENCE']
-    generalLedgerLine['Quantity'] = 1
-    generalLedgerLine['Rate'] = generalLedgerLine['Total']
-    generalLedgerLine.rename(columns={'ORMSTRID':'CustId'}, inplace = True)
-    txns = salesOrderInvoiceHeader.loc[
-        (salesOrderInvoiceHeader['SOPTYPE']=='Invoice')&\
-        (pd.to_datetime(salesOrderInvoiceHeader['GLPOSTDT'], errors='coerce')<=end_date)&\
-        (pd.to_datetime(salesOrderInvoiceHeader['GLPOSTDT'], errors='coerce')<=end_date)
-    ].copy()
-    txnsLines = salesOrderInvoiceLine.loc[
-        (salesOrderInvoiceLine['SOPTYPE']=='Invoice')
-    ].copy()
-    txnsLines.rename(columns = {'SLSINDX':'ACTINDX'}, inplace = True)
-    txnsLines['XTNDPRCE'] = txnsLines['XTNDPRCE'].astype('float')
-    txnsLines = txnsLines.merge(txns, on = ['SOPNUMBE'], suffixes = ('', '_inv'))
+    txnsLines=generalLedgerLine
     txnsLines['ShipAddress'] = txnsLines[['ADDRESS1', 'ADDRESS2', 'ADDRESS3']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']),
         axis=1
     )
-    txnsLines.rename(columns = {
-        'ORIGNUMB':'OrderId',
-        'GLPOSTDT':'TransactionDate',
-        'SOPSTATUS':'TransactionStatus',
-        'SLPRSNID':'SalesRepID',
-        'CUSTNMBR':'CustId',
-        'CSTPONBR':'CustPo',
-        'FUFILDAT':'CloseDate',
-        'ShipToName':'ShipName',
-        'CITY':'ShipCity',
-        'STATE':'ShipState',
-        'ZIPCODE':'ShipZip',
-        'SUBTOTAL':'HeaderTotal',
-        'ITEMNMBR':'ItemId',
-        'ACTLSHIP':'ShipDate',
-        'XTNDPRCE':'Total'
-    }, inplace = True)
-    txnsLines['TransactionType']='INVOICE'
-    txnsLines['TransactionId']=txnsLines['SOPNUMBE']
-    txnsLines['TransactionNo']=txnsLines['SOPNUMBE']
-    txnsLines['TransactionDate'] = pd.to_datetime(txnsLines['TransactionDate'])
-    txnsLines['Quantity']=txnsLines['QUANTITY']
-    txnsLines['Rate']=txnsLines['UNITPRCE']
-    txnsLines['ItemDescription']=txnsLines['ITEMDESC']
-    matchedGlTranLin= pd.merge(
-        generalLedgerLine.groupby('SOPNUMBE').agg({'Total':'sum'}).reset_index(),
-        txnsLines.groupby('SOPNUMBE').agg({'Total':'sum'}).reset_index(),
-        on = 'SOPNUMBE',
-    )
-    matchedGlTranLin = matchedGlTranLin[np.isclose(matchedGlTranLin['Total_x'], matchedGlTranLin['Total_y'], atol=0.01)]
-    txns = txns.loc[
-    (txns['SOPNUMBE'].isin(matchedGlTranLin['SOPNUMBE']))
-    ]
-    txnsLines = txnsLines.loc[
-    (txnsLines['SOPNUMBE'].isin(matchedGlTranLin['SOPNUMBE']))
-    ]
-    generalLedgerLine = generalLedgerLine.loc[~generalLedgerLine['SOPNUMBE'].isin(matchedGlTranLin['SOPNUMBE'])]
-    txnsLines = pd.concat([txnsLines, generalLedgerLine], ignore_index=True)
     txnsLines = txnsLines.merge(account[['ACTINDX', 'ACTDESCR', 'AccountType']].drop_duplicates(subset=['ACTINDX']).rename(columns = {'ACTDESCR':'Account'}), on ='ACTINDX', how = 'left')
     txnsLines = txnsLines.merge(customer[['CustId', 'CustNo', 'CustName']], on = 'CustId', how = 'left')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on='ItemId', how = 'left', suffixes = ('', '_Item'))
@@ -1841,17 +2087,27 @@ def process_gp_transactions(
     txnsLines['Rate'] = pd.to_numeric(txnsLines['Rate'], errors='coerce')
     txnsLines['Rate']=txnsLines['Rate']*txnsLines['CAD/USD']
     txnsLines['Total']=txnsLines['Total']*txnsLines['CAD/USD']
+    txnsLines['OpenTotal']=txnsLines['OpenTotal']*txnsLines['CAD/USD']
     txns = txnsLines.fillna('').groupby( 'TransactionId', as_index=False ).agg({'OrderId': 'max', 'CustId': 'max', 'TransactionStatus': 'max', 'TransactionNo': 'max', 'TransactionType': 'max', 'TransactionDate': 'max', 'SalesRepID': 'max', 'CustPo': 'max', 'CustNo': 'max', 'CustName': 'max', 'ShipName': 'max', 'ShipAddress': 'max', 'ShipCity': 'max', 'ShipState': 'max', 'ShipZip': 'max', 'BillName': 'max', 'BillAddress': 'max', 'BillCity': 'max', 'BillState': 'max', 'BillZip': 'max', 'Total': 'sum'})
-    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total']]
+    txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Rate', 'Quantity', 'Total', 'OpenTotal', 'DueDate']]
     txns['Company'] = companyName
-    txns = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txns = clean_df(s3_client = s3_client, gold_bucket_name= gold_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = ['BillZip'], state_columns = ['BillState'], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txns = txns[['Company'] + txns.columns[:-1].tolist()]
+    txns["Total"] = pd.to_numeric(
+        txns["Total"],
+        errors="coerce"
+    ).fillna(0.0).astype("float64")
+    
+    txnsLines["Total"] = pd.to_numeric(
+        txnsLines["Total"],
+        errors="coerce"
+    ).fillna(0.0).astype("float64")
     mismatched_txns = txns.merge(txnsLines, on='TransactionId', how='inner', suffixes=('_ord', '_lin')).groupby('TransactionId').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_txns = mismatched_txns[~np.isclose(mismatched_txns['Total_ord'], mismatched_txns['Total_lin'], atol=0.1)]
     log_message(f'[INFO] {mismatched_txns.shape[0]} txns total do not match txnsline total')
     txns = txns[~txns['TransactionId'].isin(mismatched_txns['TransactionId'])]
     txnsLines['Company'] = companyName
-    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name= gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
     txnsLines = txnsLines[txnsLines['TransactionId'].isin(txns['TransactionId'])]
     return txns, txnsLines
@@ -1863,7 +2119,7 @@ def process_gp_orders(
     dfLine,
     item,
     item_df,
-    customersORvendors,
+    customer,
     start_date,
     end_date,
     s3_client,
@@ -1896,6 +2152,10 @@ def process_gp_orders(
         (dfHeader[txnsType7].isin(txnsType17))
     ].copy()
 
+    if txnsType2 == 'PurchaseOrder':
+        orders[txnsType9] = 'V' + ' :: ' + orders[txnsType9].fillna("").astype(str).str.strip()
+    else:
+        orders[txnsType9] = 'C' + ' :: ' + orders[txnsType9].fillna("").astype(str).str.strip()
     orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [txnsType], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
     orders['ShipAddress'] = orders[['ADDRESS1', 'ADDRESS2', 'ADDRESS3']].fillna('').apply(
@@ -1919,7 +2179,7 @@ def process_gp_orders(
     }, inplace = True)
     orders[f'{txnsType2}Id']=orders[f'{txnsType2}No']
     orders[f'{txnsType2}Status'] = orders[f'{txnsType2}Status'].astype('str')
-    orders = orders.merge(customersORvendors[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}Id', how = 'left')
+    orders = orders.merge(customer[[f'{txnsType3}Id', f'{txnsType3}No', f'{txnsType3}Name']], on = f'{txnsType3}Id', how = 'left')
                 
     ordersLines = dfLine[
         (dfLine[txnsType].isin(orders[f'{txnsType2}Id']))&\
