@@ -7347,70 +7347,75 @@ def upload_to_redshift(
             log_message(f'[INFO] Found {len(targets)} valid target dataset(s) in bucket "{bucket}". Uploading to Redshift...')
             for s3_path, info in targets.items():
                 table_name = info['table_name']
-                sample_file_key = info['sample_file_key']
-                is_parquet = info['is_parquet']
+                try:
+                    sample_file_key = info['sample_file_key']
+                    is_parquet = info['is_parquet']
 
-                check_table_query = '''
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
-                '''
-                cur.execute(check_table_query)
-                existing_tables = [row[0] for row in cur.fetchall()]
-                if is_parquet:
-                    column_defs = get_parquet_schema_from_s3(s3_client, bucket, sample_file_key)
-                    copy_options = """
-                    FORMAT AS PARQUET
-                    FILLRECORD
-                    """
-                else:
-                    column_defs = get_csv_schema_from_s3(s3_client, bucket, sample_file_key)
-                    copy_options = """
-                    CSV
-                    IGNOREHEADER 1
-                    DELIMITER ','
-                    QUOTE '"'
-                    TRUNCATECOLUMNS
-                    FILLRECORD
-                    """
-                if not column_defs:
-                    log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
-                    continue
-                quoted_table_name = '"' + table_name.replace('"', '""') + '"'
-                qualified_table_name = f'public.{quoted_table_name}'
-                create_table_query = (
-                    f'CREATE TABLE {qualified_table_name} ({", ".join(column_defs)});'
-                )
-                if table_name in existing_tables:
-                    existing_schema = get_table_schema_from_redshift(cur, table_name)
-                    if existing_schema != column_defs:
-                        log_message(
-                            f'[WARNING] Table "{table_name}" schema differs from the source. '
-                            'Dropping and recreating it...'
-                        )
-
-                        cur.execute(f'DROP TABLE {qualified_table_name};')
-                        cur.execute(create_table_query)
+                    check_table_query = '''
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+                    '''
+                    cur.execute(check_table_query)
+                    existing_tables = [row[0] for row in cur.fetchall()]
+                    if is_parquet:
+                        column_defs = get_parquet_schema_from_s3(s3_client, bucket, sample_file_key)
+                        copy_options = """
+                        FORMAT AS PARQUET
+                        FILLRECORD
+                        """
                     else:
-                        log_message(f'[INFO] Clearing existing rows from "{table_name}"...')
-                        cur.execute(f'TRUNCATE TABLE {qualified_table_name};')
-                        conn.commit()
-                else:
-                    log_message(f'[INFO] Creating table "{table_name}"...')
-                    cur.execute(create_table_query)
-                copy_query = f"""
-                COPY {qualified_table_name}
-                FROM %s
-                IAM_ROLE %s
-                {copy_options};
-                """
-                log_message(f'[INFO] Streaming {s3_path}...')
-                cur.execute(copy_query, (s3_path, redshift_iam_role_arn))
-                conn.commit()
-                log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
+                        column_defs = get_csv_schema_from_s3(s3_client, bucket, sample_file_key)
+                        copy_options = """
+                        CSV
+                        IGNOREHEADER 1
+                        DELIMITER ','
+                        QUOTE '"'
+                        TRUNCATECOLUMNS
+                        FILLRECORD
+                        """
+                    if not column_defs:
+                        log_message(f'[WARNING] Could not parse columns for {s3_path}. Skipping...')
+                        continue
+                    quoted_table_name = '"' + table_name.replace('"', '""') + '"'
+                    qualified_table_name = f'public.{quoted_table_name}'
+                    create_table_query = (
+                        f'CREATE TABLE {qualified_table_name} ({", ".join(column_defs)});'
+                    )
+                    if table_name in existing_tables:
+                        existing_schema = get_table_schema_from_redshift(cur, table_name)
+                        if existing_schema != column_defs:
+                            log_message(
+                                f'[WARNING] Table "{table_name}" schema differs from the source. '
+                                'Dropping and recreating it...'
+                            )
+
+                            cur.execute(f'DROP TABLE {qualified_table_name};')
+                            cur.execute(create_table_query)
+                        else:
+                            log_message(f'[INFO] Clearing existing rows from "{table_name}"...')
+                            cur.execute(f'TRUNCATE TABLE {qualified_table_name};')
+                            conn.commit()
+                    else:
+                        log_message(f'[INFO] Creating table "{table_name}"...')
+                        cur.execute(create_table_query)
+                    copy_query = f"""
+                    COPY {qualified_table_name}
+                    FROM %s
+                    IAM_ROLE %s
+                    {copy_options};
+                    """
+                    log_message(f'[INFO] Streaming {s3_path}...')
+                    cur.execute(copy_query, (s3_path, redshift_iam_role_arn))
+                    conn.commit()
+                    log_message(f'[SUCCESS] Uploaded {s3_path} to Redshift table "{table_name}"!')
+                except Exception as e:
+                    safe_rollback()
+                    log_message(f'[ERROR] Error processing table "{table_name}" from {s3_path}: {e}')
+                    continue
         except Exception as e:
             safe_rollback()
-            log_message(f'[ERROR] Error uploading files in bucket "{bucket}": {e}')
-            raise
+            log_message(f'[ERROR] Error processing bucket "{bucket}": {e}')
+            continue
     for redshift_role, role_info in redshift_roles.items():
         try:
             create_role_query = f'CREATE ROLE "{redshift_role}";'
