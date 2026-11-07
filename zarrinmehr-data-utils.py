@@ -961,8 +961,8 @@ def process_qbo_transactions(
         billPaymentCheckLines,
     ], ignore_index=True)
     txns=txns[
-        (pd.to_datetime(txns['TransactionDate'], errors='coerce')>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(txns['TransactionDate'], errors='coerce')<=end_date, errors='coerce', format='mixed')
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce', format='mixed')<=end_date)
     ].copy()
     txnsLines['AccountId']=txnsLines['AccountId'].fillna('').astype(str)
     account['Id']=account['Id'].fillna('').astype(str)
@@ -1180,13 +1180,13 @@ def process_qbo_orders(
             ordersLines[col] = pd.NaT
     #-----------------------------------------------------------------------------------------------------------
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['ShipDate']) < start_date, errors='coerce', format='mixed') |
-        (pd.to_datetime(ordersLines['ShipDate']) > end_date, errors='coerce', format='mixed'),
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') < start_date) |
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') > end_date),
         'ShipDate'
     ] = np.nan
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['InstallDate']) < start_date, errors='coerce', format='mixed') |
-        (pd.to_datetime(ordersLines['InstallDate']) > end_date, errors='coerce', format='mixed'),
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') < start_date) |
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') > end_date),
         'InstallDate'
     ] = np.nan
     #-----------------------------------------------------------------------------------------------------------
@@ -1426,8 +1426,8 @@ def process_ns_transactions(
     txns = pd.concat([generalJournalLines, txns], ignore_index=True )
     txnsLines = pd.concat([generalJournalLines, txnsLines], ignore_index=True )
     txns = txns[
-        (pd.to_datetime(txns['trandate'])>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(txns['trandate'])<=end_date, errors='coerce', format='mixed')
+        (pd.to_datetime(txns['trandate'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(txns['trandate'], errors='coerce', format='mixed')<=end_date)
     ].copy() 
     txns['shippingaddress'] = txns['shippingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
     txns['billingaddress'] = txns['billingaddress'].fillna(-1).apply(convert_to_int_or_keep).astype('str')
@@ -1708,13 +1708,13 @@ def process_ns_orders(
             ordersLines['InstallDate'] = np.nan
 
         ordersLines.loc[
-            (pd.to_datetime(ordersLines['ShipDate']) < start_date, errors='coerce', format='mixed') |
-            (pd.to_datetime(ordersLines['ShipDate']) > end_date, errors='coerce', format='mixed'),
+            (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') < start_date) |
+            (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') > end_date),
             'ShipDate'
         ] = np.nan
         ordersLines.loc[
-            (pd.to_datetime(ordersLines['InstallDate']) < start_date, errors='coerce', format='mixed') |
-            (pd.to_datetime(ordersLines['InstallDate']) > end_date, errors='coerce', format='mixed'),
+            (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') < start_date) |
+            (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') > end_date),
             'InstallDate'
         ] = np.nan
     else:
@@ -2144,8 +2144,8 @@ def process_gp_orders(
     itemsCategoriesV3
 ):
     orders = dfHeader[
-        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce')>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce')<=end_date, errors='coerce', format='mixed')&\
+        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(dfHeader['CREATDDT'], errors='coerce', format='mixed')<=end_date)&\
         (dfHeader[txnsType7].isin(txnsType17))
     ].copy()
 
@@ -2258,13 +2258,13 @@ def process_gp_orders(
     ordersLines['InstallDate'] = np.nan
     #-----------------------------------------------------------------------------------------------------------
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['ShipDate']) < start_date, errors='coerce', format='mixed') |
-        (pd.to_datetime(ordersLines['ShipDate']) > end_date, errors='coerce', format='mixed'),
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') < start_date) |
+        (pd.to_datetime(ordersLines['ShipDate'], errors='coerce', format='mixed') > end_date),
         'ShipDate'
     ] = np.nan
     ordersLines.loc[
-        (pd.to_datetime(ordersLines['InstallDate']) < start_date, errors='coerce', format='mixed') |
-        (pd.to_datetime(ordersLines['InstallDate']) > end_date, errors='coerce', format='mixed'),
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') < start_date) |
+        (pd.to_datetime(ordersLines['InstallDate'], errors='coerce', format='mixed') > end_date),
         'InstallDate'
     ] = np.nan
     #-----------------------------------------------------------------------------------------------------------
@@ -2995,12 +2995,12 @@ def process_qb_transactions(
         creditCardChargeLines,
     ], ignore_index=True)
     txns = txns[
-        (pd.to_datetime(txns['TransactionDate'], errors='coerce')>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(txns['TransactionDate'], errors='coerce')<=end_date, errors='coerce', format='mixed')
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(txns['TransactionDate'], errors='coerce', format='mixed')<=end_date)
     ].copy()
     txnsLines = txnsLines[
-        (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce')>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce')<=end_date, errors='coerce', format='mixed')
+        (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce', format='mixed')<=end_date)
     ].copy()  
     txnsLines = txnsLines.merge(account[['FullName', 'AccountType']].drop_duplicates(subset = ['FullName']).rename(columns = {'FullName': 'Account'}), on = 'Account', how = 'left')
     txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
@@ -3148,8 +3148,8 @@ def process_qb_orders(
     orders[f'{txnsType2}Status'] = 'Open'
     orders.loc[(orders['IsManuallyClosed'] == 1) | (orders[object_key_3] == 1), f'{txnsType2}Status'] = 'Closed'
     orders = orders[
-        (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')>=start_date, errors='coerce', format='mixed')&\
-        (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce')<=end_date, errors='coerce', format='mixed')
+        (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce', format='mixed')>=start_date)&\
+        (pd.to_datetime(orders[f'{txnsType2}Date'], errors='coerce', format='mixed')<=end_date)
     ].copy()
     orders = orders.copy()
     #### Lines
@@ -3348,8 +3348,8 @@ def process_s50_transactions(
         txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
         txns_df = JrnlHdr[JrnlHdr['JrnlKey_Journal']==txnsType].copy()
         txns_df = txns_df[
-            (pd.to_datetime(txns_df['TransactionDate'])>=start_date, errors='coerce', format='mixed')&\
-            (pd.to_datetime(txns_df['TransactionDate'])<=end_date, errors='coerce', format='mixed')
+            (pd.to_datetime(txns_df['TransactionDate'], errors='coerce', format='mixed')>=start_date)&\
+            (pd.to_datetime(txns_df['TransactionDate'], errors='coerce', format='mixed')<=end_date)
         ].copy()
         EmpNames = employees[['EmpRecordNumber', 'EmployeeName']].copy()
         EmpNames = EmpNames[~EmpNames['EmpRecordNumber'].duplicated()]
