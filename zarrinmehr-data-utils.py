@@ -2295,7 +2295,7 @@ def get_expected_columns(
     )
     return list(dict.fromkeys(cols))
 
-
+ 
 def process_qb_transactions(
     account,
     companyName,
@@ -2304,32 +2304,34 @@ def process_qb_transactions(
     start_date,
     end_date,
     s3_client,
-    silver_bucket_name
+    redshift_kwargs,
+    silver_bucket_name,
+    gold_bucket_name
 ):
     customersORvendors = customer.copy()
 
     # --- Transactions Base ---
     config = {
-        "file": "Transaction.csv",
+        "table_name": f"{silver_bucket_name}-Transaction",
         "rename": {
             'AccountRefFullName': 'Account',
             'Amount': 'Total'
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey', 'TimeModified'])
-    transactions = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    transactions = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     transactions = transactions.sort_values(['FQTxnLinkKey', 'TimeModified']).drop_duplicates(subset=['FQTxnLinkKey'], keep='last').copy()
     transactions.rename(columns=config['rename'], inplace=True)
 
     # --- General Journal ---
     config = {
-        "file": "JournalEntry.csv"
+        "table_name": f"{silver_bucket_name}-JournalEntry"
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    generalJournal = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    generalJournal = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
 
     config = {
-        "file": "JournalEntryLine.csv",
+        "table_name": f"{silver_bucket_name}-JournalEntryLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'RefNumber': 'TransactionNo',
@@ -2344,7 +2346,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    generalJournalLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    generalJournalLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     generalJournalLines = generalJournal.merge(generalJournalLines, on='TxnID', suffixes=('_h', ''))
     generalJournalLines = generalJournalLines.reset_index(drop=True).reset_index()
     generalJournalLines['TransactionId'] = 'GENERAL JOURNAL' + ' :: ' + generalJournalLines['index'].astype(str)
@@ -2357,7 +2359,7 @@ def process_qb_transactions(
 
     # --- Bills ---
     config = {
-        "file": "Bill.csv",
+        "table_name": f"{silver_bucket_name}-Bill",
         "transaction_type": "BILL",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2373,7 +2375,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['VendorAddressAddr2', 'VendorAddressAddr3', 'VendorAddressAddr4'])
-    bills = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    bills = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     bills['BillAddress'] = bills[['VendorAddressAddr2', 'VendorAddressAddr3', 'VendorAddressAddr4']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2382,7 +2384,7 @@ def process_qb_transactions(
     bills['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "BillExpenseLine.csv",
+        "table_name": f"{silver_bucket_name}-BillExpenseLine",
         "multiply_total": -1,
         "rename": {
             'ExpenseLineAccountRefFullName': 'Account',
@@ -2398,7 +2400,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    billExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    billExpenseLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billExpenseLines.rename(columns=config['rename'], inplace=True)
     billExpenseLines['Total'] = billExpenseLines['Total'] * config['multiply_total']
     billExpenseLines["OpenTotal"] = np.where(
@@ -2408,7 +2410,7 @@ def process_qb_transactions(
     )
     # --- Checks ---
     config = {
-        "file": "Check.csv",
+        "table_name": f"{silver_bucket_name}-Check",
         "transaction_type": "CHECK",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2424,7 +2426,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5'])
-    checks = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    checks = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     checks['BillAddress'] = checks[['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2433,7 +2435,7 @@ def process_qb_transactions(
     checks['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "CheckExpenseLine.csv",
+        "table_name": f"{silver_bucket_name}-CheckExpenseLine",
         "multiply_total": -1,
         "drop": ['AccountRefListID', 'AccountRefFullName'],
         "rename": {
@@ -2447,7 +2449,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    checkExpenseLine = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    checkExpenseLine = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     checkExpenseLine.drop(columns=config['drop'], inplace=True)
     checkExpenseLine.rename(columns=config['rename'], inplace=True)
     checkExpenseLine['Total'] = checkExpenseLine['Total'] * config['multiply_total']
@@ -2456,7 +2458,7 @@ def process_qb_transactions(
 
     # --- Receive Payment ---
     config = {
-        "file": "ReceivePayment.csv",
+        "table_name": f"{silver_bucket_name}-ReceivePayment",
         "transaction_type": "RECEIVE PAYMENT",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2472,12 +2474,12 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    receivePayment = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    receivePayment = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     receivePayment.rename(columns=config['rename'], inplace=True)
     receivePayment['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "ReceivePaymentLine.csv",
+        "table_name": f"{silver_bucket_name}-ReceivePaymentLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'AppliedToTxnDiscountAccountRefFullName': 'Account',
@@ -2489,7 +2491,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['DepositToAccountRefFullName', 'TotalAmount'])
-    receivePaymentLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    receivePaymentLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     receivePaymentLines.loc[
         receivePaymentLines['AppliedToTxnDiscountAccountRefFullName'].isna(),
         'AppliedToTxnDiscountAccountRefFullName'
@@ -2504,13 +2506,13 @@ def process_qb_transactions(
 
     # --- Deposit ---
     config = {
-        "file": "Deposit.csv"
+        "table_name": f"{silver_bucket_name}-Deposit"
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    deposit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    deposit = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
 
     config = {
-        "file": "DepositLine.csv",
+        "table_name": f"{silver_bucket_name}-DepositLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'DepositLineCheckNumber': 'TransactionNo',
@@ -2525,7 +2527,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['TxnID'])
-    depositLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    depositLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     depositLines = deposit.merge(depositLines, on='TxnID', suffixes=('_h', ''))
     depositLines = depositLines.reset_index(drop=True).reset_index()
     depositLines['TransactionId'] = 'DEPOSIT' + ' :: ' + depositLines['index'].astype(str)
@@ -2538,7 +2540,7 @@ def process_qb_transactions(
 
     # --- Invoice ---
     config = {
-        "file": "Invoice.csv",
+        "table_name": f"{silver_bucket_name}-Invoice",
         "transaction_type": "INVOICE",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2559,7 +2561,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5', 'ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
-    invoice = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    invoice = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     invoice['BillAddress'] = invoice[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2572,7 +2574,7 @@ def process_qb_transactions(
     invoice['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "InvoiceLine.csv",
+        "table_name": f"{silver_bucket_name}-InvoiceLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'TxnID': 'TransactionId',
@@ -2586,7 +2588,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    invoiceLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    invoiceLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     invoiceLines = invoiceLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on=['FQTxnLinkKey'],
@@ -2601,7 +2603,7 @@ def process_qb_transactions(
 
     # --- Credit Card Credit ---
     config = {
-        "file": "CreditCardCredit.csv",
+        "table_name": f"{silver_bucket_name}-CreditCardCredit",
         "transaction_type": "CREDIT CARD CREDIT",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2612,12 +2614,12 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCredit = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditCardCredit.rename(columns=config['rename'], inplace=True)
     creditCardCredit['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "CreditCardCreditExpenseLine.csv",
+        "table_name": f"{silver_bucket_name}-CreditCardCreditExpenseLine",
         "multiply_total": -1,
         "drop": ['AccountRefListID', 'AccountRefFullName'],
         "rename": {
@@ -2633,14 +2635,14 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCreditLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditCardCreditLines.drop(columns=config['drop'], inplace=True)
     creditCardCreditLines.rename(columns=config['rename'], inplace=True)
     creditCardCreditLines['Total'] = creditCardCreditLines['Total'] * config['multiply_total']
 
     # --- Bill Lines ---
     config = {
-        "file": "BillItemLine.csv",
+        "table_name": f"{silver_bucket_name}-BillItemLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'ItemLineAmount': 'Total',
@@ -2654,7 +2656,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    billsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    billsLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billsLines = billsLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on='FQTxnLinkKey',
@@ -2668,7 +2670,7 @@ def process_qb_transactions(
     )
     # --- Check Lines ---
     config = {
-        "file": "CheckItemLine.csv",
+        "table_name": f"{silver_bucket_name}-CheckItemLine",
         "drop": ['AccountRefListID', 'AccountRefFullName'],
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2681,7 +2683,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    checksLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    checksLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     checksLines.drop(columns=config['drop'], inplace=True)
     checksLines = checksLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
@@ -2689,12 +2691,14 @@ def process_qb_transactions(
         how='left'
     )
     checksLines.rename(columns=config['rename'], inplace=True)
+    checksLines['Total']=pd.to_numeric(checksLines['Total'], errors='coerce')
+    checksLines['Quantity']=pd.to_numeric(checksLines['Quantity'], errors='coerce')
     checksLines['Quantity'] = checksLines['Quantity'].mask(checksLines['Quantity'].isna() | checksLines['Quantity'].eq(0), 1)
     checksLines['Rate'] = checksLines['Total'] / checksLines['Quantity']
 
     # --- Vendor Credit ---
     config = {
-        "file": "VendorCredit.csv",
+        "table_name": f"{silver_bucket_name}-VendorCredit",
         "transaction_type": "VENDOR CREDIT",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2710,12 +2714,12 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    vendorCredit = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    vendorCredit = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     vendorCredit.rename(columns=config['rename'], inplace=True)
     vendorCredit['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "VendorCreditItemLine.csv",
+        "table_name": f"{silver_bucket_name}-VendorCreditItemLine",
         "multiply_total": -1,
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2729,7 +2733,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    vendorCreditLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    vendorCreditLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     vendorCreditLines = vendorCreditLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on='FQTxnLinkKey',
@@ -2739,7 +2743,7 @@ def process_qb_transactions(
     vendorCreditLines['Total'] = vendorCreditLines['Total'] * config['multiply_total']
 
     config = {
-        "file": "VendorCreditExpenseLine.csv",
+        "table_name": f"{silver_bucket_name}-VendorCreditExpenseLine",
         "multiply_total": -1,
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2754,13 +2758,13 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    vendorCreditExpenseLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    vendorCreditExpenseLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     vendorCreditExpenseLines.rename(columns=config['rename'], inplace=True)
     vendorCreditExpenseLines['Total'] = vendorCreditExpenseLines['Total'] * config['multiply_total']
 
     # --- Sales Receipts ---
     config = {
-        "file": "SalesReceipt.csv",
+        "table_name": f"{silver_bucket_name}-SalesReceipt",
         "transaction_type": "SALES RECEIPT",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2776,7 +2780,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5'])
-    salesReceipts = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    salesReceipts = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     salesReceipts['BillAddress'] = salesReceipts[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2785,7 +2789,7 @@ def process_qb_transactions(
     salesReceipts['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "SalesReceiptLine.csv",
+        "table_name": f"{silver_bucket_name}-SalesReceiptLine",
         "rename": {
             'TxnDate': 'TransactionDate',
             'TxnID': 'TransactionId',
@@ -2798,7 +2802,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    salesReceiptsLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    salesReceiptsLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     salesReceiptsLines = salesReceiptsLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account', 'Total']],
         on=['FQTxnLinkKey'],
@@ -2808,7 +2812,7 @@ def process_qb_transactions(
 
     # --- Bill Payment Checks ---
     config = {
-        "file": "BillPaymentCheck.csv",
+        "table_name": f"{silver_bucket_name}-BillPaymentCheck",
         "transaction_type": "BILL PAYMENT CHECK",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2824,7 +2828,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5'])
-    billPaymentCheck = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    billPaymentCheck = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billPaymentCheck['BillAddress'] = billPaymentCheck[['AddressAddr2', 'AddressAddr3', 'AddressAddr4', 'AddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2833,7 +2837,7 @@ def process_qb_transactions(
     billPaymentCheck['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "BillPaymentCheckLine.csv",
+        "table_name": f"{silver_bucket_name}-BillPaymentCheckLine",
         "multiply_total": -1,
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2845,7 +2849,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    billPaymentCheckLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    billPaymentCheckLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billPaymentCheckLines.rename(columns=config['rename'], inplace=True)
     billPaymentCheckLines['Total'] = billPaymentCheckLines['Total'] * config['multiply_total']
     billPaymentCheckLines['ItemDescription'] = billPaymentCheckLines['ItemId']
@@ -2854,7 +2858,7 @@ def process_qb_transactions(
 
     # --- Credit Card Charge ---
     config = {
-        "file": "CreditCardCharge.csv",
+        "table_name": f"{silver_bucket_name}-CreditCardCharge",
         "transaction_type": "CREDIT CARD CHARGE",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2870,12 +2874,12 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardCharge = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditCardCharge = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditCardCharge.rename(columns=config['rename'], inplace=True)
     creditCardCharge['TransactionType'] = config['transaction_type']
 
     config = {
-        "file": "CreditCardChargeExpenseLine.csv",
+        "table_name": f"{silver_bucket_name}-CreditCardChargeExpenseLine",
         "drop": ['AccountRefListID', 'AccountRefFullName'],
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2890,13 +2894,13 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config)
-    creditCardChargeLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditCardChargeLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditCardChargeLines.drop(columns=config['drop'], inplace=True)
     creditCardChargeLines.rename(columns=config['rename'], inplace=True)
 
     # --- Credit Memo ---
     config = {
-        "file": "CreditMemo.csv",
+        "table_name": f"{silver_bucket_name}-CreditMemo",
         "transaction_type": "CREDIT MEMO",
         "rename": {
             'TxnID': 'TransactionId',
@@ -2917,7 +2921,7 @@ def process_qb_transactions(
         }
     }
     expected_columns = get_expected_columns(config, extra=['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5', 'ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5'])
-    creditMemo = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditMemo = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditMemo['BillAddress'] = creditMemo[['BillAddressAddr2', 'BillAddressAddr3', 'BillAddressAddr4', 'BillAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -2929,7 +2933,7 @@ def process_qb_transactions(
     creditMemo.rename(columns=config['rename'], inplace=True)
 
     config = {
-        "file": "CreditMemoLine.csv",
+        "table_name": f"{silver_bucket_name}-CreditMemoLine",
         "transaction_type": "CREDIT MEMO",
         "rename": {
             'TxnDate': 'TransactionDate',
@@ -2945,7 +2949,7 @@ def process_qb_transactions(
         "multiply_total": -1
     }
     expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
-    creditMemoLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    creditMemoLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     creditMemoLines = creditMemoLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
         on=['FQTxnLinkKey'],
@@ -2957,10 +2961,10 @@ def process_qb_transactions(
 
     # --- Sales Rep ---
     config = {
-        "file": "SalesRep.csv"
+        "table_name": f"{silver_bucket_name}-SalesRep"
     }
     expected_columns = get_expected_columns(config, extra=['ListID', 'SalesRepEntityRefFullName'])
-    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    SalesRep = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
     txns = pd.concat([
@@ -3003,15 +3007,15 @@ def process_qb_transactions(
         (pd.to_datetime(txnsLines['TransactionDate'], errors='coerce', format='mixed')<=end_date)
     ].copy()  
     txnsLines = txnsLines.merge(account[['FullName', 'AccountType']].drop_duplicates(subset = ['FullName']).rename(columns = {'FullName': 'Account'}), on = 'Account', how = 'left')
-    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txnsLines = clean_df(s3_client = s3_client, gold_bucket_name= gold_bucket_name, df = txnsLines, df_name = 'txnsLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
     txnsLines.ItemId = txnsLines.ItemId.fillna('').astype('str')
     item.ItemId = item.ItemId.fillna('').astype('str')
     txnsLines = txnsLines.merge(item[['ItemId', 'ItemNo', 'ItemName']], on = 'ItemId', how = 'left')
     txnsLines = txnsLines[['TransactionId', 'TransactionNo', 'Account', 'AccountType', 'ItemId', 'ItemNo', 'ItemName', 'ItemDescription', 'Quantity', 'Rate', 'Total', 'OpenTotal', 'DueDate']]
     txnsLines['Company'] = companyName
     txnsLines = txnsLines[['Company'] + txnsLines.columns[:-1].tolist()]
-    txns = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
-    txns = clean_df(s3_client = s3_client, gold_bucket_name = silver_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name= gold_bucket_name, df = txns, df_name = 'txns', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
+    txns = clean_df(s3_client = s3_client, gold_bucket_name= gold_bucket_name, df = txns, df_name = 'txns', id_column = ['TransactionId'], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False)
 
     txns['subTotal'] = txns['Total']
     txns['TransactionStatus'] = txns['IsPaid'].fillna('').astype('str').replace({'True': 'INVOICED/PAID IN FULL', 'False': 'NOT INVOICED/PAID IN FULL', '': 'NOT INVOICED/PAID IN FULL'})
@@ -3039,6 +3043,7 @@ def process_qb_orders(
     start_date,
     end_date,
     s3_client,
+    redshift_kwargs,
     silver_bucket_name,
     gold_bucket_name,
     txnsType,
@@ -3054,9 +3059,9 @@ def process_qb_orders(
     log_message(f'{txnsType2}...')
     #### orders
     if txnsType == 'PURCHORD':
-        object_key_1 = 'PurchaseOrder.csv'
-        object_key_2 = 'PurchaseOrderLine.csv'
-        object_key_a = 'PurchaseOrderLinkedTxn.csv'
+        object_key_1 = 'PurchaseOrder'
+        object_key_2 = 'PurchaseOrderLine'
+        object_key_a = 'PurchaseOrderLinkedTxn'
         object_key_b = 'Bill'
         object_key_3 = 'IsFullyReceived'
         object_key_4 = 'InventorySiteRefListID'
@@ -3066,9 +3071,9 @@ def process_qb_orders(
         object_key_8 = 'TotalAmount'
         object_key_9 = 'Purchase'
     else:
-        object_key_1 = 'SalesOrder.csv'
-        object_key_2 = 'SalesOrderLine.csv'
-        object_key_a = 'SalesOrderLinkedTxn.csv'
+        object_key_1 = 'SalesOrder'
+        object_key_2 = 'SalesOrderLine'
+        object_key_a = 'SalesOrderLinkedTxn'
         object_key_b = 'Invoice'
         object_key_3 = 'IsFullyInvoiced'
         object_key_4 = 'SalesRepRefListID'
@@ -3080,14 +3085,14 @@ def process_qb_orders(
 
     # --- OrderLinkedTxn ---
     config = {
-        "file": object_key_a,
+        "table_name": f"{silver_bucket_name}-{object_key_a}",
         "rename": {
             'RefNumber':f'{txnsType2}No', 
             'LinkedTxnRefNumber':'TransactionNo'
         }
     }
     expected_columns = get_expected_columns(config, extra=['LinkedTxnTxnType'])
-    SalesOrderLinkedTxn = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    SalesOrderLinkedTxn = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[SalesOrderLinkedTxn['LinkedTxnTxnType'] == object_key_b].copy()
     SalesOrderLinkedTxn.rename(columns=config['rename'], inplace=True)
     SalesOrderLinkedTxn = SalesOrderLinkedTxn[[f'{txnsType2}No', 'TransactionNo']].copy()
@@ -3096,7 +3101,7 @@ def process_qb_orders(
     SalesOrderLinkedTxn = SalesOrderLinkedTxn.merge(txns[['TransactionNo', 'TransactionDate']], on = 'TransactionNo', how = 'left').drop(columns = ['TransactionNo']).dropna().drop_duplicates(subset = [f'{txnsType2}No']).rename(columns = {'TransactionDate':'InvoiceDate'})
     # --- orders ---
     config = {
-        "file": object_key_1,
+        "table_name": f"{silver_bucket_name}-{object_key_1}",
         "rename": {
             'TxnID': f'{txnsType2}Id',
             'RefNumber': f'{txnsType2}No',
@@ -3112,7 +3117,7 @@ def process_qb_orders(
         }
     }
     expected_columns = get_expected_columns(config, extra=['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5', 'IsManuallyClosed', object_key_3, object_key_4])
-    orders = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    orders = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     orders['ShipAddress'] = orders[['ShipAddressAddr2', 'ShipAddressAddr3', 'ShipAddressAddr4', 'ShipAddressAddr5']].fillna('').apply(
         lambda row: ' :: '.join([str(val).upper().strip() for val in row if str(val).strip() != '']), 
         axis=1
@@ -3120,7 +3125,7 @@ def process_qb_orders(
     orders.rename(columns=config['rename'], inplace=True)
     # --- orders Lines ---
     config = {
-        "file": object_key_2,
+        "table_name": f"{silver_bucket_name}-{object_key_2}",
         "rename": {
             'TxnID': f'{txnsType2}Id',
             'RefNumber': f'{txnsType2}No',
@@ -3132,14 +3137,14 @@ def process_qb_orders(
         }
     }
     expected_columns = get_expected_columns(config)
-    ordersLines = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    ordersLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     ordersLines.rename(columns=config['rename'], inplace=True)
     # --- Sales Rep ---
     config = {
-        "file": "SalesRep.csv"
+        "table_name": f"{silver_bucket_name}-SalesRep"
     }
     expected_columns = get_expected_columns(config, extra=['ListID', 'SalesRepEntityRefFullName'])
-    SalesRep = safe_read_file_from_s3(s3_client=s3_client, bucket_name=silver_bucket_name, object_key=config['file'], expected_columns=expected_columns)
+    SalesRep = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     SalesRep['SalesRepEntityRefFullName'] = SalesRep['SalesRepEntityRefFullName'].fillna('').astype('str').str.upper()
 
     orders = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = orders, df_name = 'orders', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
@@ -3157,9 +3162,9 @@ def process_qb_orders(
     ordersLines = ordersLines[~ordersLines[f'{txnsType2}Id'].isna()].copy()
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines = clean_df(s3_client = s3_client, gold_bucket_name = gold_bucket_name, df = ordersLines, df_name = 'ordersLines', id_column = [], additional_date_columns = [], zip_code_columns = [], keep_invalid_as_null=True, numeric_id=False, just_useful_columns=False )
-    ordersLines['Quantity'] = ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', '').astype('float')
-    ordersLines['Total'] = ordersLines['Total'].fillna(0).astype('str').str.replace(',', '').astype('float')
-    ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: float(x.replace('%', '')) / 100 if '%' in x else float(x))
+    ordersLines['Quantity'] = pd.to_numeric(ordersLines['Quantity'].fillna(0).astype('str').str.replace(',', ''), errors='coerce')
+    ordersLines['Total'] = pd.to_numeric(ordersLines['Total'].fillna(0).astype('str').str.replace(',', ''), errors='coerce')
+    ordersLines['Rate'] = ordersLines['Rate'].fillna(0).astype('str').str.replace(',', '').apply(lambda x: pd.to_numeric(x.replace('%', ''), errors='coerce') / 100 if '%' in x else pd.to_numeric(x, errors='coerce'))
     ordersLines = ordersLines[[f'{txnsType2}Id', f'{txnsType2}No', 'ItemId', 'ItemDescription', 'Quantity', 'Rate', 'Total']]
     ordersLines = ordersLines.copy()
     ordersLines[['Quantity', 'Rate', 'Total']] = ordersLines[['Quantity', 'Rate', 'Total']].fillna(0)
@@ -3202,6 +3207,8 @@ def process_qb_orders(
     orders = orders[~orders[f'{txnsType2}Id'].str.upper().duplicated()]
     orders[f'{txnsType2}Id'] = orders[f'{txnsType2}Id'].fillna('').astype('str')
     ordersLines[f'{txnsType2}Id'] = ordersLines[f'{txnsType2}Id'].fillna('').astype('str')
+    orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce')
+    ordersLines['Total'] = pd.to_numeric(ordersLines['Total'], errors='coerce')
     mismatched_orders = orders.merge(ordersLines, on=f'{txnsType2}Id', how='inner', suffixes=('_ord', '_lin')).groupby(f'{txnsType2}Id').agg({'Total_ord':'max', 'Total_lin':'sum'}).reset_index()
     mismatched_orders = mismatched_orders[~np.isclose(mismatched_orders['Total_ord'], mismatched_orders['Total_lin'], atol=0.1)]
     log_message(f'[INFO] {mismatched_orders.shape[0]} orders total do not match orderline total')
@@ -6845,29 +6852,26 @@ def read_iif_from_s3(
     return df
 
 
-def safe_read_file_from_s3(
-        bucket_name, 
-        object_key, 
-        s3_client,
-        expected_columns
-    ):
-        try:
-            df = read_file_from_s3(
-                s3_client=s3_client,
-                bucket_name=bucket_name,
-                object_key=object_key
-            )
-        except Exception as e:
-            log_message(f"[WARNING] Failed reading {object_key} from {bucket_name}: {e}. Returning fallback schema.")
-            df = pd.DataFrame(columns=expected_columns)
-        if df.empty and not list(df.columns):
-            df = pd.DataFrame(columns=expected_columns)
-        missing_cols = set(expected_columns) - set(df.columns)
-        if missing_cols:
-            for col in missing_cols:
-                df[col] = None
-    
-        return df
+def safe_read_table_from_redshift(
+    table_name,
+    expected_columns,
+    redshift_kwargs
+):
+    try:
+        df = load_data_via_query(
+            sql_query=f'SELECT * FROM "{table_name}"',
+            **redshift_kwargs
+        )
+    except Exception as e:
+        log_message(f"[WARNING] Failed reading {table_name} from Redshift: {e}. Returning fallback schema.")
+        df = pd.DataFrame(columns=expected_columns)
+    if df.empty and not list(df.columns):
+        df = pd.DataFrame(columns=expected_columns)
+    missing_cols = set(expected_columns) - set(df.columns)
+    if missing_cols:
+        for col in missing_cols:
+            df[col] = None
+    return df
 
 
 def group(
