@@ -2295,7 +2295,7 @@ def get_expected_columns(
     )
     return list(dict.fromkeys(cols))
 
- 
+
 def process_qb_transactions(
     account,
     companyName,
@@ -2399,7 +2399,7 @@ def process_qb_transactions(
             'DueDate':'DueDate'
         }
     }
-    expected_columns = get_expected_columns(config)
+    expected_columns = get_expected_columns(config, extra=['IsPaid'])
     billExpenseLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billExpenseLines.rename(columns=config['rename'], inplace=True)
     billExpenseLines['Total'] = billExpenseLines['Total'] * config['multiply_total']
@@ -2587,7 +2587,7 @@ def process_qb_transactions(
             'DueDate':'DueDate'
         }
     }
-    expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
+    expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey', 'IsPaid'])
     invoiceLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     invoiceLines = invoiceLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
@@ -2655,7 +2655,7 @@ def process_qb_transactions(
             'DueDate':'DueDate'
         }
     }
-    expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey'])
+    expected_columns = get_expected_columns(config, extra=['FQTxnLinkKey', 'IsPaid'])
     billsLines = safe_read_table_from_redshift(redshift_kwargs=redshift_kwargs, table_name=config['table_name'], expected_columns=expected_columns)
     billsLines = billsLines.merge(
         transactions[['FQTxnLinkKey', 'AccountRefListID', 'Account']],
