@@ -3835,25 +3835,23 @@ def build_process_params(secrets, folder_path):
 
 
 def load_and_refresh_qbo_token(
-    qbo_token_path,
-    client_id,
-    client_secret,
-    redirect_uri,
-    environment
+    secretsmanager_client,
+    secretsmanager_secret_name
 ):
-    if not qbo_token_path:
-        raise ValueError("qbo_token_path is required")
 
-    if os.path.exists(qbo_token_path):
-        with open(qbo_token_path, 'r') as file:
-            secrets = json.load(file)
-    else:
-        secrets = {}
-
-    access_token = secrets.get("access_token")
-    refresh_token = secrets.get("refresh_token")
-    realm = secrets.get("realm")
-    state = secrets.get("state")
+    response = secretsmanager_client.get_secret_value(
+        SecretId=secretsmanager_secret_name
+    )
+    token_data = json.loads(response["SecretString"])
+    
+    client_id = token_data.get("client_id")
+    client_secret = token_data.get("client_secret")
+    redirect_uri = token_data.get("redirect_uri")
+    environment = token_data.get("environment")
+    access_token = token_data.get("access_token")
+    refresh_token = token_data.get("refresh_token")
+    realm = token_data.get("realm")
+    state = token_data.get("state")
     auth_client = AuthClient(
         client_id=client_id,
         client_secret=client_secret,
@@ -3877,15 +3875,13 @@ def load_and_refresh_qbo_token(
         if not auth_code or not realm:
             raise ValueError("Missing code or realmId in redirect URL")
         auth_client.get_bearer_token(auth_code, realm_id=realm)
-        access_token = auth_client.access_token
-        refresh_token = auth_client.refresh_token
         log_message("[SUCCESS] QuickBooks first-time authorization complete")
     else:
         auth_client.refresh(refresh_token=refresh_token)
-        access_token = auth_client.access_token
-        refresh_token = auth_client.refresh_token
         log_message("[SUCCESS] QuickBooks token refreshed")
 
+    access_token = auth_client.access_token
+    refresh_token = auth_client.refresh_token
     updates = {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -3893,10 +3889,12 @@ def load_and_refresh_qbo_token(
         "state": state
     }
     updates = {k: v for k, v in updates.items() if v is not None}
-    secrets.update(updates)
-    with open(qbo_token_path, 'w') as file:
-        json.dump(secrets, file, indent=2)
-    log_message("[SUCCESS] QuickBooks credentials saved")
+    token_data.update(updates)
+    secretsmanager_client.put_secret_value(
+        SecretId=secretsmanager_secret_name,
+        SecretString=json.dumps(token_data),
+    )
+    log_message("[SUCCESS] QuickBooks credentials saved in AWS Secrets Manager")
 
     return access_token, realm
 
@@ -3972,20 +3970,14 @@ def _stream_suiteql(
 
 def _stream_qboapi(
     sql_query,
-    qbo_token_path,
-    client_id,
-    client_secret,
-    redirect_uri,
-    environment,
+    secretsmanager_client,
+    secretsmanager_secret_name,
     chunksize,
     timeout_seconds
 ):
     access_token, realm = load_and_refresh_qbo_token(
-        qbo_token_path=qbo_token_path,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        environment=environment
+        secretsmanager_client=secretsmanager_client,
+        secretsmanager_secret_name=secretsmanager_secret_name
     )
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -4011,11 +4003,8 @@ def _stream_qboapi(
                     "Refreshing token and retrying current page..."
                 )
                 access_token, realm = load_and_refresh_qbo_token(
-                    qbo_token_path=qbo_token_path,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    redirect_uri=redirect_uri,
-                    environment=environment
+                    secretsmanager_client=secretsmanager_client,
+                    secretsmanager_secret_name=secretsmanager_secret_name
                 )
                 headers['Authorization'] = f'Bearer {access_token}'
                 response = requests.get(
@@ -4210,11 +4199,8 @@ def load_data_via_query(
         token_secret=None,
         realm=None,
         active_conn=None,
-        client_id=None,
-        client_secret=None,
-        redirect_uri=None,
-        environment=None,
-        qbo_token_path=None,
+        secretsmanager_client=None,
+        secretsmanager_secret_name=None,
         redshift_client=None,
         redshift_cluster_identifier=None,
         redshift_db_name=None,
@@ -4259,11 +4245,9 @@ def load_data_via_query(
         elif source_type == "qboapi":
             data_generator = _stream_qboapi(
                 sql_query=sql_query,
-                qbo_token_path=qbo_token_path,
-                client_id=client_id,
-                client_secret=client_secret,
-                redirect_uri=redirect_uri,
-                environment=environment,
+                secretsmanager_client=secretsmanager_client,
+                secretsmanager_secret_name=secretsmanager_secret_name,
+
                 chunksize=chunksize,
                 timeout_seconds=timeout_seconds,
             )
@@ -4368,6 +4352,7 @@ def build_incremental_query(
     lastupdate_str,
     id_column
 ):
+    quotation = {"qboapi": "", "bigquery": "`"}.get(source_type, '"')
     id_order_by = f", {id_column}" if id_column else ""
     is_custom_query = base_target.strip().lower().startswith("select")
     query_base = base_target
@@ -4381,9 +4366,9 @@ def build_incremental_query(
         order_clause = existing_order_clause
     else:
         if last_modified_column:
-            order_clause = f"ORDER BY \"{last_modified_column}\"{id_order_by}"
+            order_clause = f"ORDER BY {quotation}{last_modified_column}{quotation}{id_order_by}"
         elif id_column:
-            order_clause = f"ORDER BY \"{id_column}\""
+            order_clause = f"ORDER BY {quotation}{id_column}{quotation}"
         else:
             order_clause = ""
 
@@ -4405,7 +4390,7 @@ def build_incremental_query(
 
     elif source_type == "mssql":
         where_clause = (
-            f"{where_keyword} \"{last_modified_column}\" >= {{ts '{lastupdate_str}'}}"
+            f"{where_keyword} {quotation}{last_modified_column}{quotation} >= {{ts '{lastupdate_str}'}}"
             if (lastupdate_str and last_modified_column)
             else ""
         )
@@ -4821,13 +4806,11 @@ def stream_source_to_bronze(
     token_key=None,
     token_secret=None,
     realm=None,
-    client_id=None,
-    client_secret=None,
-    redirect_uri=None,
-    environment=None,
-    qbo_token_path=None,
+    secretsmanager_client=None,
+    secretsmanager_secret_name=None,
     timeout_seconds=900
 ):
+    quotation = {"qboapi": "", "bigquery": "`"}.get(source_type, '"')
     if CreateS3Bucket:
         try:
             buckets = s3_client.list_buckets()["Buckets"]
@@ -4864,7 +4847,7 @@ def stream_source_to_bronze(
             try:
                 if isinstance(table_info, dict):
                     id_column = table_info.get("id_column")
-                    id_column = (", ".join(f'"{col}"' for col in id_column) if isinstance(id_column, list) else f'"{id_column}"') if id_column else None
+                    id_column = (", ".join(f'{quotation}{col}{quotation}' for col in id_column) if isinstance(id_column, list) else f'{quotation}{id_column}{quotation}') if id_column else None
                     last_modified_column = table_info.get("last_modified_column")
                     defined_query = table_info.get("query")
                 else:
@@ -4948,11 +4931,8 @@ def stream_source_to_bronze(
                 elif source_type == "qboapi":
                     data_generator = _stream_qboapi(
                         sql_query=inc_query,
-                        qbo_token_path=qbo_token_path,
-                        client_id=client_id,
-                        client_secret=client_secret,
-                        redirect_uri=redirect_uri,
-                        environment=environment,
+                        secretsmanager_client=secretsmanager_client,
+                        secretsmanager_secret_name=secretsmanager_secret_name,
                         chunksize=chunksize,
                         timeout_seconds=timeout_seconds,
                     )
