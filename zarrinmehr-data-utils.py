@@ -3774,24 +3774,39 @@ def extract_column_values(data, column):
 def build_tables(
     secrets,
     connection_string=None,
-    file_path="Temp.csv"
+    file_path="Temp.csv",
+    bigquery_client=None,
+    timeout_seconds=900
 ):
     tables_mode = secrets.get("tables_mode", "manual")
+    source_type = secrets.get("source_type", "mssql")
     if tables_mode == "manual":
         return secrets["tables"]
     if tables_mode == "query":
-        load_data_via_query(
-            sql_query=secrets["table_query"],
-            source_type=secrets.get("table_query_source_type", "mssql"),
-            connection_string=connection_string,
-            file_path=file_path,
-            timeout_seconds=secrets.get("timeout_seconds", 900)
-        )
-        table_rows = []
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                table_rows = list(reader)
+        if source_type == "bigquery":
+            try:
+                tables = {}
+                for dataset in bigquery_client.list_datasets(timeout=timeout_seconds):
+                    for table in bigquery_client.list_tables(dataset.reference, timeout=timeout_seconds):
+                        tables[table.table_id] = f"SELECT * FROM `{table.project}.{table.dataset_id}.{table.table_id}`"
+                for table in secrets.get("tables_to_remove") or []:
+                    tables.pop(table, None)
+                return tables
+            finally:
+                bigquery_client.close()
+        else:
+            load_data_via_query(
+                sql_query=secrets["table_query"],
+                source_type=source_type,
+                connection_string=connection_string,
+                file_path=file_path,
+                timeout_seconds=timeout_seconds
+            )
+            table_rows = []
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    table_rows = list(reader)
 
         column = secrets["table_name_column"]
         table_names = extract_column_values(table_rows, column)
@@ -6678,27 +6693,6 @@ def read_excel_from_sharepoint(url):
             raise ValueError("WOPI context JSON not found in the response.")
     else:
         raise Exception(f"[ERROR] Failed to fetch the URL. Status code: {response.status_code}")
-
-
-def generate_table_select_queries(
-    project_id,
-    bigquery_client,
-    tables_to_remove=None
-):
-    table_queries = {}
-    datasets = list(bigquery_client.list_datasets())
-    if datasets:
-        for dataset in datasets:
-            table_list = bigquery_client.list_tables(dataset.dataset_id)
-            for table in table_list:
-                table_queries[table.table_id] = f"SELECT * FROM `{table.project}.{table.dataset_id}.{table.table_id}`"
-    else:
-        log_message(f'[INFO] {project} project does not contain any datasets.')
-    if tables_to_remove:
-        for table in tables_to_remove:
-            if table in table_queries:
-                del table_queries[table]
-    return table_queries
 
 
 def read_file_from_s3(
