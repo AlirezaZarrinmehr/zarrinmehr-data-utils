@@ -115,6 +115,7 @@ modules = [
     ("intuitlib.client", "AuthClient", "intuit-oauth"),
     ("intuitlib.enums", "Scopes", "intuit-oauth"),
     ("collections", "Counter", None),
+    ("collections.abc", "Mapping", None),
     ("pandas.api.types", "is_numeric_dtype", None),
     ("typing", "List", "typing"),
     ("typing", "Dict", "typing"),
@@ -122,6 +123,7 @@ modules = [
     ("concurrent.futures", "ThreadPoolExecutor", "concurrent.futures"),
     ("concurrent.futures", "wait", "concurrent.futures"),
     ("concurrent.futures", "FIRST_COMPLETED", "concurrent.futures"),
+    
 ]
 
 for fr_mod, im_mod, pip_name in modules:
@@ -7439,6 +7441,221 @@ def upload_to_redshift(
     createRedshiftCluster=False
 ):
 
+    def _quote(name):
+        if not isinstance(name, str) or not name or "\x00" in name or len(name.encode("utf-8")) > 127:
+            raise ValueError("Identifiers must be nonempty strings of at most 127 UTF-8 bytes, without NUL")
+        return '"' + name.replace('"', '""') + '"'
+
+    def _object(value, allowed, required=()):
+        if not isinstance(value, Mapping):
+            raise TypeError("Permission config sections must be objects")
+        unknown, missing = set(value) - set(allowed), set(required) - set(value)
+        if unknown or missing:
+            raise ValueError(f"Unknown config keys: {sorted(unknown)!r}; missing keys: {sorted(missing)!r}")
+        if "config_version" in value and (type(value["config_version"]) is not int or value["config_version"] != 2):
+            raise ValueError("Only config_version=2 is supported")
+
+    def _columns(privileges):
+        _object(privileges, {"select"}, {"select"})
+        _object(privileges["select"], {"columns"}, {"columns"})
+        columns = privileges["select"]["columns"]
+        if columns == "*":
+            return "*"
+        if not isinstance(columns, list):
+            raise TypeError("select.columns must be '*' or a list")
+        for column in columns:
+            _quote(column)
+        if "*" in columns or len(set(columns)) != len(columns):
+            raise ValueError("Column lists must contain unique names; use '*' as a string for all columns")
+        return tuple(columns)
+
+    def _permission_plan(value):
+        legacy = isinstance(value, Mapping) and all(
+            isinstance(info, Mapping) and "access" in info for info in value.values()
+        )
+        configs = [value] if legacy else value if isinstance(value, (list, tuple)) else [value]
+        owners, roles, desired = set(), {}, {}
+        for config in configs:
+            if not legacy:
+                if isinstance(config, Mapping) and any(k in config for k in ("redshift_roles", "access_control")):
+                    _object(config, {"config_version", "redshift_roles", "access_control"})
+                    wrappers = [k for k in ("redshift_roles", "access_control") if k in config]
+                    if len(wrappers) != 1:
+                        raise ValueError("Expected exactly one redshift_roles section")
+                    config = config[wrappers[0]]
+                _object(config, {"config_version", "policy_id", "sync_mode", "defaults", "roles"},
+                        {"policy_id", "sync_mode", "roles"})
+                owner = config["policy_id"]
+                _quote(owner)
+                if config["sync_mode"] != "reconcile_managed" or owner in owners:
+                    raise ValueError("Expected reconcile_managed with a unique policy_id per config")
+                owners.add(owner)
+                defaults = config.get("defaults", {})
+                _object(defaults, {"object_type", "schema", "privileges"})
+                if "object_type" in defaults and defaults["object_type"] not in ("table", "view"):
+                    raise ValueError("object_type must be table or view")
+                if "schema" in defaults:
+                    _quote(defaults["schema"])
+                if "privileges" in defaults:
+                    _columns(defaults["privileges"])
+                role_configs = config["roles"]
+                if not isinstance(role_configs, Mapping):
+                    raise TypeError("roles must be an object")
+            else:
+                owner, role_configs = None, config
+                defaults = {"object_type": "table", "schema": "public", "privileges": {"select": {"columns": "*"}}}
+            for role, info in role_configs.items():
+                _quote(role)
+                if role.lower() == "public" or role.lower().startswith("sys:"):
+                    raise ValueError("Use custom database roles, not PUBLIC or system roles")
+                if not legacy:
+                    _object(info, {"grants", "description"}, {"grants"})
+                    if "description" in info and not isinstance(info["description"], str):
+                        raise TypeError("Role descriptions must be strings")
+                entries = info["access" if legacy else "grants"]
+                if not isinstance(entries, list) and not (legacy and isinstance(entries, tuple)):
+                    raise TypeError("Role grants must be a list")
+                roles[role] = None
+                for entry in entries:
+                    if legacy:
+                        if isinstance(entry, str):
+                            entry = {"name": entry}
+                        else:
+                            _object(entry, {"table", "columns"}, {"table", "columns"})
+                            entry = {"name": entry["table"], "privileges": {"select": {"columns": entry["columns"]}}}
+                    _object(entry, {"object_type", "schema", "name", "privileges"}, {"name"})
+                    kind = entry.get("object_type", defaults.get("object_type"))
+                    schema, name = entry.get("schema", defaults.get("schema")), entry["name"]
+                    _quote(schema)
+                    _quote(name)
+                    if kind not in ("table", "view") or schema.lower().startswith("pg_") or schema.lower() in {
+                        "information_schema", "pipeline_permissions"
+                    }:
+                        raise ValueError("Unsupported object type or protected schema")
+                    columns = _columns(entry.get("privileges", defaults.get("privileges")))
+                    key, grant = (role, schema, name, "SELECT"), (owner, kind, columns)
+                    if key in desired and (not legacy or desired[key] != grant):
+                        raise ValueError(f"Duplicate or conflicting permission scope: {key!r}")
+                    desired[key] = grant
+        return {"managed": not legacy, "owners": owners, "roles": roles, "grants": desired,
+                "policies": len(owners) if not legacy else int(bool(roles))}
+
+    def _apply_permissions(connection, plan):
+        managed, active, roles = plan["managed"], plan["owners"], plan["roles"]
+        desired = dict(plan["grants"])
+        counts = {"policies": plan["policies"], "configured": len(desired), "applied": 0, "removed": 0, "missing": 0}
+        if not counts["policies"]:
+            return counts
+        if connection.autocommit:
+            raise ValueError("Permission reconciliation requires autocommit=False")
+        state = '"pipeline_permissions"."managed_relation_grants"'
+        try:
+            with connection.cursor() as cursor:
+                log_message(f"[INFO] Permissions: starting {counts['policies']} policy part(s), {len(desired)} configured grants.")
+                cursor.execute("SET enable_case_sensitive_identifier TO true;")
+                cursor.execute('CREATE SCHEMA IF NOT EXISTS "pipeline_permissions";')
+                cursor.execute(f"""CREATE TABLE IF NOT EXISTS {state} (
+                    policy_id VARCHAR(127) NOT NULL, role_name VARCHAR(127) NOT NULL,
+                    object_type VARCHAR(16) NOT NULL, schema_name VARCHAR(127) NOT NULL,
+                    object_name VARCHAR(127) NOT NULL, privilege_name VARCHAR(16) NOT NULL
+                );""")
+                cursor.execute('REVOKE ALL ON SCHEMA "pipeline_permissions" FROM PUBLIC;')
+                cursor.execute(f"REVOKE ALL ON TABLE {state} FROM PUBLIC;")
+                log_message("[INFO] Permissions: acquiring registry lock...")
+                cursor.execute(f"LOCK TABLE {state};")
+                cursor.execute(f"SELECT policy_id, role_name, object_type, schema_name, object_name, privilege_name FROM {state};")
+                previous = {}
+                for owner, role, kind, schema, name, privilege in cursor.fetchall():
+                    key = (role, schema, name, privilege)
+                    if key in previous or privilege != "SELECT" or kind not in ("table", "view"):
+                        raise ValueError("Duplicate or unsupported scope in permission registry")
+                    previous[key] = (owner, kind)
+                if not managed:
+                    owned = set(desired) & set(previous)
+                    counts["skipped_managed"] = len(owned)
+                    for key in owned:
+                        del desired[key]
+                    if owned:
+                        log_message(f"[INFO] Permissions: preserving {len(owned)} scopes already owned by managed policies.")
+                for key, (owner, _, _) in desired.items():
+                    previous_owner = previous.get(key, (owner,))[0]
+                    if previous_owner != owner and previous_owner not in active:
+                        raise ValueError(f"{key!r} belongs to {previous_owner!r}; load both policies together to move it")
+                cursor.execute("SELECT role_name FROM svv_roles;")
+                existing_roles = {row[0] for row in cursor.fetchall()}
+                cursor.execute("""SELECT n.nspname, c.relname, c.relkind FROM pg_catalog.pg_class AS c
+                    JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'v');""")
+                relations = {(schema, name): kind for schema, name, kind in cursor.fetchall()}
+                columns_by_table, eligible = {}, {}
+                for key, grant in desired.items():
+                    role, schema, name, _ = key
+                    owner, kind, columns = grant
+                    if (schema, name) not in relations:
+                        counts["missing"] += 1
+                        continue
+                    if managed and relations[(schema, name)] != {"table": "r", "view": "v"}[kind]:
+                        raise ValueError(f"Configured object_type does not match {schema}.{name}")
+                    if columns != "*" and columns:
+                        if (schema, name) not in columns_by_table:
+                            cursor.execute("""SELECT column_name FROM information_schema.columns
+                                WHERE table_schema = %s AND table_name = %s;""", (schema, name))
+                            columns_by_table[(schema, name)] = {row[0] for row in cursor.fetchall()}
+                        unknown = set(columns) - columns_by_table[(schema, name)]
+                        if unknown:
+                            raise ValueError(f"{schema}.{name}: columns do not exist: {sorted(unknown)!r}")
+                    eligible[key] = grant
+                if counts["missing"]:
+                    missing = sorted({(schema, name) for _, schema, name, _ in desired if (schema, name) not in relations})
+                    examples = ", ".join(f"{_quote(schema)}.{_quote(name)}" for schema, name in missing[:3])
+                    log_message(f"[WARNING] Permissions: skipping {counts['missing']} grants for absent relations. Examples: {examples}.")
+                for role in roles:
+                    if role not in existing_roles:
+                        cursor.execute(f"CREATE ROLE {_quote(role)};")
+                        existing_roles.add(role)
+                        log_message(f"[INFO] Created role {role!r}; pending commit.")
+                stale = {key for key, (owner, _) in previous.items() if owner in active and key not in desired}
+                log_message(f"[INFO] Permissions: revoking old SELECT grants for {len(eligible)} current scopes and {len(stale)} removed scopes...")
+                for role, schema, name, _ in sorted(set(eligible) | stale):
+                    if role in existing_roles and (schema, name) in relations:
+                        cursor.execute(f"REVOKE SELECT ON TABLE {_quote(schema)}.{_quote(name)} FROM ROLE {_quote(role)};")
+                counts["removed"], usage = len(stale), set()
+                if not managed:
+                    for role in roles:
+                        cursor.execute(f'GRANT USAGE ON SCHEMA "public" TO ROLE {_quote(role)};')
+                        usage.add((role, "public"))
+                log_message(f"[INFO] Permissions: applying {len(eligible)} configured SELECT scopes...")
+                for index, ((role, schema, name, _), (_, _, columns)) in enumerate(eligible.items(), 1):
+                    if columns == "*" or columns:
+                        if (role, schema) not in usage:
+                            cursor.execute(f"GRANT USAGE ON SCHEMA {_quote(schema)} TO ROLE {_quote(role)};")
+                            usage.add((role, schema))
+                        selection = "SELECT" if columns == "*" else "SELECT (" + ", ".join(map(_quote, columns)) + ")"
+                        cursor.execute(f"GRANT {selection} ON TABLE {_quote(schema)}.{_quote(name)} TO ROLE {_quote(role)};")
+                    if index % 100 == 0:
+                        log_message(f"[INFO] Permissions: {index}/{len(eligible)} scopes applied; pending commit.")
+                counts["applied"] = len(eligible)
+                if managed:
+                    log_message(f"[INFO] Permissions: saving {len(desired)} registry rows...")
+                    for owner in active:
+                        cursor.execute(f"DELETE FROM {state} WHERE policy_id = %s;", (owner,))
+                    rows = [(owner, role, kind, schema, name, "SELECT")
+                            for (role, schema, name, _), (owner, kind, _) in desired.items()]
+                    if rows:
+                        cursor.executemany(f"INSERT INTO {state} (policy_id, role_name, object_type, schema_name, object_name, privilege_name) VALUES (%s, %s, %s, %s, %s, %s);", rows)
+            log_message("[INFO] Permissions: committing changes...")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        log_message(f"[SUCCESS] Permissions committed: {counts['applied']} applied, {counts['removed']} removed, {counts['missing']} missing relations.")
+        return counts
+
+    import psycopg2
+    from psycopg2.errors import DuplicateObject
+
+    # Preserve the original argument; accept legacy role maps or v2 policies.
+    permission_plan = _permission_plan(redshift_roles)
+
     if not isinstance(s3_bucket_names, (list, tuple)):
         raise TypeError('s3_bucket_names must be a list of bucket names or dictionaries.')
     selected_by_bucket = {}
@@ -7651,27 +7868,12 @@ def upload_to_redshift(
             safe_rollback()
             log_message(f'[ERROR] Error processing bucket "{bucket}": {e}')
             continue
-    for redshift_role, role_info in redshift_roles.items():
-        try:
-            create_role_query = f'CREATE ROLE "{redshift_role}";'
-            cur.execute(create_role_query)
-            conn.commit()
-            log_message(f'[SUCCESS] Role "{redshift_role}" created successfully.')
-        except DuplicateObject:
-            safe_rollback()
-            log_message(f'[INFO] Role "{redshift_role}" already exists. Skipping creation.')
-        grant_usage_query = f'GRANT USAGE ON SCHEMA public TO ROLE "{redshift_role}";'
-        cur.execute(grant_usage_query)
-        conn.commit()
-        for table in role_info['access']:
-            try:
-                grant_select_query = f'GRANT SELECT ON TABLE public."{table}" TO ROLE "{redshift_role}";'
-                cur.execute(grant_select_query)
-                conn.commit()
-                log_message(f'[SUCCESS] Granted SELECT on {table} to role "{redshift_role}".')
-            except UndefinedTable:
-                safe_rollback()
-                log_message(f'[ERROR] Table "{table}" does not exist. Skipping grant.')
+    try:
+        _apply_permissions(conn, permission_plan)
+    except BaseException:
+        cur.close()
+        conn.close()
+        raise
     for redshift_user in redshift_users:
         try:
             create_user_query = f"""CREATE USER "{redshift_user['username']}" WITH PASSWORD '{redshift_user['password']}';"""
