@@ -1156,13 +1156,13 @@ def process_qbo_orders(
     ordersLines = ordersLines[ordersLines['OrderId'].isin(orders['OrderId'])]
     #-------------------------------------
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        gold_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
+        df=item_df, 
+        companyName=companyName, 
+        s3_client=s3_client, 
+        gold_bucket_name=gold_bucket_name, 
+        DBIA=DBIA, 
+        dfCategories=itemsCategoriesV3,
+        txnsLines=ordersLines
     )
     #-----------------------------------------------------------------------------------------------------------
     orderTypes = ordersLines.merge(
@@ -1656,13 +1656,13 @@ def process_ns_orders(
         ordersLines.loc[ordersLines['ItemId'].str.strip().isin(['1462', '7260']), 'ItemDescription']='SHIPPING'
 
         ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-            item_df, 
-            companyName, 
-            s3_client, 
-            gold_bucket_name, 
-            DBIA, 
-            itemsCategoriesV3,
-            ordersLines
+            df=item_df, 
+            companyName=companyName, 
+            s3_client=s3_client, 
+            gold_bucket_name=gold_bucket_name, 
+            DBIA=DBIA, 
+            dfCategories=itemsCategoriesV3,
+            txnsLines=ordersLines
         )
 
         orderTypes = ordersLines.merge(
@@ -2232,13 +2232,13 @@ def process_gp_orders(
     orders = orders.loc[orders[f'{txnsType2}Id'].notna() & (orders[f'{txnsType2}Id'].astype('str').str.strip() != '')]
     #-------------------------------------
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        gold_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
+        df=item_df, 
+        companyName=companyName, 
+        s3_client=s3_client, 
+        gold_bucket_name=gold_bucket_name, 
+        DBIA=DBIA, 
+        dfCategories=itemsCategoriesV3,
+        txnsLines=ordersLines
     )
     #-----------------------------------------------------------------------------------------------------------
     orderTypes = ordersLines.merge(
@@ -3222,13 +3222,13 @@ def process_qb_orders(
     orders = orders[['Company'] + orders.columns[:-1].tolist()]
     ordersLines = ordersLines[ordersLines[f'{txnsType2}Id'].isin(orders[f'{txnsType2}Id'])]
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        gold_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
+        df=item_df, 
+        companyName=companyName, 
+        s3_client=s3_client, 
+        gold_bucket_name=gold_bucket_name, 
+        DBIA=DBIA, 
+        dfCategories=itemsCategoriesV3,
+        txnsLines=ordersLines
     )
     #-----------------------------------------------------------------------------------------------------------
     orderTypes = ordersLines.merge(
@@ -3562,13 +3562,13 @@ def process_s50_orders(
 
     #-------------------------------------
     ordersLines, itemsCategoriesV3, item_df = enrich_and_classify_items(
-        item_df, 
-        companyName, 
-        s3_client, 
-        gold_bucket_name, 
-        DBIA, 
-        itemsCategoriesV3,
-        ordersLines
+        df=item_df, 
+        companyName=companyName, 
+        s3_client=s3_client, 
+        gold_bucket_name=gold_bucket_name, 
+        DBIA=DBIA, 
+        dfCategories=itemsCategoriesV3,
+        txnsLines=ordersLines
     )
     #-----------------------------------------------------------------------------------------------------------
     orderTypes = ordersLines.merge(
